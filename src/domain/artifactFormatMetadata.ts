@@ -232,6 +232,14 @@ export type EspImageSegmentMetadata = z.infer<
   typeof espImageSegmentMetadataSchema
 >;
 
+/**
+ * What a segment header declares: where its bytes load and how many there
+ * are. Header offsets are layout, and the classification is derived.
+ */
+export const espImageSegmentDeclaration = (
+  metadata: EspImageSegmentMetadata,
+) => ({ load_addr: metadata.load_addr, data_len: metadata.data_len });
+
 /** One Secure Boot v2 block with its 0xE7 magic and a matching CRC32. */
 export const espImageSignatureBlockMetadataSchema = z.strictObject({
   kind: z.literal("esp-image-signature-block"),

@@ -141,6 +141,12 @@ wider placement ranges.
 A segment cut short by the end of the file is the bytes the file holds, with
 an entry limitation that gives the declared length.
 
+Artifact comparison uses each segment's `load_addr` and `data_len` as its
+declaration, so a segment that moves with unchanged bytes is `changed` in
+`metadata`. Segments pair by index: inserting or removing one shifts the
+paths of the segments after it. Header offsets and `classification` are not
+compared; the image's own change covers the header and chip.
+
 ## Secure Boot v2 signatures
 
 A signature sector starts at the next 4 KiB boundary after the image and
