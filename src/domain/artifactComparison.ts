@@ -425,7 +425,7 @@ const classifyPath = (input: ClassifyPathInput): ArtifactChange | null => {
         }
       : availability;
   const dimensions = changedDimensions(input);
-  if (Object.values(input.metadata).includes("unknown")) {
+  if (declarationUnknown(input.metadata)) {
     if (dimensions.length === 0)
       return {
         ...base,
@@ -449,14 +449,21 @@ type MetadataComparison = "unchanged" | "changed" | "unknown";
 interface OccurrenceMetadata {
   /** ASAR storage is an occurrence field, not format metadata. */
   readonly asarPacking: MetadataComparison;
+  /** Every occurrence records `encrypted`, so a pair's comparison is known. */
+  readonly encryption: Exclude<MetadataComparison, "unknown">;
   /** Absent when neither occurrence records a compared declaration. */
   readonly formatDeclaration: MetadataComparison | "absent";
 }
 
-/** A declaration that differs even when content is unavailable. */
+/** A declared fact that differs, known even when content is unavailable. */
 const declarationChanged = (metadata: OccurrenceMetadata): boolean =>
   metadata.asarPacking === "changed" ||
+  metadata.encryption === "changed" ||
   metadata.formatDeclaration === "changed";
+
+/** A declared fact that one side omits or records as another kind. */
+const declarationUnknown = (metadata: OccurrenceMetadata): boolean =>
+  Object.values(metadata).includes("unknown");
 
 const compareAsarPacking = (
   left: boolean | undefined,
@@ -490,6 +497,7 @@ const occurrenceMetadata = (input: OccurrencePair): OccurrenceMetadata => {
   const right = input.rightOccurrence;
   return {
     asarPacking: compareAsarPacking(left?.unpacked, right?.unpacked),
+    encryption: left?.encrypted === right?.encrypted ? "unchanged" : "changed",
     formatDeclaration: compareFormatDeclarations(
       formatMetadataDeclaration(left?.format_metadata),
       formatMetadataDeclaration(right?.format_metadata),
@@ -497,7 +505,12 @@ const occurrenceMetadata = (input: OccurrencePair): OccurrenceMetadata => {
   };
 };
 
-/** Node-less metadata records compare by the declarations they record. */
+/**
+ * A node-less metadata record has no content node, so its declared facts are
+ * all that comparison checks; an unread payload is not compared. Neither are
+ * its limitations: readers derive them from those facts, and their wording
+ * can change between REA versions while the record stays the same.
+ */
 const classifyDeclarationRecord = (
   input: ClassifyPathInput,
   base: ReturnType<typeof buildArtifactChangeBase>,
@@ -513,21 +526,21 @@ const classifyDeclarationRecord = (
     input.metadata.formatDeclaration === "absent"
   )
     return { handled: false, change: null };
-  if (input.metadata.formatDeclaration === "unknown")
+  const unknown = declarationUnknown(input.metadata);
+  if (declarationChanged(input.metadata))
     return {
       handled: true,
       change: {
         ...base,
-        classification: "unknown",
-        dimensions: ["availability"],
+        classification: "changed",
+        dimensions: unknown ? ["metadata", "availability"] : ["metadata"],
       },
     };
   return {
     handled: true,
-    change:
-      input.metadata.formatDeclaration === "changed"
-        ? { ...base, classification: "changed", dimensions: ["metadata"] }
-        : null,
+    change: unknown
+      ? { ...base, classification: "unknown", dimensions: ["availability"] }
+      : null,
   };
 };
 
@@ -590,7 +603,6 @@ const metadataChanged = (
   left.architecture !== right.architecture ||
   left.content_state !== right.content_state ||
   input.leftOccurrence?.entry_kind !== input.rightOccurrence?.entry_kind ||
-  input.leftOccurrence?.encrypted !== input.rightOccurrence?.encrypted ||
   JSON.stringify(left.limitations) !== JSON.stringify(right.limitations) ||
   JSON.stringify(input.leftOccurrence?.limitations) !==
     JSON.stringify(input.rightOccurrence?.limitations);

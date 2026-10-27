@@ -1230,6 +1230,14 @@ limitation. Other kinds are not compared: their fields record layout, come
 from the artifact's own bytes, or repeat occurrence fields, except Godot PCK
 source paths, which [Godot PCK archives](godot-pck.md) explains.
 
+Every occurrence records `encrypted`, and `compare_artifacts` reports a
+metadata change when it differs, including when content is unavailable. A
+member that becomes encrypted therefore compares `changed` in `metadata` and
+`availability`, not `unknown`. For a node-less metadata record with a
+compared declaration, only that declaration, the `encrypted` value and any
+recorded ASAR storage decide the comparison. REA does not compare the
+record's unread payload or its limitations, which describe the observation.
+
 POSIX letter-colon names such as `a:b` remain valid logical
 names; Windows extraction refuses names its filesystem cannot materialize.
 

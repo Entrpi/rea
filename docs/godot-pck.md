@@ -31,9 +31,9 @@ REA normalizes Unicode to NFC, so a member renamed only between Unicode forms
 compares unchanged, although Godot treats it as another path. Godot reads `\`
 as `/` and REA keeps it literal, so a member spelled with backslashes compares
 as removed and added. Directory order and offsets are layout. The encryption
-bit, the only member flag REA admits, is the occurrence's `encrypted` field; a
-member that becomes encrypted compares `unknown`, because its bytes are
-unavailable.
+bit, the only member flag REA admits, is the occurrence's `encrypted` field. A
+member whose encryption changes compares `changed` in `metadata` and
+`availability`: the change is known, but REA does not read encrypted bytes.
 
 ## CLI
 

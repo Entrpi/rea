@@ -426,8 +426,9 @@ type FormatMetadataKind = keyof FormatMetadataByKind;
  * What each kind declares beyond its own bytes, which artifact comparison
  * compares, or why comparison uses none of its facts. Every kind needs an
  * entry, so a new kind does not compile without this decision; a new field
- * of an existing kind still needs a review of its projection. For node-less
- * metadata records, the projection is everything comparison checks.
+ * of an existing kind still needs a review of its projection. For a node-less
+ * metadata record, the projection is all of its format metadata that
+ * comparison checks.
  */
 const declarationsByKind: {
   readonly [Kind in FormatMetadataKind]:

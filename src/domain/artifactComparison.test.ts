@@ -182,15 +182,20 @@ const declared = (formatMetadata: FormatMetadata) =>
 
 /** One metadata record in a container; a content digit gives it a node. */
 const recordObservation = (
-  formatMetadata: FormatMetadata,
-  content?: string,
+  formatMetadata: FormatMetadata | undefined,
+  record: {
+    readonly content?: string;
+    readonly encrypted?: boolean;
+    readonly limitations?: string[];
+  } = {},
 ) => {
   const inventory = artifactInventoryResultSchema.parse(
     ARTIFACT_COMPARISON_EXAMPLE.left.normalized_result,
   );
   const root = inventory.occurrences[0];
   if (root === undefined) throw new Error("Missing root occurrence");
-  const sha256 = content?.repeat(64);
+  const encrypted = record.encrypted ?? false;
+  const sha256 = record.content?.repeat(64);
   const artifactId = sha256 === undefined ? null : artifactIdForContent(sha256);
   if (sha256 !== undefined && artifactId !== null)
     inventory.nodes.push({
@@ -218,11 +223,18 @@ const recordObservation = (
     declared_size: 0,
     compressed_size: null,
     executable: false,
-    encrypted: false,
-    hash_status: sha256 === undefined ? "not-hashed" : "verified",
+    encrypted,
+    hash_status:
+      sha256 !== undefined
+        ? "verified"
+        : encrypted
+          ? "unavailable"
+          : "not-hashed",
     source_location: null,
-    format_metadata: formatMetadata,
-    limitations: [],
+    ...(formatMetadata === undefined
+      ? {}
+      : { format_metadata: formatMetadata }),
+    limitations: record.limitations ?? [],
   });
   inventory.coverage = { scope: "container-entries", status: "complete" };
   inventory.manifest.node_count = inventory.nodes.length;
@@ -363,8 +375,8 @@ it("compares node-less records by declaration and keeps content changes", () => 
   // Equal declarations do not hide a change in content that a record names.
   expect(
     compareArtifacts(
-      recordObservation(runtimeOption, "a"),
-      recordObservation(runtimeOption, "b"),
+      recordObservation(runtimeOption, { content: "a" }),
+      recordObservation(runtimeOption, { content: "b" }),
     ).changes,
   ).toEqual([
     expect.objectContaining({
@@ -373,4 +385,36 @@ it("compares node-less records by declaration and keeps content changes", () => 
       dimensions: ["content"],
     }),
   ]);
+});
+
+it("compares a node-less record's encryption but not its limitations", () => {
+  // A PYZ namespace record and the reader's caveat for it.
+  const namespace: FormatMetadata = {
+    ...runtimeOption,
+    container: "pyz",
+    container_name: "PYZ.pyz",
+    source_name: "legacy",
+    type_code: 3,
+  };
+  const caveat =
+    "Namespace package has no importable bytecode; its declared payload is not materialized.";
+  const plain = recordObservation(namespace, { limitations: [caveat] });
+  // A known encryption change survives a declaration that one side omits.
+  const result = compareArtifacts(
+    plain,
+    recordObservation(undefined, { encrypted: true, limitations: [caveat] }),
+  );
+  expect(result.changes).toEqual([
+    expect.objectContaining({
+      logical_path: "record",
+      classification: "changed",
+      dimensions: ["metadata", "availability"],
+    }),
+  ]);
+  expect(result.limitations).toEqual([FORMAT_DECLARATION_UNKNOWN_LIMITATION]);
+  // Limitations describe the observation, so a caveat alone is no change.
+  expect(compareArtifacts(plain, recordObservation(namespace))).toMatchObject({
+    status: "unchanged",
+    changes: [],
+  });
 });
