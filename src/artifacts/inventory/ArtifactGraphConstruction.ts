@@ -284,6 +284,7 @@ export const rootOccurrenceFor = (
       "pyinstaller",
       "node-sea",
       "esp-image",
+      "esp-flash-image",
     ].includes(metadata.format)
       ? "container"
       : artifactRoleForFormat(metadata.path, metadata.format).kind,
@@ -574,7 +575,11 @@ const artifactRoleForFormat = (
       format: zipPackageFormatForPath(path) ?? format,
     };
   if (format === "plist") return { kind: "plist", format };
-  if (format === "godot-pck" || format === "esp-image")
+  if (
+    format === "godot-pck" ||
+    format === "esp-image" ||
+    format === "esp-flash-image"
+  )
     return { kind: "container", format };
   return {
     kind: ["native-addon", "dynamic-library"].includes(byPath.kind)

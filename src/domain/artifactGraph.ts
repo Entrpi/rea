@@ -87,6 +87,7 @@ const artifactFormatSchema = z.enum([
   "pyinstaller",
   "node-sea",
   "esp-image",
+  "esp-flash-image",
   "unknown",
 ]);
 

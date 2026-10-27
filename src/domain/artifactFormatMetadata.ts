@@ -132,6 +132,13 @@ const uint16 = z.number().int().min(0).max(0xffff);
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/u);
 const byteRange = z.strictObject({ offset, length: offset });
 
+/** Derived from `chip_id` through the cited table. */
+const espChipFactsSchema = z.strictObject({
+  target: z.string(),
+  isa: z.enum(["xtensa", "riscv"]),
+  source: z.string(),
+});
+
 /** `esp_app_desc_t` fields, as ESP-IDF names them; strings stop at NUL. */
 const espAppDescriptorSchema = z.strictObject({
   kind: z.literal("app"),
@@ -183,13 +190,7 @@ export const espImageMetadataSchema = z.strictObject({
     hash_appended: z.boolean(),
   }),
   /** Derived from `chip_id` through the cited table; null for unknown IDs. */
-  chip: z
-    .strictObject({
-      target: z.string(),
-      isa: z.enum(["xtensa", "riscv"]),
-      source: z.string(),
-    })
-    .nullable(),
+  chip: espChipFactsSchema.nullable(),
   checksum: z.strictObject({
     offset: offset.nullable(),
     stored: uint8.nullable(),
@@ -266,6 +267,139 @@ export type EspImageSignatureBlockMetadata = z.infer<
   typeof espImageSignatureBlockMetadataSchema
 >;
 
+/** One partition table entry as declared, with ESP-IDF's type names. */
+export const espFlashPartitionMetadataSchema = z.strictObject({
+  kind: z.literal("esp-flash-partition"),
+  /** Position among the table's partition entries. */
+  index: uint8,
+  /** The label up to its first NUL; null when it is not UTF-8. */
+  label: z.string().nullable(),
+  type: uint8,
+  subtype: uint8,
+  /** `gen_esp32part.py` names; null for values it does not name. */
+  type_name: z.string().nullable(),
+  subtype_name: z.string().nullable(),
+  flash_address: uint32,
+  size: uint32,
+  encrypted: z.boolean(),
+  readonly: z.boolean(),
+  /** Flag bits other than `encrypted` and `readonly`, which ESP-IDF ignores. */
+  unknown_flags: uint32,
+});
+export type EspFlashPartitionMetadata = z.infer<
+  typeof espFlashPartitionMetadataSchema
+>;
+
+/** What a partition entry declares; its index is layout. */
+export const espFlashPartitionDeclaration = (
+  metadata: EspFlashPartitionMetadata,
+) => ({
+  label: metadata.label,
+  type: metadata.type,
+  subtype: metadata.subtype,
+  flash_address: metadata.flash_address,
+  size: metadata.size,
+  encrypted: metadata.encrypted,
+  readonly: metadata.readonly,
+  unknown_flags: metadata.unknown_flags,
+});
+
+/** ESP image facts for a region of a dump; offsets are relative to the region. */
+const espFlashImageFactsSchema = z.strictObject({
+  /** An ESP image, erased flash, or bytes that are not one, such as ciphertext. */
+  status: z.enum(["esp-image", "erased", "unrecognized"]),
+  image: espImageMetadataSchema.nullable(),
+  segments: z.array(espImageSegmentMetadataSchema),
+  signature_blocks: z.array(espImageSignatureBlockMetadataSchema),
+  coverage: z.enum(["complete", "unknown"]).nullable(),
+  limitations: z.array(z.string()),
+});
+
+const espOtaRecordSchema = z.strictObject({
+  index: z.union([z.literal(0), z.literal(1)]),
+  ota_seq: uint32,
+  seq_label: z.string().regex(/^[0-9a-f]{40}$/u),
+  ota_state: uint32,
+  state_name: z
+    .enum(["new", "pending-verify", "valid", "invalid", "aborted", "undefined"])
+    .nullable(),
+  crc: uint32,
+  /** CRC-32 of `ota_seq` seeded with 0xFFFFFFFF, as the bootloader checks it. */
+  crc_matches: z.boolean(),
+  valid: z.boolean(),
+});
+
+/**
+ * An ESP flash dump: where it sits in flash, its bootloader, partition table,
+ * partitions and OTA data. Entries are the table's partitions; app and
+ * bootloader regions carry their ESP image facts here.
+ */
+export const espFlashImageMetadataSchema = z.strictObject({
+  kind: z.literal("esp-flash-image"),
+  /** Flash address of the file's first byte: 0 unless the caller gave one. */
+  flash_offset: z.strictObject({
+    value: uint32,
+    source: z.enum(["default", "caller"]),
+  }),
+  /** From the bootloader's `chip_id`; null without a located bootloader. */
+  chip: espChipFactsSchema.nullable(),
+  /** The image at its chip's ROM offset, through the partition table. */
+  bootloader: z
+    .strictObject({
+      flash_address: uint32,
+      region_size: offset,
+      facts: espFlashImageFactsSchema,
+    })
+    .nullable(),
+  partition_table: z.strictObject({
+    flash_address: uint32,
+    /** 0x8000, the caller's offset, or a scan for a verified MD5 (derived). */
+    method: z.enum(["default", "caller", "scan"]),
+    partition_count: uint8,
+    md5: z.strictObject({
+      status: z.enum(["valid", "invalid", "absent"]),
+      stored: z
+        .string()
+        .regex(/^[0-9a-f]{32}$/u)
+        .nullable(),
+      computed: z
+        .string()
+        .regex(/^[0-9a-f]{32}$/u)
+        .nullable(),
+    }),
+  }),
+  /** Declared partitions with no bytes in the dump, which have no entry. */
+  partitions_outside_dump: z.array(espFlashPartitionMetadataSchema),
+  /** ESP image facts for each app partition the dump holds. */
+  apps: z.array(
+    z.strictObject({ partition_index: uint8, facts: espFlashImageFactsSchema }),
+  ),
+  otadata: z
+    .strictObject({
+      partition_index: uint8,
+      records: z.array(espOtaRecordSchema),
+      /** Derived from the records under the stated assumptions. */
+      selected: z.strictObject({
+        active_record: z.union([z.literal(0), z.literal(1)]).nullable(),
+        slot: uint8.nullable(),
+        partition_index: uint8.nullable(),
+        basis: z.enum([
+          "otadata",
+          "factory-fallback",
+          "ota_0-fallback",
+          "none",
+        ]),
+        assumptions: z.array(z.string()),
+      }),
+      /** Rollback, anti-rollback and load fallback decide it at boot. */
+      running_partition: z.literal("unknown"),
+    })
+    .nullable(),
+  /** Bytes outside every described region that are not erased flash. */
+  undescribed: z.array(byteRange),
+});
+export type EspFlashImageMetadata = z.infer<typeof espFlashImageMetadataSchema>;
+
 /** Declaration identity that is stable across archive layout changes. */
 export const pyInstallerEntryDeclaration = (
   metadata: PyInstallerEntryMetadata,
@@ -286,6 +420,8 @@ export const artifactFormatMetadataSchema = z.discriminatedUnion("kind", [
   espImageMetadataSchema,
   espImageSegmentMetadataSchema,
   espImageSignatureBlockMetadataSchema,
+  espFlashImageMetadataSchema,
+  espFlashPartitionMetadataSchema,
 ]);
 export type ArtifactFormatMetadata = z.infer<
   typeof artifactFormatMetadataSchema

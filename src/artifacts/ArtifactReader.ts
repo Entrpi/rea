@@ -180,6 +180,7 @@ export interface ArtifactReader {
     | "pyinstaller"
     | "node-sea"
     | "esp-image"
+    | "esp-flash-image"
     | "file";
   entries(
     signal?: AbortSignal,

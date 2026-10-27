@@ -6,6 +6,11 @@ import { AsarArtifactReader } from "./AsarArtifactReader.js";
 import type { ArtifactReader } from "./ArtifactReader.js";
 import { DirectoryArtifactReader } from "./DirectoryArtifactReader.js";
 import { EspImageArtifactReader } from "./EspImageArtifactReader.js";
+import {
+  EspFlashImageArtifactReader,
+  type EspFlashAdmission,
+} from "./EspFlashImageArtifactReader.js";
+import type { EspFlashSelection } from "../domain/firmware/espFlashLocation.js";
 import { GodotPckArtifactReader } from "./GodotPckArtifactReader.js";
 import { MachOSliceArtifactReader } from "./MachOSliceArtifactReader.js";
 import { NativeDmgArtifactReader } from "./NativeDmgArtifactReader.js";
@@ -29,6 +34,7 @@ export type ArtifactReaderFormat =
   | "mach-o-universal"
   | "dmg"
   | "esp-image"
+  | "esp-flash-image"
   | ZipPackageFormat;
 
 interface ArtifactReaderConstruction {
@@ -39,8 +45,11 @@ interface ArtifactReaderConstruction {
     | NodeSeaAdmission
     | PyInstallerAdmission
     | GodotPckAdmission
+    | EspFlashAdmission
     | undefined;
   readonly asarHeaderAdmission?: AsarHeaderAdmission | undefined;
+  /** Caller inputs for an explicitly selected ESP flash image. */
+  readonly espFlashSelection?: EspFlashSelection | undefined;
   /** Caller-selected root spelling; only ASAR companion lookup consumes this. */
   readonly selectedPath?: string | undefined;
 }
@@ -118,6 +127,16 @@ export function createArtifactReader(
       return new NativeDmgArtifactReader(path, options.environment);
     case "esp-image":
       return new EspImageArtifactReader(path, rootSource);
+    case "esp-flash-image":
+      return new EspFlashImageArtifactReader(
+        path,
+        admission !== undefined &&
+          "kind" in admission &&
+          admission.kind === "esp-flash-image"
+          ? admission
+          : rootSource,
+        options.espFlashSelection,
+      );
     default:
       return undefined;
   }

@@ -1,4 +1,9 @@
 import type { GodotPckAdmission } from "../GodotPckLocation.js";
+import type { EspFlashAdmission } from "../EspFlashImageArtifactReader.js";
+import {
+  locateEspFlashLayout,
+  type EspFlashSelection,
+} from "../../domain/firmware/espFlashLocation.js";
 import type { PyInstallerAdmission } from "../pyinstaller/PyInstallerAdmission.js";
 import { assertArtifactSelectedSource } from "../ArtifactSelectedSource.js";
 import { artifactNameForClassification } from "../../domain/artifactNameSelection.js";
@@ -55,6 +60,7 @@ type RootInventoryClassification = RootClassification & {
     | NodeSeaAdmission
     | PyInstallerAdmission
     | GodotPckAdmission
+    | EspFlashAdmission
     | undefined;
 };
 
@@ -75,6 +81,7 @@ export const classifyAndHashRootForInventory = async (
     | "asarHeaderAdmission"
     | "selectedPath"
     | "expectedRootSha256"
+    | "espFlashSelection"
   >,
   probeFacts?: ArtifactEmbeddedFormatProbeFacts,
 ): Promise<RootInventoryClassification> => {
@@ -150,6 +157,7 @@ export const classifyAndHashRootForInventory = async (
       options.signal,
       options.asarHeaderAdmission,
       options.selectedPath,
+      options.espFlashSelection,
     );
     const format =
       typeof classified === "string" ? classified : classified.kind;
@@ -167,7 +175,8 @@ export const classifyAndHashRootForInventory = async (
       format === "godot-pck" ||
       format === "pyinstaller" ||
       format === "node-sea" ||
-      format === "esp-image";
+      format === "esp-image" ||
+      format === "esp-flash-image";
     outcome = {
       kind: "completed",
       value: {
@@ -207,11 +216,13 @@ const classifyRootFormat = async (
   signal?: AbortSignal,
   asarHeaderAdmission?: AsarHeaderAdmission,
   selectedPath?: string,
+  espFlashSelection?: EspFlashSelection,
 ): Promise<
   | ArtifactOccurrence["artifact_format"]
   | NodeSeaAdmission
   | PyInstallerAdmission
   | GodotPckAdmission
+  | EspFlashAdmission
 > => {
   const { handle } = source;
   const probe = createArtifactClassificationProbe(asarHeaderAdmission);
@@ -267,6 +278,24 @@ const classifyRootFormat = async (
     return "dmg";
   const pck = await embeddedProbes.godotPck(evidence.prefix);
   if (pck !== undefined) return { kind: "godot-pck", source, location: pck };
+  // A C3 or S3 dump begins with its bootloader, so the layout is located
+  // before the bytes are read as one ESP image.
+  const flash = await locateEspFlashLayout(
+    archiveBytes,
+    read,
+    espFlashSelection ?? {},
+    {
+      explicit: espFlashSelection !== undefined,
+      ...(signal === undefined ? {} : { signal }),
+    },
+  );
+  if (flash.ok)
+    return { kind: "esp-flash-image", source, location: flash.value };
+  if (espFlashSelection !== undefined)
+    throw new ArtifactReaderFailure(
+      "unavailable",
+      `ESP flash image layout is not recognized: ${flash.error}`,
+    );
   const fatEvidence = await readRootFatSliceHeaders(handle, evidence, signal);
   const mzWindowsHeaderSignature = await readRootMzWindowsHeaderSignature(
     handle,
