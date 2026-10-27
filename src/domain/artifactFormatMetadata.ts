@@ -276,12 +276,16 @@ type FormatMetadataKind = keyof FormatMetadataByKind;
 /**
  * What each kind declares beyond its own bytes, which artifact comparison
  * compares, or why comparison uses none of its facts. Every kind needs an
- * entry, so a new kind does not compile without this decision.
+ * entry, so a new kind does not compile without this decision; a new field
+ * of an existing kind still needs a review of its projection. For node-less
+ * metadata records, the projection is everything comparison checks.
  */
 const declarationsByKind: {
   readonly [Kind in FormatMetadataKind]:
     | {
-        readonly declaration: (metadata: FormatMetadataByKind[Kind]) => unknown;
+        readonly declaration: (
+          metadata: FormatMetadataByKind[Kind],
+        ) => FormatMetadataDeclaration["facts"];
       }
     | { readonly notCompared: string };
 } = {
@@ -291,7 +295,7 @@ const declarationsByKind: {
   },
   "godot-pck-entry": {
     notCompared:
-      "index and declared_offset are directory layout. The reader admits only the encryption bit in flags, which the occurrence's encrypted field records, and an all-zero md5_status adds an occurrence limitation. source_path is the stored spelling, not Godot's lookup key: logical_path holds that key apart from Unicode normalization, and Godot 4.4 stopped storing the res:// prefix.",
+      "index and declared_offset are layout; flags and md5_status repeat occurrence facts; source_path spells Godot's lookup path in a version-dependent way. docs/godot-pck.md gives the evidence.",
   },
   pyinstaller: {
     notCompared:
@@ -340,7 +344,7 @@ const declarationsByKind: {
 /** A declaration that artifact comparison compares within its kind. */
 export interface FormatMetadataDeclaration {
   readonly kind: FormatMetadataKind;
-  readonly facts: unknown;
+  readonly facts: Readonly<Record<string, unknown>>;
 }
 
 // Generic in the kind, so each projection receives its own metadata type.

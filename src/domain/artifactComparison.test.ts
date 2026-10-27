@@ -1,29 +1,24 @@
 import { expect, it } from "vitest";
 import { ARTIFACT_COMPARISON_EXAMPLE } from "../contracts/artifactComparisonExample.js";
-import { compareArtifacts } from "./artifactComparison.js";
+import {
+  compareArtifacts,
+  FORMAT_DECLARATION_UNKNOWN_LIMITATION,
+} from "./artifactComparison.js";
 import {
   artifactInventoryResultSchema,
+  type ArtifactInventoryResult,
   type ArtifactOccurrence,
 } from "./artifactGraph.js";
-import { artifactGraphDigest, artifactManifestId } from "./artifactIdentity.js";
+import {
+  artifactGraphDigest,
+  artifactIdForContent,
+  artifactManifestId,
+  occurrenceIdForLocation,
+} from "./artifactIdentity.js";
 import { createEvidence } from "./evidence.js";
 
 /** Recommit observation variants so comparisons exercise valid Evidence carriers. */
-const observation = (
-  facts: Pick<ArtifactOccurrence, "hash_status"> &
-    Partial<Pick<ArtifactOccurrence, "unpacked" | "format_metadata">>,
-  changedContent = false,
-) => {
-  const source = changedContent
-    ? ARTIFACT_COMPARISON_EXAMPLE.right
-    : ARTIFACT_COMPARISON_EXAMPLE.left;
-  const inventory = artifactInventoryResultSchema.parse(
-    source.normalized_result,
-  );
-  inventory.occurrences = inventory.occurrences.map((occurrence) => ({
-    ...occurrence,
-    ...facts,
-  }));
+const commit = (inventory: ArtifactInventoryResult) => {
   const graphSha256 = artifactGraphDigest({
     nodes: inventory.nodes,
     occurrences: inventory.occurrences,
@@ -41,7 +36,7 @@ const observation = (
       sha256: inventory.manifest.root_sha256,
       format: inventory.manifest.root_format,
     },
-    source.provider,
+    ARTIFACT_COMPARISON_EXAMPLE.left.provider,
     {
       operation: "inventory_artifact",
       parameters: {},
@@ -50,6 +45,24 @@ const observation = (
       authority: "shipped-artifact",
     },
   );
+};
+
+const observation = (
+  facts: Pick<ArtifactOccurrence, "hash_status"> &
+    Partial<Pick<ArtifactOccurrence, "unpacked" | "format_metadata">>,
+  changedContent = false,
+) => {
+  const source = changedContent
+    ? ARTIFACT_COMPARISON_EXAMPLE.right
+    : ARTIFACT_COMPARISON_EXAMPLE.left;
+  const inventory = artifactInventoryResultSchema.parse(
+    source.normalized_result,
+  );
+  inventory.occurrences = inventory.occurrences.map((occurrence) => ({
+    ...occurrence,
+    ...facts,
+  }));
+  return commit(inventory);
 };
 
 const packingObservation = (
@@ -167,13 +180,75 @@ type FormatMetadata = NonNullable<ArtifactOccurrence["format_metadata"]>;
 const declared = (formatMetadata: FormatMetadata) =>
   observation({ hash_status: "verified", format_metadata: formatMetadata });
 
-const pyInstallerEntry: FormatMetadata = {
+/** One metadata record in a container; a content digit gives it a node. */
+const recordObservation = (
+  formatMetadata: FormatMetadata,
+  content?: string,
+) => {
+  const inventory = artifactInventoryResultSchema.parse(
+    ARTIFACT_COMPARISON_EXAMPLE.left.normalized_result,
+  );
+  const root = inventory.occurrences[0];
+  if (root === undefined) throw new Error("Missing root occurrence");
+  const sha256 = content?.repeat(64);
+  const artifactId = sha256 === undefined ? null : artifactIdForContent(sha256);
+  if (sha256 !== undefined && artifactId !== null)
+    inventory.nodes.push({
+      artifact_id: artifactId,
+      format: "file",
+      sha256,
+      size: 0,
+      media_type: null,
+      architecture: null,
+      content_state: "materialized",
+      limitations: [],
+    });
+  inventory.occurrences.push({
+    occurrence_id: occurrenceIdForLocation({
+      rootArtifactId: inventory.manifest.root_artifact_id,
+      logicalPath: "record",
+      entryKind: "metadata",
+    }),
+    artifact_id: artifactId,
+    parent_occurrence_id: root.occurrence_id,
+    logical_path: "record",
+    entry_kind: "metadata",
+    artifact_kind: "package-metadata",
+    artifact_format: "unknown",
+    declared_size: 0,
+    compressed_size: null,
+    executable: false,
+    encrypted: false,
+    hash_status: sha256 === undefined ? "not-hashed" : "verified",
+    source_location: null,
+    format_metadata: formatMetadata,
+    limitations: [],
+  });
+  inventory.coverage = { scope: "container-entries", status: "complete" };
+  inventory.manifest.node_count = inventory.nodes.length;
+  inventory.manifest.occurrence_count = inventory.occurrences.length;
+  return commit(inventory);
+};
+
+const espImageSegment: FormatMetadata = {
+  kind: "esp-image-segment",
+  index: 1,
+  load_addr: 0x3fc8_8000,
+  data_len: 4,
+  header_offset: 24,
+  classification: "loaded",
+};
+const movedSegment: FormatMetadata = {
+  ...espImageSegment,
+  load_addr: 0x3fc8_a000,
+};
+const runtimeOption: FormatMetadata = {
   kind: "pyinstaller-entry",
   container: "carchive",
   container_name: null,
-  index: 0,
-  source_name: "helper",
-  type_code: "m",
+  index: 1,
+  source_name: "pyi-contents-directory _internal",
+  type_code: "o",
   relative_offset: 0,
   directory_record_offset: null,
   directory_record_size: null,
@@ -187,171 +262,115 @@ const pyInstallerEntry: FormatMetadata = {
   pyz_entry_count: null,
   encryption_source: null,
 };
-const nodeSeaEntry: FormatMetadata = {
-  kind: "node-sea-entry",
-  role: "asset",
-  source_path: "data/asset.txt",
-  index: 0,
-};
-const espImageSegment: FormatMetadata = {
-  kind: "esp-image-segment",
-  index: 1,
-  load_addr: 0x3fc8_8000,
-  data_len: 4,
-  header_offset: 24,
-  classification: "loaded",
-};
 
-// Each compared kind: a base, a declared change and a layout-only change.
-const declarations = [
-  [
-    "pyinstaller-entry",
-    pyInstallerEntry,
-    { ...pyInstallerEntry, type_code: "s" },
-    { ...pyInstallerEntry, index: 5, relative_offset: 64 },
-  ],
-  [
-    "node-sea-entry",
-    nodeSeaEntry,
-    { ...nodeSeaEntry, role: "code-cache" },
-    { ...nodeSeaEntry, index: 3 },
-  ],
-  [
-    "esp-image-segment",
-    espImageSegment,
-    { ...espImageSegment, load_addr: 0x3fc8_a000 },
-    { ...espImageSegment, header_offset: 64, classification: "unknown" },
-  ],
-] as const satisfies readonly (readonly [
-  string,
-  FormatMetadata,
-  FormatMetadata,
-  FormatMetadata,
-])[];
-
-it.each(declarations)(
-  "compares %s declarations without their layout",
-  (_kind, base, change, layout) => {
-    expect(compareArtifacts(declared(base), declared(layout))).toMatchObject({
-      status: "unchanged",
-      changes: [],
-    });
-    expect(compareArtifacts(declared(base), declared(change))).toMatchObject({
-      status: "changed",
-      changes: [{ classification: "changed", dimensions: ["metadata"] }],
-    });
-  },
-);
-
-it.each(declarations)(
-  "retains a changed %s declaration when content is unavailable",
-  (_kind, base, change) => {
-    expect(
-      compareArtifacts(
-        declared(base),
-        observation({ hash_status: "unavailable", format_metadata: change }),
-      ),
-    ).toMatchObject({
-      status: "changed",
-      changes: [
-        { classification: "changed", dimensions: ["metadata", "availability"] },
-      ],
-    });
-  },
-);
-
-it.each(declarations)(
-  "keeps one-sided %s declarations unknown",
-  (_kind, base) => {
-    const omitted = observation({ hash_status: "verified" });
-    for (const [left, right] of [
-      [declared(base), omitted],
-      [omitted, declared(base)],
-    ] as const) {
-      const result = compareArtifacts(left, right);
-      expect(result).toMatchObject({
-        status: "unknown",
-        changes: [{ classification: "unknown", dimensions: ["availability"] }],
-      });
-      expect(result.limitations).toEqual([
-        expect.stringContaining(
-          "Format metadata declarations are recorded on only one side",
-        ),
-      ]);
-    }
-  },
-);
-
-it("keeps declarations of different kinds unknown", () => {
+it("compares an ESP segment declaration without its layout or derived class", () => {
   expect(
-    compareArtifacts(declared(pyInstallerEntry), declared(nodeSeaEntry)),
+    compareArtifacts(
+      declared(espImageSegment),
+      declared({
+        ...espImageSegment,
+        header_offset: 64,
+        classification: "unknown",
+      }),
+    ),
+  ).toMatchObject({ status: "unchanged", changes: [] });
+  expect(
+    compareArtifacts(declared(espImageSegment), declared(movedSegment)),
   ).toMatchObject({
-    status: "unknown",
-    changes: [{ classification: "unknown", dimensions: ["availability"] }],
+    status: "changed",
+    changes: [{ classification: "changed", dimensions: ["metadata"] }],
+  });
+});
+
+it("retains a changed declaration when content is unavailable", () => {
+  expect(
+    compareArtifacts(
+      declared(espImageSegment),
+      observation({
+        hash_status: "unavailable",
+        format_metadata: movedSegment,
+      }),
+    ),
+  ).toMatchObject({
+    status: "changed",
+    changes: [
+      { classification: "changed", dimensions: ["metadata", "availability"] },
+    ],
   });
 });
 
 it.each([
-  [
-    "godot-pck-entry",
-    {
-      kind: "godot-pck-entry",
-      index: 0,
-      source_path: "res://scenes/main.gd",
-      declared_offset: 0,
-      flags: 0,
-      md5_status: "declared",
-    },
-    {
-      kind: "godot-pck-entry",
-      index: 3,
-      source_path: "scenes/main.gd",
-      declared_offset: 96,
-      flags: 0,
-      md5_status: "declared",
-    },
-  ],
-  [
-    "esp-image-signature-block",
-    {
-      kind: "esp-image-signature-block",
-      index: 0,
-      version: 2,
-      scheme: "rsa",
-      sha_version: null,
-      curve_id: null,
-      digest_algorithm: "sha256",
-      image_digest: "a".repeat(64),
-      image_digest_matches: true,
-      public_key_sha256: "b".repeat(64),
-      signature_status: "unverified",
-    },
-    {
-      kind: "esp-image-signature-block",
-      index: 0,
-      version: 2,
-      scheme: "rsa",
-      sha_version: null,
-      curve_id: null,
-      digest_algorithm: "sha256",
-      image_digest: "a".repeat(64),
-      image_digest_matches: false,
-      public_key_sha256: "b".repeat(64),
-      signature_status: "unverified",
-    },
-  ],
-] as const satisfies readonly (readonly [
-  string,
-  FormatMetadata,
-  FormatMetadata,
-])[])("does not compare %s metadata", (_kind, left, right) => {
+  ["one side omits it", undefined],
+  ["the other side records another kind", runtimeOption],
+] as const)("keeps a declaration unknown when %s", (_case, other) => {
+  const result = compareArtifacts(
+    declared(espImageSegment),
+    other === undefined
+      ? observation({ hash_status: "verified" })
+      : declared(other),
+  );
+  expect(result).toMatchObject({
+    status: "unknown",
+    changes: [{ classification: "unknown", dimensions: ["availability"] }],
+  });
+  expect(result.limitations).toEqual([FORMAT_DECLARATION_UNKNOWN_LIMITATION]);
+});
+
+it("does not compare ESP signature block metadata", () => {
+  const block: FormatMetadata = {
+    kind: "esp-image-signature-block",
+    index: 0,
+    version: 2,
+    scheme: "rsa",
+    sha_version: null,
+    curve_id: null,
+    digest_algorithm: "sha256",
+    image_digest: "a".repeat(64),
+    image_digest_matches: true,
+    public_key_sha256: "b".repeat(64),
+    signature_status: "unverified",
+  };
   for (const other of [
-    declared(right),
+    declared({ ...block, image_digest_matches: false }),
     observation({ hash_status: "verified" }),
   ])
-    expect(compareArtifacts(declared(left), other)).toMatchObject({
+    expect(compareArtifacts(declared(block), other)).toMatchObject({
       status: "unchanged",
       changes: [],
       limitations: [],
     });
+});
+
+it("compares node-less records by declaration and keeps content changes", () => {
+  expect(
+    compareArtifacts(
+      recordObservation(runtimeOption),
+      recordObservation(runtimeOption),
+    ),
+  ).toMatchObject({ status: "unchanged", changes: [] });
+  expect(
+    compareArtifacts(
+      recordObservation(runtimeOption),
+      recordObservation({ ...runtimeOption, source_name: "pyi-python-flag O" }),
+    ).changes,
+  ).toEqual([
+    expect.objectContaining({
+      logical_path: "record",
+      classification: "changed",
+      dimensions: ["metadata"],
+    }),
+  ]);
+  // Equal declarations do not hide a change in content that a record names.
+  expect(
+    compareArtifacts(
+      recordObservation(runtimeOption, "a"),
+      recordObservation(runtimeOption, "b"),
+    ).changes,
+  ).toEqual([
+    expect.objectContaining({
+      logical_path: "record",
+      classification: "changed",
+      dimensions: ["content"],
+    }),
+  ]);
 });

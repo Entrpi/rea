@@ -103,6 +103,10 @@ export type ArtifactComparisonResult = z.infer<
 >;
 type ArtifactChange = z.infer<typeof artifactChangeSchema>;
 
+/** Comparison limitation when a path's format declarations cannot be compared. */
+export const FORMAT_DECLARATION_UNKNOWN_LIMITATION =
+  "Format metadata declarations are missing on one side or differ in kind for matching paths; omitted metadata may be a legacy or non-container observation and leaves the complete declaration unavailable.";
+
 const comparisonInventory = (input: unknown, side: "left" | "right") => {
   try {
     return parseArtifactInventoryEvidence(input);
@@ -190,9 +194,7 @@ export const compareArtifacts = (
         ]
       : []),
     ...(comparison.hasUnknownFormatDeclaration
-      ? [
-          "Format metadata declarations are recorded on only one side for matching paths; omitted metadata may be a legacy observation and leaves the complete declaration unavailable.",
-        ]
+      ? [FORMAT_DECLARATION_UNKNOWN_LIMITATION]
       : []),
     ...(comparison.hasAmbiguousDuplicatePaths
       ? [
@@ -501,10 +503,13 @@ const classifyDeclarationRecord = (
   base: ReturnType<typeof buildArtifactChangeBase>,
 ): { readonly handled: boolean; readonly change: ArtifactChange | null } => {
   // Metadata is not inherently a declaration. Only apply this comparison
-  // when a producer explicitly recorded a compared one.
+  // when a producer explicitly recorded a compared one. A record that names
+  // content keeps the content comparison.
   if (
     input.leftOccurrence?.entry_kind !== "metadata" ||
     input.rightOccurrence?.entry_kind !== "metadata" ||
+    input.leftOccurrence.artifact_id !== null ||
+    input.rightOccurrence.artifact_id !== null ||
     input.metadata.formatDeclaration === "absent"
   )
     return { handled: false, change: null };

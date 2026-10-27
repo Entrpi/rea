@@ -1226,9 +1226,9 @@ PyInstaller entries, Node SEA members and ESP image segments; each format's
 guide names the compared fields. A changed declaration is a metadata change,
 including when content is unavailable. A declaration that only one side
 records, or that the other side records as another kind, is unknown and adds a
-limitation. Other kinds are not compared: their fields come from the artifact's
-own bytes or repeat occurrence fields, except Godot PCK source paths, which
-[Godot PCK archives](godot-pck.md) explains.
+limitation. Other kinds are not compared: their fields record layout, come
+from the artifact's own bytes, or repeat occurrence fields, except Godot PCK
+source paths, which [Godot PCK archives](godot-pck.md) explains.
 
 POSIX letter-colon names such as `a:b` remain valid logical
 names; Windows extraction refuses names its filesystem cannot materialize.
