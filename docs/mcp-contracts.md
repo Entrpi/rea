@@ -1230,13 +1230,20 @@ limitation. Other kinds are not compared: their fields record layout, come
 from the artifact's own bytes, or repeat occurrence fields, except Godot PCK
 source paths, which [Godot PCK archives](godot-pck.md) explains.
 
-Every occurrence records `encrypted`, and `compare_artifacts` reports a
-metadata change when it differs, including when content is unavailable. A
-member that becomes encrypted therefore compares `changed` in `metadata` and
-`availability`, not `unknown`. For a node-less metadata record with a
-compared declaration, only that declaration, the `encrypted` value and any
-recorded ASAR storage decide the comparison. REA does not compare the
-record's unread payload or its limitations, which describe the observation.
+Every occurrence records `entry_kind`, `executable` and `encrypted`, and
+`compare_artifacts` compares them even when content is unavailable. A
+different entry kind or `encrypted` value is a `metadata` change, and a
+different `executable` value is an `executable` change. When either side's
+content is unavailable, the change also includes `availability`. For example,
+REA does not read symlink targets, so a non-executable ZIP member that
+becomes a symlink compares `changed` in `metadata` and `availability`, not
+`unknown`. Declared sizes and integrity digests do not count without
+content: REA compares observed sizes and checks a declared digest against
+observed bytes. For a node-less metadata record with a compared declaration,
+only that declaration, these fields and any recorded ASAR storage decide the
+comparison. Such a record adds `availability` only when a declaration is
+unknown. REA does not compare the record's unread payload or its
+limitations, which describe the observation.
 
 POSIX letter-colon names such as `a:b` remain valid logical
 names; Windows extraction refuses names its filesystem cannot materialize.
