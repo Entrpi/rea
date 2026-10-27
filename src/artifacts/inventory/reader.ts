@@ -1,4 +1,5 @@
 import type { GodotPckAdmission } from "../GodotPckLocation.js";
+import type { EspFlashAdmission } from "../EspFlashImageArtifactReader.js";
 import type { PyInstallerAdmission } from "../pyinstaller/PyInstallerAdmission.js";
 import type { NodeSeaAdmission } from "../nodeSea/NodeSeaAdmission.js";
 import type { AsarHeaderAdmission } from "../../config/asarHeaderAdmission.js";
@@ -25,7 +26,8 @@ export const createReader = (
     | StableRegularFileDescriptor
     | NodeSeaAdmission
     | PyInstallerAdmission
-    | GodotPckAdmission,
+    | GodotPckAdmission
+    | EspFlashAdmission,
   asarHeaderAdmission?: AsarHeaderAdmission,
   selectedPath?: string,
 ): ArtifactReader | undefined => {
@@ -69,6 +71,11 @@ export const inventoryCoverage = (
               "Node SEA inventory establishes the injected blob, flags, fuse sentinel, main script, optional code cache, snapshot, and assets. V8 snapshots and code cache are not deserialized, and the application is not executed.",
             ]
           : []),
+        ...(reader.format === "esp-flash-image"
+          ? [
+              "ESP flash layout inventory reads a dump's bootloader region, partition table and partitions and decodes the bootloader and app partitions as ESP images. The OTA selection is derived without app rollback or anti-rollback, and the running partition is unknown. Partitions, nvs_keys included, are extracted as ordinary data; nothing is decrypted.",
+            ]
+          : []),
         ...(reader.format === "esp-image"
           ? [
               "ESP image inventory reads the header-declared segments, checksum, appended SHA-256, descriptor and Secure Boot v2 signature blocks. Segment classification follows ESP-IDF v6.1 should_map and should_load for a cold boot and does not check RAM ranges; signatures are not cryptographically verified, and code is not disassembled.",
@@ -98,7 +105,8 @@ export const inventoryCoverage = (
     format === "asar" ||
     format === "godot-pck" ||
     format === "node-sea" ||
-    format === "esp-image"
+    format === "esp-image" ||
+    format === "esp-flash-image"
   )
     return {
       coverage: { scope: "container-entries", status: "unknown" },

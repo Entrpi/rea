@@ -683,3 +683,20 @@ refusals. ESP8266 images are refused, and flash-encrypted images are not
 recognized. Segments are not disassembled, and RISC-V or Xtensa segments
 cannot be opened as raw-binary. See
 [ESP images](https://github.com/morluto/rea/blob/main/docs/esp-image.md).
+
+## ESP flash images
+
+A whole-flash dump opens as `esp-flash-image`. `root_format_metadata` holds
+`partition_table` (its `method`: `default`, `caller` or a derived
+`scan`), `bootloader` and `apps` ESP image facts, `otadata` with a derived
+`selected` slot (null when a record is missing) and its `assumptions`, and
+`partitions_outside_dump`;
+`running_partition` is always `unknown`. Partition rows
+(`partitions/<label>.bin`) carry the declared `type`, `subtype`, names,
+`flash_address`, `size` and flags; `encrypted` is a storage flag, not
+proof of ciphertext. For a dump read from another flash address, call
+`open_binary` with `format: "esp-flash-image"` and `flash_offset`; a
+relocated table can be named with `partition_table_offset`. No table found
+means unknown, often flash encryption. Extraction writes `nvs_keys` as
+ordinary data. See
+[ESP flash images](https://github.com/morluto/rea/blob/main/docs/esp-flash-image.md).

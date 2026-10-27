@@ -208,9 +208,11 @@ first byte that is not erased starts a range to the end of that region. A
 slot that is neither a block nor erased is reported whole. Adjacent ranges
 are merged.
 
-A whole-flash dump of a chip whose bootloader is at offset 0, such as
-ESP32-C3 or ESP32-S3, is recognized as that bootloader image; the partition
-table, apps and data follow as undescribed bytes.
+A whole-flash dump whose partition table REA finds is read as an
+[ESP flash image](esp-flash-image.md). Without one, a dump of a chip whose
+bootloader is at offset 0, such as ESP32-C3 or ESP32-S3, is recognized as that
+bootloader image, and the partition table, apps and data follow as
+undescribed bytes.
 
 ## Limits
 

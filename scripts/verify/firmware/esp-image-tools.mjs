@@ -41,13 +41,16 @@ export const tool = async (module, args) => {
   return `${stdout}${stderr}`;
 };
 
+/** The npm script whose tools are checked, named in each failure. */
+let lane = "verify:esp-images";
+
 /** Check one tool before any work; a failure names the variable to set. */
 const prerequisite = async (needed, variable, check) => {
   try {
     return await check();
   } catch (failure) {
     throw new Error(
-      `verify:esp-images needs ${needed}; set ${variable}. ${failure.message}`,
+      `${lane} needs ${needed}; set ${variable}. ${failure.message}`,
       { cause: failure },
     );
   }
@@ -63,7 +66,8 @@ export const spell = (v4, later) => {
 };
 
 /** Check every tool before any work and report their versions. */
-export const checkTools = async () => {
+export const checkTools = async (script = "verify:esp-images") => {
+  lane = script;
   const compilerVersion = await prerequisite(
     `a Clang with the RISC-V target (tried ${compiler})`,
     "REA_RISCV_CLANG",
@@ -98,7 +102,7 @@ export const checkTools = async () => {
   );
   if (version[0] !== PINNED_ESPTOOL)
     console.warn(
-      `verify:esp-images: esptool ${version[0]} is not the pinned ${PINNED_ESPTOOL}, whose sources the reader's layout facts cite.`,
+      `${lane}: esptool ${version[0]} is not the pinned ${PINNED_ESPTOOL}, whose sources the reader's layout facts cite.`,
     );
   const xtensaVersion =
     xtensa === undefined
@@ -202,10 +206,10 @@ export const imageInfo = async (file, chip) => {
 };
 
 /** REA's complete inline inventory for one file through the built CLI. */
-export const inspect = async (file) => {
+export const inspect = async (file, flags = []) => {
   const result = await execute(
     process.execPath,
-    [entrypoint, "inspect-artifact", file, "--json"],
+    [entrypoint, "inspect-artifact", file, ...flags, "--json"],
     { ...options, env: { ...process.env, REA_LOG_LEVEL: "silent" } },
   ).then(
     ({ stdout }) => ({ ok: true, stdout }),
@@ -235,10 +239,10 @@ const oracleDescriptorKind = (oracle) => {
 };
 
 /** Extract every entry through the built CLI into a new directory in `root`. */
-export const extract = async (file, root) => {
+export const extract = async (file, root, flags = []) => {
   const { stdout } = await execute(
     process.execPath,
-    [entrypoint, "extract-artifact", file, "--json"],
+    [entrypoint, "extract-artifact", file, ...flags, "--json"],
     {
       ...options,
       env: {

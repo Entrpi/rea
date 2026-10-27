@@ -1,3 +1,4 @@
+import type { EspFlashSelection } from "../../domain/firmware/espFlashLocation.js";
 import type { InvestigationRecordPort } from "../investigation/InvestigationRecordPort.js";
 import type { BinaryTarget } from "../../domain/binaryTargetTypes.js";
 import type { NativeLoadSelection } from "../../domain/rawBinary.js";
@@ -59,6 +60,7 @@ export interface BinarySessionPort
       readonly signal?: AbortSignal;
       readonly targetKind?: BinaryTarget["kind"];
       readonly loadSelection?: NativeLoadSelection;
+      readonly espFlash?: EspFlashSelection;
       readonly snapshot?: AnalysisSnapshot;
       readonly loadSnapshot?: AnalysisSnapshotLoader;
       readonly providerId?: AnalysisProviderSelector;

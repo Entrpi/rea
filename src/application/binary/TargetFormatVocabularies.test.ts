@@ -121,6 +121,11 @@ const TARGETS: TargetFixtures = {
   dmg: { ...archive, format: "dmg" },
   pkg: { ...archive, format: "pkg" },
   "esp-image": { ...archive, format: "esp-image" },
+  "esp-flash-image": {
+    ...archive,
+    format: "esp-flash-image",
+    espFlash: { selected: true, flashOffset: null, partitionTableOffset: null },
+  },
   plist: { ...artifact, format: "plist" },
   javascript: { ...artifact, format: "javascript" },
   "source-map": { ...artifact, format: "source-map" },

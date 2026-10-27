@@ -7,6 +7,7 @@ import {
 import { hashStableRootArtifactHandle } from "../inventory/hashStableRootArtifact.js";
 import { absoluteCallerPath } from "../../filesystem/callerPath.js";
 import type { AsarHeaderAdmission } from "../../config/asarHeaderAdmission.js";
+import type { EspFlashSelection } from "../../domain/firmware/espFlashLocation.js";
 import { createArtifactReader } from "../createArtifactReader.js";
 import { resolveAsarHeaderAdmission } from "../AsarHeader.js";
 import {
@@ -59,6 +60,8 @@ import type { ArtifactIntegrityPolicyName } from "../../domain/artifactIntegrity
 /** Local extraction input with the output root chosen by the adapter. */
 export interface ArtifactExtractionInput {
   readonly asarHeaderAdmission?: AsarHeaderAdmission;
+  /** Caller inputs when the target was explicitly selected as an ESP flash image. */
+  readonly espFlashSelection?: EspFlashSelection | undefined;
   readonly inputPath: string;
   readonly expectedRootSha256?: string | undefined;
   /** Selected artifact spelling; packed I/O remains on inputPath. */
@@ -99,6 +102,7 @@ const extractArtifactInScope = async (
         asarHeaderAdmission:
           input.asarHeaderAdmission ??
           resolveAsarHeaderAdmission(input.environment),
+        espFlashSelection: input.espFlashSelection,
         integrity: input.integrityPolicy,
       },
       probeFacts,
@@ -578,6 +582,7 @@ const requireExtractableFormat = async (
     format !== "asar" &&
     format !== "godot-pck" &&
     format !== "esp-image" &&
+    format !== "esp-flash-image" &&
     format !== "mach-o-universal" &&
     !isZipPackageFormat(format)
   ) {
@@ -624,7 +629,11 @@ const createReader = (
   path: string,
   input: Pick<
     ArtifactExtractionInput,
-    "inputPath" | "selectedPath" | "environment" | "asarHeaderAdmission"
+    | "inputPath"
+    | "selectedPath"
+    | "environment"
+    | "asarHeaderAdmission"
+    | "espFlashSelection"
   >,
   containerFormat: ArtifactGraphManifest["root_format"],
   transferredSource?: ActiveArtifactInventorySource,
@@ -640,6 +649,7 @@ const createReader = (
             input.selectedPath ?? input.inputPath,
           ),
           admission: transferredSource?.admission,
+          espFlashSelection: input.espFlashSelection,
           asarHeaderAdmission:
             containerFormat === "asar"
               ? (input.asarHeaderAdmission ??

@@ -1,0 +1,153 @@
+import { crc32 } from "node:zlib";
+
+import { hex, u32 } from "./espImageStructures.js";
+import type { EspBootPartitions } from "./espPartitionTable.js";
+
+/*
+ * OTA data, from ESP-IDF v6.1 `esp_flash_partitions.h`
+ * (`esp_ota_select_entry_t`, `esp_ota_img_states_t`),
+ * `bootloader_common_loader.c` and `bootloader_utility.c`
+ * (`bootloader_utility_get_selected_boot_partition`), and `otatool.py`.
+ */
+/** The otadata partition holds one record at the start of each of two sectors. */
+export const ESP_OTA_DATA_SECTOR_BYTES = 0x1000;
+/** `read_otadata` refuses a smaller otadata partition. */
+export const ESP_OTA_DATA_MIN_BYTES = 2 * ESP_OTA_DATA_SECTOR_BYTES;
+export const ESP_OTA_SELECT_ENTRY_BYTES = 32;
+const UNSET = 0xffff_ffff;
+
+export type EspOtaStateName =
+  | "new"
+  | "pending-verify"
+  | "valid"
+  | "invalid"
+  | "aborted"
+  | "undefined";
+
+const STATE_NAMES: Readonly<Record<number, EspOtaStateName>> = {
+  0x0: "new",
+  0x1: "pending-verify",
+  0x2: "valid",
+  0x3: "invalid",
+  0x4: "aborted",
+  [UNSET]: "undefined",
+};
+
+/** One `esp_ota_select_entry_t`, observed as written. */
+export interface EspOtaRecord {
+  readonly index: 0 | 1;
+  readonly ota_seq: number;
+  readonly seq_label: string;
+  readonly ota_state: number;
+  readonly state_name: EspOtaStateName | null;
+  readonly crc: number;
+  /** CRC-32 of `ota_seq`, seeded with `0xFFFFFFFF`, as the bootloader computes it. */
+  readonly crc_matches: boolean;
+  /** `bootloader_common_ota_select_valid`: set sequence, usable state, matching CRC. */
+  readonly valid: boolean;
+}
+
+export const decodeEspOtaRecord = (
+  bytes: Uint8Array,
+  index: 0 | 1,
+): EspOtaRecord => {
+  const sequence = bytes.subarray(0, 4);
+  const otaSeq = u32(bytes, 0);
+  const state = u32(bytes, 24);
+  const crc = u32(bytes, 28);
+  const crcMatches = crc32(sequence, UNSET) >>> 0 === crc;
+  return {
+    index,
+    ota_seq: otaSeq,
+    seq_label: hex(bytes.subarray(4, 24)),
+    ota_state: state,
+    state_name: STATE_NAMES[state] ?? null,
+    crc,
+    crc_matches: crcMatches,
+    valid: otaSeq !== UNSET && state !== 0x3 && state !== 0x4 && crcMatches,
+  };
+};
+
+export const ESP_OTA_SELECTION_ASSUMPTIONS = [
+  "Records are used as written: the bootloader may first mark a pending-verify record aborted when app rollback is enabled.",
+  "Anti-rollback, which compares the app's secure_version with eFuse, is not applied.",
+  "The selected app is not checked for a loadable image; the bootloader falls back to other partitions when it fails to load or is not declared.",
+  "Factory-reset and test-app GPIO holds and a wake from deep sleep, which can override the selection, are not applied.",
+] as const;
+
+export interface EspOtaSelection {
+  /** The record the bootloader reads as active: the higher valid `ota_seq`. */
+  readonly active_record: 0 | 1 | null;
+  /** `(ota_seq - 1) % ota_app_count`, the bootloader's slot arithmetic. */
+  readonly slot: number | null;
+  /** The table index of the selected app; null when none is declared. */
+  readonly partition_index: number | null;
+  /** The bootloader's branch; `none` is its INVALID_INDEX, which resets. */
+  readonly basis: "otadata" | "factory-fallback" | "ota_0-fallback" | "none";
+  readonly assumptions: readonly string[];
+}
+
+/** `bootloader_common_ota_select_invalid`, which does not check the CRC. */
+const unusable = ({ ota_seq, ota_state }: EspOtaRecord): boolean =>
+  ota_seq === UNSET || ota_state === 0x3 || ota_state === 0x4;
+
+/**
+ * Derive the app partition the bootloader would select, as
+ * `bootloader_utility_get_selected_boot_partition` does without app
+ * rollback or anti-rollback:
+ * - an otadata partition smaller than two sectors: none, because
+ *   `read_otadata` fails and the bootloader resets;
+ * - both records unusable, or no OTA app: the factory app when one is
+ *   declared, else boot index 0 (`ota_0`);
+ * - otherwise the valid record with the higher `ota_seq` (record 0 on a
+ *   tie), whose slot is `(ota_seq - 1) % ota_app_count`;
+ * - no valid record, as after a CRC mismatch: the factory index, whether
+ *   or not a factory app is declared.
+ * Unknown (null) when the dump lacks a record the bootloader would read.
+ */
+export const selectEspOtaSlot = (
+  records: readonly EspOtaRecord[],
+  boot: EspBootPartitions,
+  otadataSize: number,
+): EspOtaSelection | null => {
+  const assumptions = [...ESP_OTA_SELECTION_ASSUMPTIONS];
+  const selection = (
+    basis: EspOtaSelection["basis"],
+    fields: Partial<Omit<EspOtaSelection, "basis" | "assumptions">> = {},
+  ): EspOtaSelection => ({
+    active_record: null,
+    slot: null,
+    partition_index: null,
+    ...fields,
+    basis,
+    assumptions,
+  });
+  const factory = selection("factory-fallback", {
+    partition_index: boot.factory?.index ?? null,
+  });
+  if (otadataSize < ESP_OTA_DATA_MIN_BYTES) return selection("none");
+  if (records.length < 2) return null;
+  if (records.every(unusable) || boot.otaAppCount === 0)
+    return boot.factory !== undefined
+      ? factory
+      : selection("ota_0-fallback", {
+          slot: 0,
+          partition_index: boot.otaSlots.get(0)?.index ?? null,
+        });
+  const valid = records.filter(({ valid }) => valid);
+  const [first, second] = valid;
+  const active =
+    first !== undefined &&
+    second !== undefined &&
+    second.ota_seq > first.ota_seq
+      ? second
+      : first;
+  if (active === undefined) return factory;
+  const slot = ((active.ota_seq - 1) >>> 0) % boot.otaAppCount;
+  return selection("otadata", {
+    active_record: active.index,
+    slot,
+    // A gap in the OTA subtypes selects a slot with no partition.
+    partition_index: boot.otaSlots.get(slot)?.index ?? null,
+  });
+};
