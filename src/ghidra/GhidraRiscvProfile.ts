@@ -1,6 +1,76 @@
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import type { JsonValue } from "../domain/jsonValue.js";
+import type { RiscvFloatAbi } from "../domain/riscvIsaDeclaration.js";
 import type { GhidraLanguageOverride } from "../config/ghidraLanguageOverride.js";
+
+/** Calling-convention policy ids an analysis profile can commit. */
+export const GHIDRA_RISCV_CALLING_CONVENTION_IDS = [
+  "ilp32-prototype-v1",
+] as const;
+export type GhidraRiscvCallingConvention =
+  (typeof GHIDRA_RISCV_CALLING_CONVENTION_IDS)[number];
+
+/**
+ * The ABI and prototype of each policy REA applies after analysis.
+ * `ReaGhidraRiscvCallingConvention.java` derives each prototype from the
+ * pinned language's default `riscv32-fp.cspec` model, which is ilp32d;
+ * docs/ghidra-riscv.md states the rules of each ABI.
+ */
+export const GHIDRA_RISCV_CALLING_CONVENTIONS: Readonly<
+  Record<
+    GhidraRiscvCallingConvention,
+    { readonly abi: string; readonly prototype: string }
+  >
+> = {
+  "ilp32-prototype-v1": { abi: "ilp32", prototype: "__rea_ilp32" },
+};
+
+/** One admitted ELF class and declared float ABI. */
+export interface GhidraRiscvLane {
+  readonly elfClass: 32 | 64;
+  readonly floatAbi: RiscvFloatAbi;
+  /** Absent: Ghidra's stock double-float model applies unchanged. */
+  readonly callingConvention?: GhidraRiscvCallingConvention;
+}
+
+/** Every class and float ABI pair the Ghidra lane admits; others are refused. */
+export const GHIDRA_RISCV_LANES: readonly GhidraRiscvLane[] = [
+  { elfClass: 64, floatAbi: "double" },
+  { elfClass: 32, floatAbi: "double" },
+  { elfClass: 32, floatAbi: "soft", callingConvention: "ilp32-prototype-v1" },
+];
+
+/** Lane ids are built from their fields, so a new ABI or load model adds a value. */
+export const ghidraRiscvSupportLane = (lane: GhidraRiscvLane): string =>
+  `elf${lane.elfClass}-exec-le-${lane.floatAbi}-float-generic-v1`;
+
+/**
+ * Extensions Ghidra 12.1.4's generic RV32 language implements with p-code, by
+ * the names `Tag_RISCV_arch` records. Lanes with a calling-convention policy
+ * admit an image only when it declares an RV32I base and only these.
+ */
+export const GHIDRA_RISCV32_DECODED_EXTENSIONS: ReadonlySet<string> = new Set([
+  "m",
+  "a",
+  "f",
+  "d",
+  "c",
+  "zicsr",
+  "zifencei",
+  "zmmul",
+  "zaamo",
+  "zalrsc",
+  "zca",
+  "zcf",
+  "zcd",
+]);
+
+/** Outcome the post-analysis script records for the bridge handshake. */
+export interface GhidraRiscvCallingConventionReport {
+  readonly policy: GhidraRiscvCallingConvention;
+  readonly functions: number;
+  readonly definitions: number;
+}
 
 /**
  * Ghidra's generic RISC-V languages model the double-float ABI: the shipped
@@ -109,10 +179,10 @@ export const ghidraRiscvProfileParameters = (
           rve_declared: (target.riscv.flags & EF_RISCV_RVE) !== 0,
           tso_declared: (target.riscv.flags & EF_RISCV_TSO) !== 0,
         },
-        riscv_support_lane:
-          target.riscv.elfClass === 32
-            ? "elf32-exec-le-double-float-generic-v1"
-            : "elf64-exec-le-double-float-generic-v1",
+        riscv_support_lane: ghidraRiscvSupportLane({
+          elfClass: target.riscv.elfClass,
+          floatAbi: "double",
+        }),
       }
     : {};
 

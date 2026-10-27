@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, parse, relative } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -12,7 +12,14 @@ import { HopperProvider } from "../hopper/HopperProvider.js";
 import { hopperLoaderArgsForTarget } from "../hopper/HopperAnalysisProfile.js";
 import { IdaProvider } from "../ida/IdaProvider.js";
 import { GhidraProvider } from "./GhidraProvider.js";
-import { ghidraRiscvLimitations } from "./GhidraRiscvProfile.js";
+import {
+  GHIDRA_RISCV32_DECODED_EXTENSIONS,
+  GHIDRA_RISCV_CALLING_CONVENTIONS,
+  GHIDRA_RISCV_CALLING_CONVENTION_IDS,
+  GHIDRA_RISCV_LANES,
+  ghidraRiscvLimitations,
+  ghidraRiscvSupportLane,
+} from "./GhidraRiscvProfile.js";
 import { ghidraProfileInstallationHost as host } from "./GhidraInstallation.fixture.js";
 import {
   ghidraPinnedLanguage,
@@ -265,6 +272,56 @@ const registerRiscvAdmissionAndCapabilityCases = () => {
     expect(ida.inspectTargetSupport(target()).status).toBe("unsupported");
   });
 };
+
+describe("RISC-V lane and calling-convention tables", () => {
+  it("builds each lane id from its fields and keeps the double-float ids", () => {
+    expect(GHIDRA_RISCV_LANES.map(ghidraRiscvSupportLane)).toEqual([
+      "elf64-exec-le-double-float-generic-v1",
+      "elf32-exec-le-double-float-generic-v1",
+      "elf32-exec-le-soft-float-generic-v1",
+    ]);
+  });
+
+  it("gives every non-double lane one policy and every policy one lane", () => {
+    const corrected = GHIDRA_RISCV_LANES.filter(
+      (lane) => lane.floatAbi !== "double",
+    );
+    expect(corrected.map((lane) => lane.callingConvention)).toEqual(
+      GHIDRA_RISCV_CALLING_CONVENTION_IDS,
+    );
+    expect(
+      GHIDRA_RISCV_LANES.filter((lane) => lane.floatAbi === "double").every(
+        (lane) => lane.callingConvention === undefined,
+      ),
+    ).toBe(true);
+    expect(GHIDRA_RISCV_CALLING_CONVENTIONS).toEqual({
+      "ilp32-prototype-v1": { abi: "ilp32", prototype: "__rea_ilp32" },
+    });
+  });
+
+  it("keeps the decision record in docs/ghidra-riscv.md in step with the tables", async () => {
+    const docs = await readFile(
+      new URL("../../docs/ghidra-riscv.md", import.meta.url),
+      "utf8",
+    );
+    for (const lane of GHIDRA_RISCV_LANES)
+      expect(docs).toContain(`\`${ghidraRiscvSupportLane(lane)}\``);
+    for (const id of GHIDRA_RISCV_CALLING_CONVENTION_IDS) {
+      const { abi, prototype } = GHIDRA_RISCV_CALLING_CONVENTIONS[id];
+      expect(docs).toContain(`Policy \`${id}\`, prototype \`${prototype}\``);
+      expect(docs).toContain(`### ${abi}\n`);
+    }
+    const decoded =
+      /implements with\s+p-code: (.+?)\.\s+Any\s+other\s+extension/su.exec(
+        docs,
+      )?.[1];
+    expect(
+      new Set(
+        [...(decoded ?? "").matchAll(/`([a-z0-9]+)`/gu)].map((m) => m[1]),
+      ),
+    ).toEqual(GHIDRA_RISCV32_DECODED_EXTENSIONS);
+  });
+});
 
 describe("bounded Ghidra RISC-V admission", () => {
   registerRiscvLanguageCommitmentCases();
