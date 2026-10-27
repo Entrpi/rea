@@ -1,3 +1,13 @@
+import type { ArmElfMetadata } from "./binaryTargetTypes.js";
+
+/** Header facts of a little-endian EABI5 ARM ELF32 executable, before the resolver reads its attributes. */
+export const ARM_ELF_HEADER: ArmElfMetadata = {
+  elfClass: 32,
+  byteOrder: "little",
+  type: 2,
+  flags: 0x05000000,
+};
+
 /** Build a minimal ELF header for binary-target parser tests. */
 export const elf = (
   class_: number,

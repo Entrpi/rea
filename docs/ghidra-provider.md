@@ -16,7 +16,8 @@ snapshot parser and a separate optional annotation extension. Check the
 
 See [import language and analysis seeds](installation.md#ghidra-import-language-and-analysis-seeds)
 to override the header-detected language or seed analysis. An override that conflicts with a fixed raw, DOS, PSP, MIPS, RISC-V or GameCube DOL import
-is a configuration error naming the conflicting settings. It does not make an
+is a configuration error naming the conflicting settings. An override still
+wins over the [M-profile ARM ELF](ghidra-arm.md) pin. It does not make an
 otherwise admitted target unsupported; REA preserves the requested settings.
 An inaccessible language
 catalog remains a read failure; it does not prove that a configured language is

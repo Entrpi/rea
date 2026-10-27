@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
 import { createInspectionResources } from "../../../fixtures/inspectionResources.js";
 
+import { ARM_ELF_HEADER } from "../../../../src/domain/binaryTarget.fixture.js";
 import type { BinaryTarget } from "../../../../src/domain/binaryTargetTypes.js";
 import {
   hopperLoaderArgsForTarget,
@@ -155,23 +156,40 @@ describe("Hopper analysis profiles", () => {
 const target = (
   format: "mach-o" | "elf" | "pe" | "dos-mz",
   architecture: "x86" | "x86_64" | "arm" | "arm64",
-): BinaryTarget =>
-  format === "pe"
+): BinaryTarget => {
+  const identity = {
+    path: "/tmp/fixture",
+    sha256: "a".repeat(64),
+    kind: "executable",
+  } as const;
+  if (format === "pe")
+    return {
+      ...identity,
+      format,
+      architecture,
+      availableArchitectures: [architecture],
+      executableRole: "application",
+      managed: false,
+    };
+  if (format !== "elf")
+    return {
+      ...identity,
+      format,
+      architecture,
+      availableArchitectures: [architecture],
+    };
+  return architecture === "arm"
     ? {
-        path: "/tmp/fixture",
-        sha256: "a".repeat(64),
-        kind: "executable",
+        ...identity,
         format,
         architecture,
         availableArchitectures: [architecture],
-        executableRole: "application",
-        managed: false,
+        arm: ARM_ELF_HEADER,
       }
     : {
-        path: "/tmp/fixture",
-        sha256: "a".repeat(64),
-        kind: "executable",
+        ...identity,
         format,
         architecture,
         availableArchitectures: [architecture],
       };
+};
