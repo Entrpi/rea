@@ -134,6 +134,12 @@ const GENERIC_RAW_LANGUAGES =
 const GHIDRA_LOW_OVERHEAD_LOOPS =
   "Ghidra 12.1.4 decodes the ARMv8.1-M low-overhead-loop branches WLS and LE, but their targets can be wrong and LE has no fall-through, so code after such a loop may be left undisassembled.";
 
+/** What a variant's decoder gets wrong, for every lane that decodes the variant. */
+export const ghidraVariantDecoderLimitations = (
+  variant: ArchitectureVariant | undefined,
+): readonly string[] =>
+  variant === "armv8.1-m.main" ? [GHIDRA_LOW_OVERHEAD_LOOPS] : [];
+
 /** Limitations that every result from a raw-binary session carries. */
 export const ghidraRawBinaryLimitations = (
   load: RawBinaryLoad,
@@ -150,9 +156,7 @@ export const ghidraRawBinaryLimitations = (
         load.architectureVariant === undefined
           ? GENERIC_RAW_LANGUAGES
           : `The caller-named ${load.architectureVariant} variant is decoded with ${language.languageId} in Thumb state. The decoder does not refuse instructions that this profile lacks, and floating-point and TrustZone state are not modeled.`,
-        ...(load.architectureVariant === "armv8.1-m.main"
-          ? [GHIDRA_LOW_OVERHEAD_LOOPS]
-          : []),
+        ...ghidraVariantDecoderLimitations(load.architectureVariant),
         ...(load.entrySource.kind === "vector-table"
           ? [
               `The entry is the Reset vector ${load.entrySource.resetVector} read from the vector table at ${load.entrySource.address}, with bit 0 cleared. The initial stack pointer ${load.entrySource.initialStackPointer} is recorded and not validated.`,
