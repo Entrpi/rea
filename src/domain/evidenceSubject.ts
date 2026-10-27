@@ -38,6 +38,7 @@ export const evidenceSubjectFormatSchema = z.enum([
   "entitlements",
   "pyinstaller",
   "node-sea",
+  "esp-image",
 ]);
 
 /** Format-owned architecture declarations shared by Evidence and persisted executions. */

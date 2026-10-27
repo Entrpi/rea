@@ -259,7 +259,8 @@ export type BinaryTarget =
           | "asar"
           | "godot-pck"
           | "dmg"
-          | "pkg";
+          | "pkg"
+          | "esp-image";
       })
   | (BinaryTargetIdentity &
       NonExecutableMetadata & {
