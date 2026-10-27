@@ -1660,7 +1660,12 @@ describe("native macOS provider failures and parsing", () => {
       executableRole: "shared-library" as const,
       managed: false,
     },
-    { ...machoTarget("/fixture.elf"), format: "elf" as const },
+    {
+      ...machoTarget("/fixture.elf"),
+      format: "elf" as const,
+      availableArchitectures: ["arm64" as const],
+      architecture: "arm64" as const,
+    },
   ])(
     "refuses to list architectures of a $format target without running lipo",
     async (target) => {
@@ -1777,6 +1782,8 @@ describe("native signature inspection target scope", () => {
     {
       ...machoTarget("/fixture.elf"),
       format: "elf" as const,
+      availableArchitectures: ["arm64" as const],
+      architecture: "arm64" as const,
     },
   ])(
     "refuses inspect_signature on a $format target without running codesign",

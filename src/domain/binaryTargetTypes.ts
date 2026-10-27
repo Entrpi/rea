@@ -1,3 +1,4 @@
+import type { ArmBuildAttributes } from "./armBuildAttributes.js";
 import type { DolHeader } from "./gamecubeDol.js";
 import type {
   ArchitectureVariant,
@@ -106,6 +107,21 @@ export type HeaderArchitecture = Exclude<
   ElfMetadataArchitecture | RawOnlyArchitecture | "hexagon" | "arm64_32"
 >;
 
+/**
+ * ARM ELF header facts and the `.ARM.attributes` declarations that select a
+ * profile lane. Recognition does not establish profile support.
+ */
+export interface ArmElfMetadata extends ElfFamilyMetadata {
+  /** Undefined until inspected. */
+  readonly attributes?: ArmElfAttributesObservation;
+}
+
+/** Inspected file-scope attributes, an inspected absence, or why they stay unknown. */
+export type ArmElfAttributesObservation =
+  | { readonly status: "declared"; readonly declarations: ArmBuildAttributes }
+  | { readonly status: "absent" }
+  | { readonly status: "unavailable"; readonly reason: string };
+
 /** Raw ELF facts; family recognition does not establish ISA or ABI support. */
 export interface MipsElfMetadata extends ElfFamilyMetadata {
   /** Undefined until inspected; null means no ABI record was observed. */
@@ -194,6 +210,15 @@ export type BinaryTarget =
   | (BinaryTargetIdentity & {
       readonly kind: "executable";
       readonly format: "elf";
+      readonly architecture: "arm";
+      readonly availableArchitectures: readonly "arm"[];
+      readonly arm: ArmElfMetadata;
+      readonly executableRole?: never;
+      readonly managed?: never;
+    })
+  | (BinaryTargetIdentity & {
+      readonly kind: "executable";
+      readonly format: "elf";
       readonly architecture: "riscv";
       readonly availableArchitectures: readonly "riscv"[];
       /** ISA extensions in `.riscv.attributes` are not inspected by the header parser. */
@@ -229,7 +254,19 @@ export type BinaryTarget =
       readonly managed?: never;
     })
   | (ExecutableTarget & {
-      readonly format: "mach-o" | "elf" | "dos-mz" | "dos-com";
+      readonly format: "mach-o" | "dos-mz" | "dos-com";
+      readonly universalSlice?: never;
+      readonly executableRole?: never;
+      readonly managed?: never;
+    })
+  | (BinaryTargetIdentity & {
+      readonly kind: "executable";
+      readonly format: "elf";
+      readonly architecture: Exclude<HeaderArchitecture, "arm">;
+      readonly availableArchitectures: readonly Exclude<
+        HeaderArchitecture,
+        "arm"
+      >[];
       readonly universalSlice?: never;
       readonly executableRole?: never;
       readonly managed?: never;

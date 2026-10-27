@@ -1,4 +1,5 @@
 import type {
+  ArmElfMetadata,
   BinaryArchitecture,
   ElfFamilyMetadata,
   HeaderArchitecture,
@@ -44,6 +45,12 @@ export type ExecutableMetadata =
     }
   | {
       readonly format: "elf";
+      readonly architecture: "arm";
+      readonly availableArchitectures: readonly "arm"[];
+      readonly arm: ArmElfMetadata;
+    }
+  | {
+      readonly format: "elf";
       readonly architecture: "riscv";
       readonly availableArchitectures: readonly "riscv"[];
       readonly riscv: ElfFamilyMetadata;
@@ -66,9 +73,18 @@ export type ExecutableMetadata =
       readonly universalSlice?: never;
     }
   | {
-      readonly format: "mach-o" | "elf" | "dos-mz" | "dos-com";
+      readonly format: "mach-o" | "dos-mz" | "dos-com";
       readonly architecture: HeaderArchitecture;
       readonly availableArchitectures: readonly HeaderArchitecture[];
+      readonly universalSlice?: never;
+    }
+  | {
+      readonly format: "elf";
+      readonly architecture: Exclude<HeaderArchitecture, "arm">;
+      readonly availableArchitectures: readonly Exclude<
+        HeaderArchitecture,
+        "arm"
+      >[];
       readonly universalSlice?: never;
     }
   | {
@@ -424,6 +440,14 @@ const parseElf = (
       format: "elf",
       architecture,
       availableArchitectures: [architecture],
+    });
+  // The profile declarations live outside the fixed header; the resolver reads them.
+  if (architecture === "arm")
+    return ok({
+      format: "elf",
+      architecture,
+      availableArchitectures: [architecture],
+      arm: { elfClass, byteOrder, type, flags },
     });
   return ok({
     format: "elf",
