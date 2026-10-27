@@ -1244,7 +1244,15 @@ checks a declared digest against observed bytes. For a node-less metadata
 record with a compared declaration, only that declaration, these fields and
 any recorded ASAR storage decide the comparison. Such a record adds
 `availability` only when a declaration is unknown. REA does not compare the
-record's unread payload or its limitations, which describe the observation.
+record's unread payload.
+
+`compare_artifacts` does not compare limitations. They explain what an
+observation could establish, such as a case collision with another
+occurrence or a symlink target that REA did not read, and their wording can
+change between REA versions. A path therefore compares as if its
+limitations were equal, even when a limitation is the only record of a fact,
+such as an ASAR block integrity table. The result repeats each inventory's
+limitations, and occurrence limitations stay in the inventory Evidence.
 
 POSIX letter-colon names such as `a:b` remain valid logical
 names; Windows extraction refuses names its filesystem cannot materialize.

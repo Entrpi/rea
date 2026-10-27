@@ -450,3 +450,27 @@ it("compares a node-less record's occurrence fields but not its limitations", ()
     changes: [],
   });
 });
+
+it("does not compare limitation wording beside content", () => {
+  // Readers write no node limitations; a hand-built inventory can.
+  const worded = (limitation: string) => {
+    const inventory = artifactInventoryResultSchema.parse(
+      ARTIFACT_COMPARISON_EXAMPLE.left.normalized_result,
+    );
+    inventory.nodes = inventory.nodes.map((node) => ({
+      ...node,
+      limitations: [limitation],
+    }));
+    inventory.occurrences = inventory.occurrences.map((occurrence) => ({
+      ...occurrence,
+      limitations: [limitation],
+    }));
+    return commit(inventory);
+  };
+  expect(
+    compareArtifacts(
+      worded("Bytes were read."),
+      worded("All bytes were read."),
+    ),
+  ).toMatchObject({ status: "unchanged", changes: [] });
+});

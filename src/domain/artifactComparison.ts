@@ -518,9 +518,7 @@ const occurrenceMetadata = (input: OccurrencePair): OccurrenceMetadata => {
 
 /**
  * A node-less metadata record has no content node, so its declared facts are
- * all that comparison checks; an unread payload is not compared. Neither are
- * its limitations: readers derive them from those facts, and their wording
- * can change between REA versions while the record stays the same.
+ * all that comparison checks; an unread payload is not compared.
  */
 const isDeclarationRecord = (input: ClassifyPathInput): boolean =>
   // Metadata is not inherently a declaration. Only apply this comparison
@@ -544,7 +542,9 @@ const declaredChecks = (input: ClassifyPathInput): DimensionCheck[] => [
 /**
  * Facts that need both content nodes. Without content, an occurrence's kind
  * and format are guessed from its path, so comparison reads them only when
- * both sides have content.
+ * both sides have content. No check reads limitations: they explain what an
+ * observation could establish, often from compared fields or from other
+ * occurrences, and their wording changes between REA versions.
  */
 const nodeChecks = (
   input: ClassifyPathInput,
@@ -573,10 +573,7 @@ const nodeChecks = (
     "metadata",
     left.media_type !== right.media_type ||
       left.architecture !== right.architecture ||
-      left.content_state !== right.content_state ||
-      JSON.stringify(left.limitations) !== JSON.stringify(right.limitations) ||
-      JSON.stringify(input.leftOccurrence?.limitations) !==
-        JSON.stringify(input.rightOccurrence?.limitations),
+      left.content_state !== right.content_state,
   ],
 ];
 

@@ -148,3 +148,30 @@ it("reports an executable mode change on an encrypted ZIP member", async () => {
     },
   ]);
 });
+
+it("keeps a ZIP member unchanged when a case-colliding sibling is added", async () => {
+  const { inspect, compare } = await connectZipComparison();
+  const lower = { name: "a", data: "lower", mode: 0o100644 };
+  const left = await inspect("lower.zip", [lower]);
+  const right = await inspect("both.zip", [
+    lower,
+    { name: "A", data: "upper", mode: 0o100644 },
+  ]);
+  // The reader notes the collision on `a`; its name and bytes are equal.
+  expect(member(left, "a").limitations).toEqual([]);
+  expect(member(right, "a").limitations).toHaveLength(1);
+  expect(member(right, "a").artifact_id).toBe(member(left, "a").artifact_id);
+
+  const result = await compare(left, right);
+  expect(memberChanges(result)).toMatchObject([
+    { logical_path: "A", classification: "added" },
+  ]);
+  // The inventory still reports the collision through the result.
+  const { limitations } = artifactInventoryResultSchema.parse(
+    right.normalized_result,
+  );
+  expect(limitations).not.toEqual([]);
+  expect(result.limitations).toEqual(
+    expect.arrayContaining(limitations.map((item) => `Right: ${item}`)),
+  );
+});
