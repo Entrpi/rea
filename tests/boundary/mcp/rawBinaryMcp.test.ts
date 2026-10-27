@@ -207,13 +207,13 @@ it("reuses a canonical raw entry and replaces the session when the entry changes
     resolveAnalysisProfile: (target) => {
       if (target.format !== "raw-binary")
         throw new Error("expected raw binary");
-      resolved.push(target.entryPoint);
+      resolved.push(target.rawLoad.entryPoint);
       return Promise.resolve(
         ok({
           profile: createAnalysisProfile(
             { ...fixture.identity(), version: "1" },
             {
-              entry_point: target.entryPoint,
+              entry_point: target.rawLoad.entryPoint,
             },
           ),
         }),
@@ -222,15 +222,15 @@ it("reuses a canonical raw entry and replaces the session when the entry changes
     createClient: (target) => {
       if (target.format !== "raw-binary")
         throw new Error("expected raw binary");
-      created.push(target.entryPoint);
+      created.push(target.rawLoad.entryPoint);
       return {
         execute: (operation) => {
           if (operation !== "health" && operation !== "address_name")
             throw new Error(`unexpected fixture operation: ${operation}`);
-          return Promise.resolve(observed(target.entryPoint));
+          return Promise.resolve(observed(target.rawLoad.entryPoint));
         },
         close: () => {
-          closed.push(target.entryPoint);
+          closed.push(target.rawLoad.entryPoint);
           return Promise.resolve(ok(null));
         },
       };

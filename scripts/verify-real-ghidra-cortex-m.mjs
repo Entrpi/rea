@@ -1,0 +1,525 @@
+// Real-Ghidra lane for ARM M-profile raw images (architecture_variant,
+// base_address, vector_table_address). Adapted from #4927 by Jean Granié.
+import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+
+import { parseAnalysisSnapshot } from "../dist/domain/analysisSnapshot.js";
+import { parseEvidence } from "../dist/domain/evidence.js";
+import { GHIDRA_RAW_VARIANT_LANGUAGES } from "../dist/ghidra/GhidraRawBinaryLanguage.js";
+import {
+  CORTEX_M0_SOURCE,
+  THUMB2_SOURCE,
+  V8M_BASELINE_SOURCE,
+  V8M_MSPLIM_SOURCE,
+  cortexM0Fixture,
+  thumb2Fixture,
+  v8mBaselineFixture,
+  v8mMsplimFixture,
+} from "../tests/conformance/ghidra/cortexM.fixture.mjs";
+import { inspectVerifierGhidraInstallation } from "./lib/ghidra-installation-inspection.mjs";
+import { llvmThumbMnemonics } from "./lib/llvm-thumb-oracle.mjs";
+import {
+  requireMcpLifecycleResult,
+  requireMcpOutput,
+  requireMcpToolError,
+} from "./lib/mcp-verifier-results.mjs";
+import { createVerifierRun, completeVerifierRun } from "./lib/verifier-run.mjs";
+
+if (process.argv.length !== 2)
+  throw new Error("Usage: node scripts/verify-real-ghidra-cortex-m.mjs");
+if (!["linux", "darwin"].includes(process.platform))
+  throw new Error(
+    "Cortex-M verification requires a Linux or macOS Ghidra host.",
+  );
+if (process.env.GHIDRA_INSTALL_DIR === undefined)
+  throw new Error(
+    "Set GHIDRA_INSTALL_DIR to a bring-your-own Ghidra installation.",
+  );
+const installation = await inspectVerifierGhidraInstallation({
+  environment: process.env,
+  installDir: process.env.GHIDRA_INSTALL_DIR,
+  ...(process.env.JAVA_HOME === undefined
+    ? {}
+    : { javaHome: process.env.JAVA_HOME }),
+});
+assert.equal(installation.status, "available", JSON.stringify(installation));
+// LLVM is the independent decoding oracle for every fixture.
+const llvm = {
+  clang: process.env.REA_CLANG ?? "clang",
+  objdump: process.env.REA_LLVM_OBJDUMP ?? "llvm-objdump",
+};
+const oracle = new Map();
+for (const source of [
+  CORTEX_M0_SOURCE,
+  THUMB2_SOURCE,
+  V8M_BASELINE_SOURCE,
+  V8M_MSPLIM_SOURCE,
+])
+  oracle.set(source, await llvmThumbMnemonics(source, llvm));
+
+const run = createVerifierRun();
+const workspace = await mkdtemp(join(tmpdir(), "rea-cortex-m-proof-"));
+const runtime = join(workspace, "runtime");
+await mkdir(runtime);
+const entrypoint = fileURLToPath(new URL("./rea.mjs", import.meta.url));
+// Only named settings reach REA, so an exported REA_GHIDRA_LANGUAGE_ID or other
+// session setting cannot change what this lane verifies.
+const env = {
+  PATH: process.env.PATH ?? "/usr/bin:/bin",
+  TMPDIR: runtime,
+  REA_LOG_LEVEL: "silent",
+  REA_ANALYSIS_PROVIDER: "ghidra",
+  REA_PROCESS_RUN_ID: run.run_id,
+  GHIDRA_INSTALL_DIR: process.env.GHIDRA_INSTALL_DIR,
+  ...(process.env.JAVA_HOME === undefined
+    ? {}
+    : { JAVA_HOME: process.env.JAVA_HOME }),
+  ...(process.env.GHIDRA_HEADLESS_MAXMEM === undefined
+    ? {}
+    : { GHIDRA_HEADLESS_MAXMEM: process.env.GHIDRA_HEADLESS_MAXMEM }),
+};
+const transport = new StdioClientTransport({
+  command: process.execPath,
+  args: [entrypoint, "mcp"],
+  env,
+  stderr: "pipe",
+});
+const client = new Client({ name: "rea-real-cortex-m-proof", version: "1" });
+let stderr = "";
+transport.stderr?.on("data", (chunk) => {
+  stderr = (stderr + chunk.toString()).slice(-65536);
+});
+const hex = (value) => `0x${value.toString(16)}`;
+const word = (value) => `0x${value.toString(16).padStart(8, "0")}`;
+let report;
+try {
+  await client.connect(transport);
+  const cases = [];
+  for (const base of [0, 0x08000000])
+    cases.push(
+      await verifyCase({
+        name: `armv6-m-${hex(base)}`,
+        variant: "armv6-m",
+        base,
+        bytes: cortexM0Fixture(base),
+        source: CORTEX_M0_SOURCE,
+        stackPointer: 0x20001000,
+      }),
+    );
+  // A boot2-style header precedes the vector table, as in RP2040 images.
+  cases.push(
+    await verifyCase({
+      name: "armv6-m-prefixed",
+      variant: "armv6-m",
+      base: 0x10000000,
+      prefix: 0x100,
+      bytes: cortexM0Fixture(0x10000000, 0x100),
+      source: CORTEX_M0_SOURCE,
+      stackPointer: 0x20001000,
+    }),
+  );
+  // Thumb-2 code under both v7 profiles; base 0 puts the image where
+  // ARMCortex.pspec would label the vector table.
+  for (const [variant, base] of [
+    ["armv7-m", 0],
+    ["armv7e-m", 0x08000000],
+  ])
+    cases.push(
+      await verifyCase({
+        name: `${variant}-thumb2-${hex(base)}`,
+        variant,
+        base,
+        bytes: thumb2Fixture(base),
+        source: THUMB2_SOURCE,
+        stackPointer: 0x20003000,
+      }),
+    );
+  cases.push(
+    await verifyCase({
+      name: "armv8-m.base",
+      variant: "armv8-m.base",
+      base: 0x08000000,
+      bytes: v8mBaselineFixture(0x08000000),
+      source: V8M_BASELINE_SOURCE,
+      stackPointer: 0x20004000,
+    }),
+  );
+  cases.push(
+    await verifyCase({
+      name: "armv8-m.main-msplim",
+      variant: "armv8-m.main",
+      base: 0x08000000,
+      bytes: v8mMsplimFixture(0x08000000),
+      source: V8M_MSPLIM_SOURCE,
+      stackPointer: 0x20002000,
+    }),
+  );
+  const identity = await verifyIdentityAndSnapshots();
+  assert.deepEqual(
+    (await readdir(runtime)).filter((name) => name.startsWith("rea-ghidra-")),
+    [],
+    "Owned Ghidra runtime survived close",
+  );
+  report = {
+    ok: true,
+    mocked: false,
+    lane: "ghidra-cortex-m",
+    host: process.platform,
+    provider: { id: "ghidra", version: installation.providerVersion },
+    oracle: "llvm",
+    cases,
+    identity,
+    transport: { cli: true, stdio_mcp: true },
+    original_unchanged: true,
+  };
+} catch (error) {
+  if (stderr.trim()) process.stderr.write(stderr);
+  throw error;
+} finally {
+  await client.close();
+  await transport.close();
+  await rm(workspace, { recursive: true, force: true });
+}
+const verifierRun = await completeVerifierRun(run);
+assert.equal(verifierRun.process_lineage.status, "verified");
+assert.deepEqual(verifierRun.process_lineage.descendants, []);
+process.stdout.write(
+  JSON.stringify({
+    verifier_run: verifierRun,
+    ...report,
+    cleanup: "complete",
+  }) + "\n",
+);
+
+async function verifyCase(fixture) {
+  const prefix = fixture.prefix ?? 0;
+  const address = (offset) => hex(fixture.base + prefix + offset);
+  const entry = address(0x40);
+  const digest = createHash("sha256").update(fixture.bytes).digest("hex");
+  const path = join(workspace, `${fixture.name}.bin`);
+  await writeFile(path, fixture.bytes);
+  const selection = {
+    path,
+    format: "raw-binary",
+    architecture: "arm",
+    architecture_variant: fixture.variant,
+    base_address: hex(fixture.base),
+    ...(prefix === 0 ? {} : { vector_table_address: address(0) }),
+  };
+  const opened = await call("open_binary", selection);
+  assert.deepEqual(
+    {
+      entry_point: opened.entry_point,
+      base_address: opened.base_address,
+      architecture_variant: opened.architecture_variant,
+      vector_table_address: opened.vector_table_address,
+    },
+    {
+      entry_point: entry,
+      base_address: hex(fixture.base),
+      architecture_variant: fixture.variant,
+      vector_table_address: address(0),
+    },
+  );
+  const image = await call("inspect_native_load_image", {}, digest);
+  const loaded = image.normalized_result;
+  assert.equal(loaded.status, "verified", JSON.stringify(image));
+  assert.equal(loaded.variant, "segments");
+  assert.equal(loaded.version, 1);
+  assert.equal(
+    loaded.language_id,
+    GHIDRA_RAW_VARIANT_LANGUAGES[fixture.variant],
+  );
+  assert.deepEqual(loaded.segments, [
+    {
+      name: "image",
+      address: hex(fixture.base),
+      size: fixture.bytes.length,
+      backing: { kind: "source-range", source: 0, offset: 0 },
+    },
+  ]);
+  assert.deepEqual(loaded.entries, [
+    {
+      address: entry,
+      isa_mode: "thumb",
+      role: "reset",
+      basis: "vector-table",
+    },
+  ]);
+  // Without processor-defined labels, Reset is the only entry Ghidra reports.
+  assert.equal(
+    image.analysis_profile.parameters.processor_labels,
+    "not-applied-v1",
+  );
+  assert.deepEqual(
+    loaded.observations.entry_points,
+    [entry],
+    "Processor-defined vector labels became entries",
+  );
+  assert.deepEqual(loaded.vector_table, {
+    address: address(0),
+    initial_stack_pointer: word(fixture.stackPointer),
+    reset_vector: word(fixture.base + prefix + 0x41),
+  });
+  assert.ok(
+    loaded.checks.some(
+      (check) =>
+        check.name === "entry_context.TMode" &&
+        check.matched &&
+        check.observed === "0x1",
+    ),
+  );
+  const memory = await call(
+    "read_bytes",
+    { address: hex(fixture.base), length: fixture.bytes.length },
+    digest,
+  );
+  assert.equal(
+    memory.normalized_result.bytes_hex,
+    fixture.bytes.toString("hex"),
+  );
+  await verifyDecoding(fixture, address, digest);
+  await verifyOddEntryAndCli(fixture, selection, image, path);
+  return {
+    name: fixture.name,
+    variant: fixture.variant,
+    base: hex(fixture.base),
+    entry,
+    sha256: digest,
+    language_id: loaded.language_id,
+    thumb_entry_context: true,
+    only_entry: entry,
+    llvm_mnemonics_matched: oracle.get(fixture.source).size,
+    odd_entry_refused: true,
+    cli_mcp_parity: true,
+  };
+}
+
+/** Ghidra's decoding at every oracle offset, in Thumb state, and its functions. */
+async function verifyDecoding(fixture, address, digest) {
+  const prefix = fixture.prefix ?? 0;
+  const entry = address(0x40);
+  for (const [offset, mnemonic] of oracle.get(fixture.source)) {
+    const decoded = (
+      await call(
+        "inspect_native_instruction",
+        { address: address(offset) },
+        digest,
+      )
+    ).normalized_result;
+    assert.equal(decoded.status, "decoded", JSON.stringify(decoded));
+    // The decoders spell an encoding width (ldr.w) and an IT-block condition
+    // (Ghidra mov.eq, LLVM moveq) differently; compare one spelling.
+    const canonical = (name) =>
+      name
+        ?.toLowerCase()
+        .replace(/\.[nw]$/u, "")
+        .replace(
+          /\.(eq|ne|cs|hs|cc|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le|al)$/u,
+          "$1",
+        );
+    assert.equal(
+      canonical(decoded.mnemonic),
+      canonical(mnemonic),
+      `${fixture.name} ${address(offset)}: Ghidra ${decoded.raw_disassembly}, LLVM ${mnemonic}`,
+    );
+    assert.equal(
+      decoded.decoder_context?.find((context) => context.register === "TMode")
+        ?.value,
+      "1",
+    );
+  }
+  const procedures = await call("list_procedures", {}, digest);
+  assert.ok(
+    procedures.normalized_result.some((item) => item.address === entry),
+  );
+  assert.ok(
+    !procedures.normalized_result.some((item) => item.address === address(0)),
+    "Vector table became a function",
+  );
+  if (fixture.source === V8M_MSPLIM_SOURCE) {
+    const msplim = await call(
+      "inspect_native_instruction",
+      { address: address(0x48) },
+      digest,
+    );
+    assert.match(msplim.normalized_result.raw_disassembly ?? "", /msplim/iu);
+  } else if (fixture.source === CORTEX_M0_SOURCE) {
+    const helper = await call(
+      "procedure_pseudo_code",
+      { procedure: address(0x56) },
+      digest,
+    );
+    assert.match(helper.normalized_result, /\+\s*(?:3|0x3)\b/u);
+    const caller = await call(
+      "procedure_pseudo_code",
+      { procedure: entry },
+      digest,
+    );
+    assert.match(caller.normalized_result, /==\s*(?:10|0xa)\b/iu);
+    const byOffset = await call(
+      "procedure_pseudo_code",
+      { procedure: `file-offset:${hex(prefix + 0x56)}` },
+      digest,
+    );
+    assert.equal(byOffset.normalized_result, helper.normalized_result);
+  }
+}
+
+/** Refuse an odd entry with its code address, keep the session, and match the CLI. */
+async function verifyOddEntryAndCli(fixture, selection, image, path) {
+  const prefix = fixture.prefix ?? 0;
+  const address = (offset) => hex(fixture.base + prefix + offset);
+  const entry = address(0x40);
+  const before = (await call("binary_session")).analysis_run.run_id;
+  // vector_table_address applies only without entry_point.
+  const { vector_table_address: _table, ...explicit } = selection;
+  const odd = requireMcpToolError(
+    await client.callTool({
+      name: "open_binary",
+      arguments: { ...explicit, entry_point: address(0x41) },
+    }),
+  );
+  assert.equal(odd.details?.diagnostics?.code_address, entry);
+  assert.match(
+    String(odd.details?.diagnostics?.suggestion),
+    /Omit entry_point/u,
+  );
+  assert.equal((await call("binary_session")).analysis_run.run_id, before);
+  await call("close_binary");
+  const cli = parseEvidence(
+    JSON.parse(
+      (
+        await promisify(execFile)(
+          process.execPath,
+          [
+            entrypoint,
+            "inspect-native-load-image",
+            path,
+            "--target-format",
+            "raw-binary",
+            "--architecture",
+            "arm",
+            "--architecture-variant",
+            fixture.variant,
+            "--base-address",
+            hex(fixture.base),
+            ...(prefix === 0 ? [] : ["--vector-table-address", address(0)]),
+            "--provider",
+            "ghidra",
+            "--json",
+          ],
+          { env, timeout: 240000, maxBuffer: 16 * 1024 * 1024 },
+        )
+      ).stdout,
+    ),
+  );
+  assert.equal(cli.analysis_profile.digest, image.analysis_profile.digest);
+  assert.deepEqual(cli.normalized_result, image.normalized_result);
+  assert.deepEqual(await readFile(path), fixture.bytes);
+}
+
+async function verifyIdentityAndSnapshots() {
+  const base = 0x08000000;
+  const bytes = cortexM0Fixture(base);
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  const path = join(workspace, "identity.bin");
+  const snapshotPath = join(workspace, "identity.snapshot.json");
+  await writeFile(path, bytes);
+  const mProfile = {
+    path,
+    format: "raw-binary",
+    architecture: "arm",
+    architecture_variant: "armv7-m",
+    base_address: "0x08000000",
+  };
+  // A load without a variant keeps the raw-binary image and generic ARM.
+  const legacy = {
+    path,
+    format: "raw-binary",
+    architecture: "arm",
+    entry_point: "0x8000000",
+  };
+  await call("open_binary", legacy);
+  const legacyImage = await call("inspect_native_load_image", {}, digest);
+  assert.equal(legacyImage.normalized_result.variant, undefined);
+  assert.equal(legacyImage.normalized_result.base_address, "0x8000000");
+  assert.equal(
+    legacyImage.analysis_profile.parameters.language_id,
+    "ARM:LE:32:v7",
+  );
+  await call("close_binary");
+  // A separate base is refused without a variant.
+  const baseOnly = await client.callTool({
+    name: "open_binary",
+    arguments: { ...legacy, base_address: "0x08000000" },
+  });
+  assert.equal(baseOnly.isError, true);
+  await call("open_binary", mProfile);
+  const image = await call("inspect_native_load_image", {}, digest);
+  assert.notEqual(
+    image.analysis_profile.digest,
+    legacyImage.analysis_profile.digest,
+  );
+  const procedures = await call("list_procedures", {}, digest);
+  await call("close_binary", { snapshot_path: snapshotPath });
+  const snapshot = parseAnalysisSnapshot(
+    JSON.parse(await readFile(snapshotPath, "utf8")),
+  );
+  assert.equal(snapshot.target.raw_load?.version, 1);
+  // A base spelling is not identity; the snapshot replays.
+  await call("open_binary", {
+    ...mProfile,
+    base_address: "0x8000000",
+    snapshot_path: snapshotPath,
+  });
+  assert.deepEqual(await call("list_procedures", {}, digest), procedures);
+  await call("close_binary");
+  // Another variant is another load; the snapshot is refused.
+  const refused = await client.callTool({
+    name: "open_binary",
+    arguments: {
+      ...mProfile,
+      architecture_variant: "armv8-m.main",
+      snapshot_path: snapshotPath,
+    },
+  });
+  assert.equal(refused.isError, true);
+  assert.deepEqual(await readFile(path), bytes);
+  return {
+    legacy_identity_unchanged: true,
+    base_without_variant_refused: true,
+    base_spelling_reuses_snapshot: true,
+    variant_partitions_snapshot: true,
+  };
+}
+
+async function call(name, args = {}, targetSha256) {
+  const result = await client.callTool(
+    { name, arguments: args },
+    { timeout: 240000 },
+  );
+  if (["open_binary", "close_binary", "binary_session"].includes(name))
+    return requireMcpLifecycleResult(result, name);
+  const evidence = parseEvidence(requireMcpOutput(result, name));
+  if (targetSha256 !== undefined)
+    assert.equal(evidence.subject.digest.sha256, targetSha256);
+  assert.equal(evidence.subject.format, "raw-binary");
+  return evidence;
+}

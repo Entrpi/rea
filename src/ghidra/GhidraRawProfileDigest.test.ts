@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import { parseConfig } from "../config/parseConfig.js";
-import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
+import type {
+  BinaryTarget,
+  RawBinaryLoad,
+} from "../domain/binaryTargetTypes.js";
+import {
+  RAW_ARCHITECTURE_VARIANT_NAMES,
+  type RawArchitectureVariant,
+} from "../domain/rawArchitectureVariant.js";
+import {
+  admittedRawLoad,
+  vectorTableWords,
+} from "../domain/rawBinary.fixture.js";
+import { GHIDRA_RAW_VARIANT_LANGUAGES } from "./GhidraRawBinaryLanguage.js";
 import { silentLogger } from "../logger.js";
 import { ghidraProfileInstallationHost as host } from "./GhidraInstallation.fixture.js";
 import { GhidraProvider } from "./GhidraProvider.js";
@@ -14,23 +26,58 @@ const RAW_DIGESTS = {
     "493a02888eca575be286b5a96041af8007444586854edb974d6a0c12fd2768c4",
 } as const;
 
+// Computed at d6f88becd. A raw load whose base is its caller-selected entry
+// keeps these profile digests, so its sessions and snapshots stay reusable.
+const LEGACY_RAW_DIGESTS = [
+  [
+    "x86",
+    "0x1000",
+    "6e18972704299f8f78c4465502e6c386e52227ef840f11acefbccafde57debca",
+  ],
+  [
+    "x86_64",
+    "0x401000",
+    "6f2e097fcc748e85165d9acc7bb80e879ce6aed3592b06a603ed14957779c102",
+  ],
+  [
+    "arm",
+    "0x8000000",
+    "c83436441786074ecde2eb776201e6546311affca43bf8905af7b79c8d387733",
+  ],
+  [
+    "arm64",
+    "0x80000",
+    "b99f37f9b495c8c4b1479836365cc99868c18959f4d06e3edeb0ba00f95e650d",
+  ],
+  [
+    "m68k",
+    "0x1000",
+    "3383ab9585908ed99835034bf9f6536fd72dfeeba014cdd965203f8173d8a171",
+  ],
+] as const;
+
 const configFor = (environment: NodeJS.ProcessEnv) => {
   const parsed = parseConfig({ GHIDRA_INSTALL_DIR: "/ghidra", ...environment });
   if (!parsed.ok) throw parsed.error;
   return parsed.value;
 };
 
-const raw = (architecture: "6502" | "x86", entryPoint: string): BinaryTarget =>
-  ({
-    path: "/tmp/raw.bin",
-    sha256: "a".repeat(64),
-    kind: "executable",
-    format: "raw-binary",
-    architecture,
-    availableArchitectures: [architecture],
+const raw = (
+  architecture: Extract<BinaryTarget, { format: "raw-binary" }>["architecture"],
+  entryPoint: string,
+): BinaryTarget => ({
+  path: "/tmp/raw.bin",
+  sha256: "a".repeat(64),
+  kind: "executable",
+  format: "raw-binary",
+  architecture,
+  availableArchitectures: [architecture],
+  rawLoad: {
+    baseAddress: entryPoint,
     entryPoint,
-    entryPointSource: entryPoint,
-  }) as unknown as BinaryTarget;
+    entrySource: { kind: "caller" },
+  },
+});
 
 describe("raw-binary analysis profile digest", () => {
   it("keeps the 6502 raw profile digest from before the shared policy refactor", async () => {
@@ -67,5 +114,170 @@ describe("raw-binary analysis profile digest", () => {
         disabled_analyzers: ["Aggressive Instruction Finder"],
       },
     });
+  });
+
+  it.each(LEGACY_RAW_DIGESTS)(
+    "keeps the %s raw profile digest at entry %s",
+    async (architecture, entryPoint, digest) => {
+      const ghidra = new GhidraProvider(configFor({}), silentLogger, {}, host);
+      const resolved = await ghidra.resolveAnalysisProfile(
+        raw(architecture, entryPoint),
+      );
+      if (!resolved.ok) throw resolved.error;
+      expect(resolved.value.profile?.parameters).toMatchObject({
+        entry_point: entryPoint,
+      });
+      expect(resolved.value.profile?.digest).toBe(digest);
+    },
+  );
+});
+
+describe("M-profile raw-binary analysis profile", () => {
+  const ghidra = () =>
+    new GhidraProvider(configFor({}), silentLogger, {}, host);
+  const profile = async (rawLoad: RawBinaryLoad) => {
+    const resolved = await ghidra().resolveAnalysisProfile({
+      path: "/tmp/raw.bin",
+      sha256: "a".repeat(64),
+      kind: "executable",
+      format: "raw-binary",
+      architecture: "arm",
+      availableArchitectures: ["arm"],
+      rawLoad,
+    });
+    if (!resolved.ok) throw resolved.error;
+    if (resolved.value.profile === null) throw new Error("expected a profile");
+    return resolved.value.profile;
+  };
+  const reset = (
+    variant: RawArchitectureVariant,
+    selection: { baseAddress?: string; vectorTableAddress?: string } = {},
+  ) =>
+    admittedRawLoad(
+      {
+        architecture: "arm",
+        architectureVariant: variant,
+        entryPoint: undefined,
+        baseAddress: "0x08000000",
+        ...selection,
+        fileBytes: 0x200,
+      },
+      vectorTableWords(0x20005000, 0x080001c5),
+    );
+
+  it("keeps the legacy ARM digest for a load admitted without a variant", async () => {
+    const legacy = await profile(
+      admittedRawLoad({
+        architecture: "arm",
+        entryPoint: "0x08000000",
+        fileBytes: 4,
+      }),
+    );
+    expect(legacy.digest).toBe(
+      LEGACY_RAW_DIGESTS.find(([family]) => family === "arm")?.[2],
+    );
+    expect(legacy.parameters).not.toHaveProperty("raw_load");
+  });
+
+  it.each(RAW_ARCHITECTURE_VARIANT_NAMES)(
+    "commits the %s decoder, Thumb entry context and raw_load",
+    async (variant) => {
+      const committed = await profile(reset(variant));
+      expect(committed.parameters).toMatchObject({
+        language_id: GHIDRA_RAW_VARIANT_LANGUAGES[variant],
+        compiler_spec_id: "default",
+        load_image_evidence: "independent-raw-segments-v1",
+        entry_point: "0x80001c4",
+        entry_context: "thumb-tmode-1-before-analysis-v1",
+        processor_labels: "not-applied-v1",
+        base_address: "0x8000000",
+        raw_load: {
+          version: 1,
+          base_address: "0x8000000",
+          architecture_variant: variant,
+          vector_table_address: "0x8000000",
+          entries: [
+            {
+              address: "0x80001c4",
+              isa_mode: "thumb",
+              role: "reset",
+              basis: "vector-table",
+            },
+          ],
+        },
+      });
+    },
+  );
+
+  it("keeps the digest across spellings and provenance only", async () => {
+    const digest = (await profile(reset("armv7-m"))).digest;
+    // Pinned so a change to raw_load semantics must bump its version.
+    expect(digest).toBe(
+      "80ca0e9f55236a884c17e00dc775a1d81e977605fdd2dda12b88285ceb260eac",
+    );
+    expect(
+      (await profile(reset("armv7-m", { baseAddress: "0x8000000" }))).digest,
+    ).toBe(digest);
+    expect(
+      (await profile(reset("armv7-m", { vectorTableAddress: "0x08000000" })))
+        .digest,
+    ).toBe(digest);
+  });
+
+  it("gives a caller-named entry and Reset at one address one coordinate context", async () => {
+    const derived = await profile(reset("armv7-m"));
+    const named = await profile(
+      admittedRawLoad({
+        architecture: "arm",
+        architectureVariant: "armv7-m",
+        baseAddress: "0x8000000",
+        entryPoint: "0x80001c4",
+        fileBytes: 0x200,
+      }),
+    );
+    // Session identity covers the reported basis; coordinates cover resolved values.
+    expect(named.digest).not.toBe(derived.digest);
+    expect(named.parameters.function_coordinate_context).toEqual(
+      derived.parameters.function_coordinate_context,
+    );
+  });
+
+  it("separates base, variant, vector table and entry role", async () => {
+    const base = await profile(reset("armv7-m"));
+    const coordinates = (committed: typeof base) =>
+      committed.parameters.function_coordinate_context;
+    const movedBase = await profile(
+      admittedRawLoad(
+        {
+          architecture: "arm",
+          architectureVariant: "armv7-m",
+          entryPoint: undefined,
+          baseAddress: "0x07ffff00",
+          fileBytes: 0x400,
+        },
+        vectorTableWords(0x20005000, 0x080001c5),
+      ),
+    );
+    const v8m = await profile(reset("armv8-m.main"));
+    // Same base, decoder and entry: separate sessions, comparable coordinates.
+    const sameCoordinates = await Promise.all([
+      profile(reset("armv7e-m")),
+      profile(reset("armv7-m", { vectorTableAddress: "0x08000100" })),
+      profile(
+        admittedRawLoad({
+          architecture: "arm",
+          architectureVariant: "armv7-m",
+          baseAddress: "0x8000000",
+          entryPoint: "0x80001c4",
+          fileBytes: 0x200,
+        }),
+      ),
+    ]);
+    for (const other of [movedBase, v8m, ...sameCoordinates])
+      expect(other.digest).not.toBe(base.digest);
+    for (const other of sameCoordinates)
+      expect(coordinates(other)).toEqual(coordinates(base));
+    expect(coordinates(movedBase)).not.toEqual(coordinates(base));
+    expect(coordinates(v8m)).not.toEqual(coordinates(base));
   });
 });

@@ -62,6 +62,7 @@ import { createAnalysisExecution } from "../application/AnalysisProvider.js";
 import { AnalysisSnapshotCache } from "../application/binary/AnalysisSnapshotCache.js";
 import { createEvidence } from "../domain/evidence.js";
 import { createEvidenceBundle } from "../domain/evidenceBundle.js";
+import { rawLoadAtEntry } from "../domain/rawBinary.fixture.js";
 
 const INSTALL = "/opt/ghidra_12.1.4_PUBLIC";
 afterEach(() => vi.restoreAllMocks());
@@ -423,8 +424,7 @@ describe("Ghidra raw-binary profile", () => {
       format: "raw-binary",
       architecture: "6502",
       availableArchitectures: ["6502"],
-      entryPoint: "0x8001",
-      entryPointSource: "0x008001",
+      rawLoad: rawLoadAtEntry("0x008001"),
     };
     expect(ghidra.inspectTargetSupport(target).status).toBe("supported");
     const resolved = await ghidra.resolveAnalysisProfile(target);
@@ -453,8 +453,7 @@ describe("Ghidra raw-binary profile", () => {
       format: "raw-binary",
       architecture: "arm",
       availableArchitectures: ["arm"],
-      entryPoint: "0x8000000",
-      entryPointSource: "0x08000000",
+      rawLoad: rawLoadAtEntry("0x08000000"),
     };
     expect(ghidra.inspectTargetSupport(target).status).toBe("supported");
     const resolved = await ghidra.resolveAnalysisProfile(target);
@@ -473,8 +472,7 @@ describe("Ghidra raw-binary profile", () => {
     });
     const shifted = await ghidra.resolveAnalysisProfile({
       ...target,
-      entryPoint: "0x8001000",
-      entryPointSource: "0x8001000",
+      rawLoad: rawLoadAtEntry("0x8001000"),
     });
     expect(resolved.ok && shifted.ok).toBe(true);
     if (!resolved.ok || !shifted.ok || resolved.value.profile === null)
@@ -493,8 +491,7 @@ describe("Ghidra raw-binary profile", () => {
       format: "raw-binary",
       architecture: "m68k",
       availableArchitectures: ["m68k"],
-      entryPoint: "0x1000",
-      entryPointSource: "0x00001000",
+      rawLoad: rawLoadAtEntry("0x00001000"),
     };
     const ghidra = provider();
     expect(ghidra.inspectTargetSupport(target).status).toBe("supported");
@@ -3511,8 +3508,7 @@ describe("Ghidra disabled analyzer options", () => {
       format: "raw-binary",
       architecture: "x86",
       availableArchitectures: ["x86"],
-      entryPoint: "0x1000",
-      entryPointSource: "0x1000",
+      rawLoad: rawLoadAtEntry("0x1000"),
     };
     const resolved = await ghidra.resolveAnalysisProfile(target);
     if (!resolved.ok || resolved.value.profile === null)
@@ -4551,8 +4547,7 @@ it("commits native coordinates independently of analyzer choices and preserves r
   const rawProfile = await resolve(defaultProvider, raw);
   const shifted = await resolve(defaultProvider, {
     ...raw,
-    entryPoint: "0x8001000",
-    entryPointSource: "0x8001000",
+    rawLoad: rawLoadAtEntry("0x8001000"),
   });
   expect(rawProfile.parameters.function_coordinate_context).toMatchObject({
     kind: "native-function-coordinate-context-v1",

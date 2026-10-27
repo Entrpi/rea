@@ -5,7 +5,9 @@ use their own format selection; see [GameCube DOL analysis](ghidra-dol.md).
 
 REA admits a headerless executable when the caller supplies the CPU family and
 the address where file offset 0 should be mapped. That interpretation is not
-inferred from a `.bin` suffix or from unrecognized bytes.
+inferred from a `.bin` suffix or from unrecognized bytes. ARM M-profile images
+can also name their profile and take their entry from the vector table; see
+[ARM M-profile images](#arm-m-profile-images).
 
 ## Open and inspect
 
@@ -86,6 +88,169 @@ applications/DLLs and explicitly selected raw 6502 images. Other raw CPU familie
 remain outside the Windows boundary. Native path admission, private DACLs, Job
 Object ownership, immutable snapshots, and the no-mutation policy still apply.
 
+## ARM M-profile images
+
+Cortex-M flash images start with a vector table and run only Thumb code. A dump
+read from a device, for example with `st-flash read dump.bin 0x08000000 <size>`,
+records neither the address it was read from nor the M profile of the core.
+Name both:
+
+```bash
+rea inspect /absolute/path/to/dump.bin --target-format raw-binary --architecture arm --architecture-variant armv7-m --base-address 0x08000000 --provider ghidra --json
+```
+
+```json
+{
+  "name": "open_binary",
+  "arguments": {
+    "path": "/absolute/path/to/dump.bin",
+    "format": "raw-binary",
+    "architecture": "arm",
+    "architecture_variant": "armv7-m",
+    "base_address": "0x08000000",
+    "provider_id": "ghidra"
+  }
+}
+```
+
+`architecture_variant` names the M profile and selects the Ghidra decoder:
+
+| architecture_variant | Profile          | language_id        | compiler_spec_id |
+| -------------------- | ---------------- | ------------------ | ---------------- |
+| `armv6-m`            | ARMv6-M          | `ARM:LE:32:Cortex` | `default`        |
+| `armv7-m`            | ARMv7-M          | `ARM:LE:32:Cortex` | `default`        |
+| `armv7e-m`           | ARMv7E-M         | `ARM:LE:32:Cortex` | `default`        |
+| `armv8-m.base`       | ARMv8-M Baseline | `ARM:LE:32:v8-m`   | `default`        |
+| `armv8-m.main`       | ARMv8-M Mainline | `ARM:LE:32:v8-m`   | `default`        |
+
+`ARM:LE:32:Cortex` is Ghidra's ARMv7 decoder with Thumb as the default state. It
+has no ARMv8-M encodings, such as the `MSPLIM` and `PSPLIM` system registers that
+v8-M startup code sets, so the v8-M variants use `ARM:LE:32:v8-m`. Neither
+decoder refuses instructions that a smaller profile lacks: `armv6-m` code is
+decoded with the ARMv7-M instruction set.
+
+- `base_address` maps file offset 0 at its own address, and `entry_point` must
+  then lie inside the mapped image. It is accepted only with
+  `architecture_variant`, the one lane whose verifier covers a separate base.
+- Without `entry_point`, REA reads the vector table at `vector_table_address`, or
+  at `base_address` when that is omitted. Word 1 is the Reset handler with bit 0
+  set for Thumb state. The vector value is observed, and the entry is derived by
+  clearing bit 0. Word 0, the initial stack pointer, is recorded as observed and
+  is not validated. `base_address` is required to omit `entry_point`.
+- Use `vector_table_address` when a header precedes the vector table, such as the
+  256-byte boot2 stage of an RP2040 image or an MCUboot header. It must be
+  4-byte aligned and inside the mapped image, and it applies only when
+  `entry_point` is omitted.
+- REA refuses a Reset word that is even, that points outside the mapped image,
+  or that lies past the end of the file.
+- An explicit `entry_point` must be even. An odd value is a Thumb interworking
+  address, such as a word copied from the vector table. REA refuses it instead
+  of clearing bit 0; `details.diagnostics` in the error give the even
+  `code_address` and suggest omitting `entry_point`.
+
+Before auto-analysis, REA's preparation script requires Ghidra's Thumb context
+(`TMode=1`) at the entry and seeds the entry there; `inspect_native_load_image`
+attests that context independently. Ghidra imports the file without its
+processor-defined labels. `ARMCortex.pspec` names the vector table at
+`0x0`-`0x40` and marks every handler slot an entry, reserved slots included, so
+at base `0x0` its names would cover the table and the code after it. The load
+image attests that the seeded entry is the only one.
+
+`npm run verify:ghidra:cortex-m` checks this lane against real Ghidra 12.1.4
+with source-owned fixtures and LLVM as the decoding oracle; see
+[testing](testing.md).
+
+### Identity and Evidence
+
+A load whose base is its caller-selected entry and that names no variant is the
+same load as before these inputs existed, decided on these resolved values. Its
+analysis profile, snapshot target, session reuse and `raw-binary` load image are
+unchanged. Any other raw load:
+
+- reports `base_address`, `architecture_variant` and, when Reset was read from
+  the vector table, `vector_table_address` in `open_binary` and
+  `binary_session`;
+- commits `raw_load` (`version: 1`) to its analysis profile and snapshot target:
+  the base, the variant, the vector table that Reset was read from, and the
+  entry's address, instruction set, `role` and `basis`;
+- returns the `segments` load image (`version: 1`): one segment backed by the
+  whole file at the base, one entry with its `isa_mode`, `role` and `basis`,
+  and, when the basis is the vector table, `vector_table` with the table
+  address and the two words read from it.
+
+An entry's `role` names its function: `entry` for an entry the caller named,
+`reset` for the Reset handler. Its `basis` records how REA chose it: `caller`
+or `vector-table`.
+
+Identity has two levels:
+
+- Coordinate identity (`function_coordinate_context`) covers only resolved
+  values that move coordinates: the decoder, the base, and the entry's address
+  and decode context. A caller-named entry and a Reset-derived entry at the
+  same address get the same coordinate context, so their functions compare.
+- Session and snapshot identity also cover the provenance that results report:
+  `raw_load` adds the variant, the vector-table address, and the entry's role
+  and basis. A reused session never reports a basis or vector words that the
+  current request did not produce.
+
+Neither level covers spellings: `0x08000000` and `0x8000000` are the same base,
+an omitted `vector_table_address` equals an explicit one at the base, and REA
+reports canonical addresses only.
+
+Saved `raw-binary` load images and raw snapshots stay readable and replay as
+before. REA versions without these inputs cannot replay a snapshot of a load
+that uses them, because its analysis profile differs.
+
+### Decision record
+
+This is decision D1 of the embedded-target work, raised in
+[#4246](https://github.com/morluto/rea/issues/4246).
+
+- **Choice.** `architecture_variant` naming the M profile, mapped as in the table
+  above; with it, `base_address` separate from the entry and an optional
+  `vector_table_address`; Reset read from the vector table when a variant and a
+  base are given without an entry; explicit odd entries refused; the `segments`
+  load image and versioned `raw_load` identity only for loads that are not
+  legacy-equivalent; an entry `role` that names its function, with its `basis`
+  recorded separately; coordinate identity from resolved values only, while
+  session and snapshot identity also cover the provenance that results report;
+  Ghidra's processor-defined labels not applied to variant loads.
+- **Alternatives.** A single `processor_variant: "cortex-m"` value
+  ([#4927](https://github.com/morluto/rea/pull/4927)) cannot select the v8-M
+  decoder. A language passthrough with a base (#4246, option C) exposes provider
+  language ids in a provider-neutral contract. Masking odd entries hides the
+  caller's value; refusing first keeps accepting them a later, additive change.
+  A `role` that records how the entry was chosen mixes provenance with what the
+  entry is. Leaving the basis and the vector-table address out of session
+  identity would let a reused session report provenance or vector words that
+  the current request did not produce. Putting them in coordinate identity would
+  make a caller-named entry and Reset at one address incomparable. Ghidra's
+  default Cortex labels name every slot, reserved ones included, and at base
+  `0x0` the code after the table; the vector table is admission's to read. A
+  separate base for every raw family is a later, additive widening; it needs
+  base-separated cases in the 6502 and m68k lanes and on Windows Ghidra P0,
+  which admits raw 6502.
+- **Owner and consumers.** `src/domain/rawArchitectureVariant.ts` owns the
+  vocabulary; `GHIDRA_RAW_VARIANT_LANGUAGES` owns the Ghidra mapping, which
+  follows the GNU architecture names in Ghidra 12.1.4's `ARM.ldefs`; raw
+  admission owns the load, its legacy equivalence, the entry's role and basis,
+  and its `raw_load` identity; the Ghidra profile owns the coordinate context
+  and the label policy. Consumers are the CLI and MCP inputs, target summaries,
+  the Ghidra profile, launcher, bridge and load-image attestation, and
+  snapshots.
+- **Costs of change.** Code: renaming an input is an alias with a deprecation
+  period; remapping a variant is one table row. Compatibility: the `segments`
+  shape and `raw_load` are permanent once released, so changes ship as
+  `version: 2`. Their variant and instruction-set values are closed sets, so a
+  version that predates a new value refuses the Evidence or snapshot instead of
+  misreading it. The `segments` and `entries` arrays hold one element today and
+  leave room for more; `vector_table` holds only the table address and the two
+  words read, under the `segments` version. Migration: sessions and snapshots of
+  loads that use these inputs are invalidated by any change to `raw_load`;
+  legacy loads are not affected. Verification: rerun
+  `npm run verify:ghidra:cortex-m`, which needs Ghidra 12.1.4, JDK 21 and LLVM
+  with Thumb targets.
+
 ## NMOS 6502
 
 ```bash
@@ -147,10 +312,15 @@ exercised.
 
 ## Limitations
 
-- Headers are not discovered from file bytes. This increment does not guess
-  load addresses, vector tables, or memory maps.
-- Big-endian ARM, Thumb-only, Cortex-M, and other Ghidra processor variants are
+- Headers are not discovered from file bytes. REA does not guess load
+  addresses, profiles, vector-table locations, or memory maps.
+- Big-endian ARM and processor variants other than the ARM M profiles are
   unsupported. m68k is the only big-endian family.
+- An M-profile load maps one segment: the file at its base. SRAM, peripheral and
+  system blocks are not created, and only the Reset vector is read. Ghidra's
+  processor-defined vector labels are not applied, so other vectors are neither
+  entries nor labels. Floating-point state, TrustZone and device memory maps are
+  not modelled.
 - Reset vectors, memory-mapped I/O, and firmware boot sequences are not
   emulated.
 - Independent load-image verification covers source identity, mapped file
