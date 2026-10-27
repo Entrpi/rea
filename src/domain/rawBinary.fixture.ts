@@ -8,6 +8,6 @@ export const rawLoadAtEntry = (entryPoint: string): RawBinaryLoad => {
   return {
     baseAddress: parsed.value.canonical,
     entryPoint: parsed.value.canonical,
-    entryPointSource: parsed.value.source,
+    entrySource: { kind: "caller" },
   };
 };

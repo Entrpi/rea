@@ -1,4 +1,8 @@
 import type { DolHeader } from "./gamecubeDol.js";
+import type {
+  RawArchitectureVariant,
+  RawEntryIsaMode,
+} from "./rawArchitectureVariant.js";
 import type { ZipPackageFormat } from "./zipPackageFormat.js";
 
 /** Provider-neutral CPU families detected from headers or explicitly selected raw loads. */
@@ -47,11 +51,31 @@ export interface ElfFamilyMetadata {
 export interface RawBinaryLoad {
   /** Canonical address of file offset 0. */
   readonly baseAddress: string;
+  /** Caller-named profile variant; absent for the family's generic decoder. */
+  readonly architectureVariant?: RawArchitectureVariant;
   /** Canonical code entry. */
   readonly entryPoint: string;
-  /** The caller's spelling of the entry, before canonicalization. */
-  readonly entryPointSource: string;
+  /** Instruction set at the entry, when the variant fixes one. */
+  readonly entryIsaMode?: RawEntryIsaMode;
+  readonly entrySource: RawBinaryEntrySource;
 }
+
+/**
+ * Whether the caller chose the entry or it was read from a vector table.
+ * Only canonical values are kept: caller spellings are not facts about the
+ * load, and a session reused across spellings must report the same load.
+ */
+export type RawBinaryEntrySource =
+  | { readonly kind: "caller" }
+  | {
+      readonly kind: "vector-table";
+      /** Canonical address of word 0. */
+      readonly address: string;
+      /** Word 1 as read, including its Thumb bit. */
+      readonly resetVector: string;
+      /** Word 0 as read; observed and not validated. */
+      readonly initialStackPointer: string;
+    };
 
 /** Referenced CodeView debug symbols from a PE debug directory. */
 export interface PeCodeViewRecord {

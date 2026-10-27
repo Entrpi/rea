@@ -22,6 +22,7 @@ import {
   RAW_ONLY_ARCHITECTURES,
   type BinaryTarget,
 } from "./binaryTargetTypes.js";
+import { rawLoadAtEntry } from "./rawBinary.fixture.js";
 
 const snapshotWithHistoricalEvidence = () => {
   const target = snapshotTarget(ANALYSIS_SNAPSHOT_TARGET);
@@ -153,7 +154,7 @@ describe("analysis snapshot target identity", () => {
       rawLoad: {
         baseAddress: "0x8000000",
         entryPoint: "0x8000000",
-        entryPointSource: "0x08000000",
+        entrySource: { kind: "caller" },
       },
     };
     const snapshot = snapshotTarget(target);
@@ -170,18 +171,19 @@ describe("analysis snapshot target identity", () => {
     expect(analysisQueryId(snapshot, binding, "list_procedures", {})).toBe(
       "query_01cf2c417f0eeab7c65168418bd10966431dd38b7c977191e7e9379088dc2c20",
     );
-    const changed = {
+    const changed: Extract<BinaryTarget, { format: "raw-binary" }> = {
       ...target,
       rawLoad: {
         baseAddress: "0x9000000",
         entryPoint: "0x9000000",
-        entryPointSource: "0x09000000",
+        entrySource: { kind: "caller" },
       },
     };
+    // Another spelling of the same entry is the same load.
     expect(
       snapshotMatchesTarget(snapshot, {
         ...target,
-        rawLoad: { ...target.rawLoad, entryPointSource: "0x8000000" },
+        rawLoad: rawLoadAtEntry("0x08000000"),
       }),
     ).toBe(true);
     expect(snapshotMatchesTarget(snapshot, changed)).toBe(false);

@@ -63,7 +63,7 @@ const raw = (
   rawLoad: {
     baseAddress: entryPoint,
     entryPoint,
-    entryPointSource: entryPoint,
+    entrySource: { kind: "caller" },
   },
 });
 

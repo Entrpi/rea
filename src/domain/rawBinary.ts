@@ -7,7 +7,9 @@ import type {
   RawOnlyArchitecture,
 } from "./binaryTargetTypes.js";
 import type { ExecutableFormatHint } from "./dosCom.js";
+import type { JsonValue } from "./jsonValue.js";
 import {
+  RAW_ARCHITECTURE_VARIANT_NAMES,
   rawArchitectureVariantRow,
   type RawArchitectureVariant,
 } from "./rawArchitectureVariant.js";
@@ -106,7 +108,29 @@ export interface RawBinaryAdmissionRejection {
    * `file_format_rejected` names a refusal caused by the target file itself.
    */
   readonly constraint: "load_selection_rejected" | "file_format_rejected";
+  /** Facts a caller can act on, such as the even address of an odd Thumb entry. */
+  readonly diagnostics?: Readonly<Record<string, JsonValue>>;
 }
+
+/** Admission that must read the first two vector-table words to finish. */
+export interface RawBinaryVectorTableRead {
+  /** File offset of vector-table word 0. */
+  readonly fileOffset: number;
+  /** Finish admission from the bytes read at `fileOffset`. */
+  readonly admit: (
+    words: Uint8Array,
+  ) => Result<RawBinaryAdmission, RawBinaryAdmissionRejection>;
+}
+
+/**
+ * Whether a load is expressible with the inputs that predate base_address and
+ * architecture_variant: base at a caller-selected entry and no variant. Such a
+ * load keeps its earlier identity and Evidence, however its base was spelled.
+ */
+export const isLegacyRawLoad = (load: RawBinaryLoad): boolean =>
+  load.architectureVariant === undefined &&
+  load.entrySource.kind === "caller" &&
+  load.baseAddress === load.entryPoint;
 
 const addressWidth = (architecture: BinaryArchitecture): bigint =>
   architecture === "6502"
@@ -117,7 +141,40 @@ const addressWidth = (architecture: BinaryArchitecture): bigint =>
       ? 0xffffffffn
       : 0xffffffffffffffffn;
 
-/** Validate architecture, entry, and that the mapped image fits the CPU width. */
+const hexAddress = (value: bigint): string => `0x${value.toString(16)}`;
+const hexWord = (value: number): string =>
+  `0x${value.toString(16).padStart(8, "0")}`;
+
+const parseRawBinaryAddress = (
+  value: unknown,
+  field: "base_address" | "vector_table_address",
+): Result<CanonicalRawBinaryEntry, RawBinaryAdmissionRejection> =>
+  typeof value === "string" && RAW_BINARY_ENTRY_POINT.test(value)
+    ? ok({
+        source: value,
+        canonical: hexAddress(BigInt(value)),
+        value: BigInt(value),
+      })
+    : err({
+        reason: `${field} must be a hexadecimal address of the form 0x…`,
+        constraint: "load_selection_rejected",
+      });
+
+const selectionRejected = (
+  reason: string,
+  diagnostics?: Readonly<Record<string, JsonValue>>,
+): Result<never, RawBinaryAdmissionRejection> =>
+  err({
+    reason,
+    constraint: "load_selection_rejected",
+    ...(diagnostics === undefined ? {} : { diagnostics }),
+  });
+
+/**
+ * Validate the selected family, variant, base and entry, and that the mapped
+ * image fits the CPU width. Without an entry, an M-profile load asks the
+ * caller to read the vector table and finishes from its first two words.
+ */
 export const admitRawBinary = (input: {
   readonly architecture: unknown;
   readonly entryPoint: unknown;
@@ -125,70 +182,187 @@ export const admitRawBinary = (input: {
   readonly architectureVariant?: unknown;
   readonly vectorTableAddress?: unknown;
   readonly fileBytes: number;
-}): Result<RawBinaryAdmission, RawBinaryAdmissionRejection> => {
-  if (
-    input.baseAddress !== undefined ||
-    input.architectureVariant !== undefined ||
-    input.vectorTableAddress !== undefined
-  )
-    return err({
-      reason:
-        "base_address, architecture_variant and vector_table_address are not admitted yet",
-      constraint: "load_selection_rejected",
-    });
+}): Result<
+  RawBinaryAdmission | RawBinaryVectorTableRead,
+  RawBinaryAdmissionRejection
+> => {
   const architecture = binaryArchitectureSchema.safeParse(input.architecture);
   if (!architecture.success)
-    return err({
-      reason:
-        "raw-binary format requires architecture (x86, x86_64, arm, arm64, 6502, or m68k)",
-      constraint: "load_selection_rejected",
-    });
-  if (typeof input.entryPoint !== "string")
-    return err({
-      reason:
+    return selectionRejected(
+      "raw-binary format requires architecture (x86, x86_64, arm, arm64, 6502, or m68k)",
+    );
+  const variant = rawArchitectureVariantRow(input.architectureVariant);
+  if (input.architectureVariant !== undefined && variant === undefined)
+    return selectionRejected(
+      `architecture_variant must be one of ${RAW_ARCHITECTURE_VARIANT_NAMES.join(", ")}`,
+    );
+  const issue = rawBinaryVariantSelectionIssue({
+    ...input,
+    architecture: architecture.data,
+  });
+  if (issue !== undefined) return selectionRejected(issue.message);
+  let entry: CanonicalRawBinaryEntry | undefined;
+  // Without an entry, the shared rules above guarantee a variant and a base.
+  if (input.entryPoint !== undefined || variant === undefined) {
+    if (typeof input.entryPoint !== "string")
+      return selectionRejected(
         "raw-binary format requires entry_point as a hexadecimal address of the form 0x…",
-      constraint: "load_selection_rejected",
-    });
-  const entry = parseRawBinaryEntryPoint(input.entryPoint);
-  if (!entry.ok)
-    return err({
-      reason: entry.error,
-      constraint: "load_selection_rejected",
-    });
-  if (
-    (architecture.data === "arm" || architecture.data === "arm64") &&
-    entry.value.value % 4n !== 0n
-  )
-    return err({
-      reason: `raw-binary ${architecture.data} entry_point ${entry.value.canonical} must be 4-byte aligned`,
-      constraint: "load_selection_rejected",
-    });
-  // 68000-family instruction words are fetched from even addresses.
-  if (architecture.data === "m68k" && entry.value.value % 2n !== 0n)
-    return err({
-      reason: `raw-binary m68k entry_point ${entry.value.canonical} must be 2-byte aligned`,
-      constraint: "load_selection_rejected",
-    });
+      );
+    const parsed = parseRawBinaryEntryPoint(input.entryPoint);
+    if (!parsed.ok) return selectionRejected(parsed.error);
+    entry = parsed.value;
+  }
+  let base: CanonicalRawBinaryEntry | undefined;
+  if (input.baseAddress !== undefined) {
+    const parsed = parseRawBinaryAddress(input.baseAddress, "base_address");
+    if (!parsed.ok) return parsed;
+    base = parsed.value;
+  }
+  if (entry !== undefined) {
+    if (variant !== undefined) {
+      // M-profile code runs in Thumb state; an odd value is an interworking address.
+      if (entry.value % 2n !== 0n) {
+        const codeAddress = hexAddress(entry.value - 1n);
+        return selectionRejected(
+          `raw-binary ${variant.name} entry_point ${entry.canonical} is a Thumb interworking address with bit 0 set; its code address is ${codeAddress}`,
+          {
+            entry_point: entry.source,
+            code_address: codeAddress,
+            isa_mode: variant.isaMode,
+            suggestion:
+              base === undefined
+                ? "Pass code_address as entry_point, or give base_address and omit entry_point to read Reset from the vector table."
+                : "Omit entry_point to read Reset from the vector table, or pass code_address as entry_point.",
+          },
+        );
+      }
+    } else if (
+      (architecture.data === "arm" || architecture.data === "arm64") &&
+      entry.value % 4n !== 0n
+    )
+      return selectionRejected(
+        `raw-binary ${architecture.data} entry_point ${entry.canonical} must be 4-byte aligned`,
+        // An odd ARM entry is most often a Cortex-M Reset vector.
+        architecture.data === "arm" && entry.value % 2n !== 0n
+          ? {
+              entry_point: entry.source,
+              suggestion:
+                "An odd ARM entry is usually a Thumb address. For Cortex-M code, give architecture_variant and base_address, and omit entry_point to read Reset from the vector table.",
+            }
+          : undefined,
+      );
+    // 68000-family instruction words are fetched from even addresses.
+    else if (architecture.data === "m68k" && entry.value % 2n !== 0n)
+      return selectionRejected(
+        `raw-binary m68k entry_point ${entry.canonical} must be 2-byte aligned`,
+      );
+  }
   const length = validateRawBinaryLength(input.fileBytes);
   if (!length.ok)
-    return err({
-      reason: length.error,
-      constraint: "file_format_rejected",
-    });
-  const last = entry.value.value + BigInt(input.fileBytes) - 1n;
+    return err({ reason: length.error, constraint: "file_format_rejected" });
+  // Without base_address, file offset 0 maps at the entry.
+  const start = base ?? entry;
+  if (start === undefined)
+    throw new Error("raw-binary admission lost both base and entry");
+  const last = start.value + BigInt(input.fileBytes) - 1n;
   const max = addressWidth(architecture.data);
-  if (entry.value.value > max || last > max)
-    return err({
-      reason: `raw-binary mapping from ${entry.value.canonical} must fit in the ${architecture.data} address width`,
-      constraint: "load_selection_rejected",
+  if (start.value > max || last > max)
+    return selectionRejected(
+      `raw-binary mapping from ${start.canonical} must fit in the ${architecture.data} address width`,
+    );
+  const mapped = `${start.canonical}..${hexAddress(last)}`;
+  const shared = {
+    baseAddress: start.canonical,
+    ...(variant === undefined
+      ? {}
+      : { architectureVariant: variant.name, entryIsaMode: variant.isaMode }),
+  };
+  if (entry !== undefined) {
+    if (entry.value < start.value || entry.value > last)
+      return selectionRejected(
+        `raw-binary entry_point ${entry.canonical} must lie inside the image mapped at ${mapped}`,
+      );
+    return ok({
+      architecture: architecture.data,
+      load: {
+        ...shared,
+        entryPoint: entry.canonical,
+        entrySource: { kind: "caller" },
+      },
     });
+  }
+  if (variant === undefined)
+    throw new Error("raw-binary admission derived an entry without a variant");
+  let table = start;
+  if (input.vectorTableAddress !== undefined) {
+    const parsed = parseRawBinaryAddress(
+      input.vectorTableAddress,
+      "vector_table_address",
+    );
+    if (!parsed.ok) return parsed;
+    table = parsed.value;
+  }
+  if (table.value % 4n !== 0n)
+    return selectionRejected(
+      `raw-binary vector table at ${table.canonical} must be 4-byte aligned${
+        input.vectorTableAddress === undefined
+          ? "; it is at base_address unless vector_table_address is given"
+          : ""
+      }`,
+    );
+  if (table.value < start.value || table.value > last)
+    return selectionRejected(
+      `raw-binary vector table at ${table.canonical} must lie inside the image mapped at ${mapped}`,
+    );
+  if (table.value + 7n > last)
+    return selectionRejected(
+      `raw-binary file ends before the Reset vector at ${hexAddress(table.value + 4n)}; the vector table at ${table.canonical} needs 8 bytes`,
+    );
   return ok({
-    architecture: architecture.data,
-    // File offset 0 maps at the entry; no other base can be selected.
-    load: {
-      baseAddress: entry.value.canonical,
-      entryPoint: entry.value.canonical,
-      entryPointSource: entry.value.source,
+    fileOffset: Number(table.value - start.value),
+    admit: (words) => {
+      if (words.byteLength !== 8)
+        return err({
+          reason: `raw-binary vector table at ${table.canonical} could not be read in full`,
+          constraint: "file_format_rejected",
+        });
+      const view = new DataView(
+        words.buffer,
+        words.byteOffset,
+        words.byteLength,
+      );
+      const stackPointer = hexWord(view.getUint32(0, true));
+      const resetWord = view.getUint32(4, true);
+      const reset = hexWord(resetWord);
+      const observed = {
+        vector_table_address: table.canonical,
+        initial_stack_pointer: stackPointer,
+        reset_vector: reset,
+      };
+      if (resetWord % 2 === 0)
+        return selectionRejected(
+          `raw-binary Reset vector ${reset} at ${hexAddress(table.value + 4n)} is even; an M-profile Reset handler runs in Thumb state, so bit 0 must be set`,
+          observed,
+        );
+      const code = BigInt(resetWord - 1);
+      if (code < start.value || code > last)
+        return selectionRejected(
+          `raw-binary Reset vector ${reset} points to ${hexAddress(code)}, outside the image mapped at ${mapped}`,
+          observed,
+        );
+      return ok({
+        architecture: architecture.data,
+        load: {
+          ...shared,
+          entryPoint: hexAddress(code),
+          entrySource: {
+            kind: "vector-table",
+            address: table.canonical,
+            resetVector: reset,
+            initialStackPointer: stackPointer,
+          },
+        },
+      });
     },
   });
 };

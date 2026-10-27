@@ -130,7 +130,53 @@ const impossible = [
     architecture: "arm",
     entry_point: "0x1000",
   },
+  {
+    kind: "executable",
+    format: "raw-binary",
+    architecture: "arm",
+    entry_point: "0x80001c4",
+    architecture_variant: "cortex-m",
+  },
 ];
+
+it.each(["draft-2020-12", "draft-07"] as const)(
+  "reports a Reset-derived M-profile load through %s clients",
+  (draft) => {
+    const advertised = toolOutputSchemaWithMetadata(
+      toolContract("open_binary"),
+    )["~standard"].jsonSchema.output({ target: draft });
+    const validate = new AjvJsonSchemaValidator().getValidator(advertised);
+    const summary = binaryTargetSummary({
+      ...executable,
+      format: "raw-binary",
+      architecture: "arm",
+      availableArchitectures: ["arm"],
+      rawLoad: {
+        baseAddress: "0x8000000",
+        architectureVariant: "armv7e-m",
+        entryPoint: "0x80001c4",
+        entryIsaMode: "thumb",
+        entrySource: {
+          kind: "vector-table",
+          address: "0x8000000",
+          resetVector: "0x080001c5",
+          initialStackPointer: "0x20005000",
+        },
+      },
+    });
+    expect(summary).toEqual({
+      ...identity,
+      kind: "executable",
+      format: "raw-binary",
+      architecture: "arm",
+      entry_point: "0x80001c4",
+      base_address: "0x8000000",
+      architecture_variant: "armv7e-m",
+      vector_table_address: "0x8000000",
+    });
+    expect(validate({ result: summary }).valid).toBe(true);
+  },
+);
 
 it.each(["draft-2020-12", "draft-07"] as const)(
   "preserves canonical live summaries and rejects impossible classifications through %s clients",

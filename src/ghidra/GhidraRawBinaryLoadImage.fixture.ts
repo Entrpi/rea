@@ -25,7 +25,7 @@ export const fixtureRawBinaryLoadImage = (): {
       rawLoad: {
         baseAddress: "0x8000000",
         entryPoint: "0x8000000",
-        entryPointSource: "0x08000000",
+        entrySource: { kind: "caller" },
       },
     },
     observation: {

@@ -54,6 +54,8 @@ import {
   admitRawBinary,
   rawBinarySelectionError,
   type NativeLoadSelection,
+  type RawBinaryAdmission,
+  type RawBinaryAdmissionRejection,
 } from "../domain/rawBinary.js";
 import { admitGamecubeDol } from "../domain/gamecubeDolAdmission.js";
 import { DOL_HEADER_SIZE } from "../domain/gamecubeDol.js";
@@ -265,7 +267,7 @@ const readOpenedBinaryTarget = async (
           { constraint: "load_selection_rejected" },
         ),
       );
-    const admitted = admitRawBinary({
+    const selected = admitRawBinary({
       architecture: loadSelection.architecture,
       entryPoint: loadSelection.entryPoint,
       baseAddress: loadSelection.baseAddress,
@@ -273,10 +275,21 @@ const readOpenedBinaryTarget = async (
       vectorTableAddress: loadSelection.vectorTableAddress,
       fileBytes: metadata.size,
     });
+    let admitted: Result<RawBinaryAdmission, RawBinaryAdmissionRejection>;
+    if (!selected.ok) admitted = selected;
+    // An omitted M-profile entry is the Reset word of the selected vector table.
+    else if ("admit" in selected.value)
+      admitted = selected.value.admit(
+        await readHandleRange(handle, selected.value.fileOffset, 8, signal),
+      );
+    else admitted = ok(selected.value);
     if (!admitted.ok)
       return err(
         new BinaryTargetError(path, admitted.error.reason, {
           constraint: admitted.error.constraint,
+          ...(admitted.error.diagnostics === undefined
+            ? {}
+            : { diagnostics: admitted.error.diagnostics }),
         }),
       );
     return ok({
