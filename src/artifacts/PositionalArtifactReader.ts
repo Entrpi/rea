@@ -1,4 +1,5 @@
 import { Readable, Transform, pipeline } from "node:stream";
+import { setImmediate } from "node:timers/promises";
 
 import {
   ArtifactReaderFailure,
@@ -32,6 +33,7 @@ export interface PositionalArtifactEntries {
  * Serve entries that are byte ranges of one carrier file. Preparation runs
  * once; every traversal, open and completed entry stream rechecks the
  * carrier's identity, and close retires open streams before the carrier.
+ * Encrypted entries are listed but never opened.
  */
 export abstract class PositionalArtifactReader implements ArtifactReader {
   abstract readonly format: ArtifactReader["format"];
@@ -83,7 +85,10 @@ export abstract class PositionalArtifactReader implements ArtifactReader {
         ...this.#coverage,
         limitations: [...this.#coverage.limitations],
       });
+    let index = 0;
     for (const entry of this.#entries.values()) {
+      // Yield between batches so a large inventory does not hold the loop.
+      if (index++ % 256 === 0) await setImmediate();
       this.assertOpen(signal);
       yield copyArtifactEntry(entry);
     }
@@ -97,6 +102,11 @@ export abstract class PositionalArtifactReader implements ArtifactReader {
         throw new ArtifactReaderFailure(
           "integrity",
           `${this.#label} entry does not match its owning inventory`,
+        );
+      if (stored.encrypted)
+        throw new ArtifactReaderFailure(
+          "unavailable",
+          `Encrypted ${this.#label} member is unsupported: ${stored.path}`,
         );
       const { handle } = await this.#source.read(signal);
       this.assertOpen(signal);
