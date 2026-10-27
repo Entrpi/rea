@@ -145,7 +145,10 @@ Artifact comparison uses each segment's `load_addr` and `data_len` as its
 declaration, so a segment that moves with unchanged bytes is `changed` in
 `metadata`. Segments pair by index: inserting or removing one shifts the
 paths of the segments after it. Header offsets and `classification` are not
-compared; the image's own change covers the header and chip.
+compared; the image's own change covers the header and chip. The image's and
+the signature blocks' `format_metadata` carry no declaration: their fields
+come from their own bytes, which content comparison covers, and a block's
+`image_digest_matches` follows the image's content.
 
 ## Secure Boot v2 signatures
 
