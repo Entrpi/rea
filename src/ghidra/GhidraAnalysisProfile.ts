@@ -86,6 +86,26 @@ export const ghidraPinnedLanguage = (
   ghidraPowerPcLanguage(target) ??
   ghidraXtensaLanguage(target);
 
+/**
+ * The language a caller override selects for this target. An override that
+ * names the pinned Xtensa language without a compiler specification keeps the
+ * pin's `default` specification, so the profile, the launch and the session
+ * check commit to one choice. Older pinned lanes keep their committed
+ * `language-default` profiles, which changing would alter persisted identity.
+ */
+export const ghidraEffectiveLanguageOverride = (
+  target: BinaryTarget,
+  override: GhidraLanguageOverride | undefined,
+): GhidraLanguageOverride | undefined => {
+  const pinned = ghidraXtensaLanguage(target);
+  return pinned !== undefined &&
+    override !== undefined &&
+    override.compilerSpecId === undefined &&
+    override.languageId === pinned.languageId
+    ? pinned
+    : override;
+};
+
 /** Policy conflicts belong to the selected settings, not to the target's support. */
 const languageOverrideConflict = (
   override: GhidraLanguageOverride,
@@ -274,7 +294,8 @@ export const resolveGhidraAnalysisProfile = async (
         pinnedLanguage,
       ),
     );
-  const selectedLanguage = languageOverride ?? pinnedLanguage;
+  const selectedLanguage =
+    ghidraEffectiveLanguageOverride(target, languageOverride) ?? pinnedLanguage;
   // DOS imports already force an admitted loader, language, and context.
   if (dos && languageOverride !== undefined)
     return Promise.resolve(

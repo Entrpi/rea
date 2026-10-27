@@ -14,6 +14,7 @@ import { IdaProvider } from "../ida/IdaProvider.js";
 import { KunaProvider } from "../kuna/KunaProvider.js";
 import { silentLogger } from "../logger.js";
 import {
+  ghidraEffectiveLanguageOverride,
   ghidraPinnedLanguage,
   ghidraProfileLanguageOverride,
 } from "./GhidraAnalysisProfile.js";
@@ -118,6 +119,27 @@ const session = (languageId: string, compilerSpecId: string) => ({
   },
 });
 
+/** Capture each launch without starting Ghidra; the stub reports the pinned import. */
+const capturingFactory =
+  (launches: GhidraClientOptions[]): GhidraProviderClientFactory =>
+  (options) => {
+    launches.push(options);
+    return {
+      start: () => Promise.resolve(ok(session(PINNED.languageId, "default"))),
+      callTool: () => Promise.resolve(ok(null)),
+      close: () => Promise.resolve(ok(null)),
+    };
+  };
+
+/** A launch that imports with, and then asserts, the complete pinned language. */
+const pinnedLaunch = expect.objectContaining({
+  expectedLanguageId: "Xtensa:LE:32:default",
+  expectedCompilerSpecId: "default",
+  launcher: expect.objectContaining({
+    options: expect.objectContaining({ languageOverride: PINNED }),
+  }),
+});
+
 const registerPinCases = () => {
   it("pins the generic little-endian language with the `default` compiler spec", async () => {
     const provider = ghidra();
@@ -158,14 +180,7 @@ const registerPinCases = () => {
 
   it("imports with the pin and asserts it against the session handshake", async () => {
     const launches: GhidraClientOptions[] = [];
-    const provider = ghidra({}, (options) => {
-      launches.push(options);
-      return {
-        start: () => Promise.resolve(ok(session(PINNED.languageId, "default"))),
-        callTool: () => Promise.resolve(ok(null)),
-        close: () => Promise.resolve(ok(null)),
-      };
-    });
+    const provider = ghidra({}, capturingFactory(launches));
     const resolved = await provider.resolveAnalysisProfile(target());
     if (!resolved.ok || resolved.value.profile === null)
       throw new Error("expected an Xtensa profile");
@@ -180,15 +195,7 @@ const registerPinCases = () => {
     } finally {
       await client.close();
     }
-    expect(launches).toEqual([
-      expect.objectContaining({
-        expectedLanguageId: "Xtensa:LE:32:default",
-        expectedCompilerSpecId: "default",
-        launcher: expect.objectContaining({
-          options: expect.objectContaining({ languageOverride: PINNED }),
-        }),
-      }),
-    ]);
+    expect(launches).toEqual([pinnedLaunch]);
     // The bridge handshake enforces the expectation above after import.
     const expected = {
       runId: "11111111-1111-4111-8111-111111111111",
@@ -309,6 +316,59 @@ const registerOverrideCases = () => {
       compiler_spec_id: "default",
       language_selection: "configured-v1",
     });
+  });
+
+  it("keeps the pinned compiler spec when the caller names only the language", async () => {
+    const launches: GhidraClientOptions[] = [];
+    const provider = ghidra(
+      {
+        GHIDRA_INSTALL_DIR: await xtensaInstallation(),
+        REA_GHIDRA_LANGUAGE_ID: "Xtensa:LE:32:default",
+      },
+      capturingFactory(launches),
+    );
+    const resolved = await provider.resolveAnalysisProfile(target());
+    if (!resolved.ok) throw resolved.error;
+    if (resolved.value.profile === null)
+      throw new Error("expected an Xtensa profile");
+    const { parameters } = resolved.value.profile;
+    expect(parameters).toMatchObject({
+      language_id: "Xtensa:LE:32:default",
+      compiler_spec_id: "default",
+      language_selection: "configured-v1",
+    });
+    expect(ghidraProfileLanguageOverride(parameters)).toEqual(PINNED);
+    const client = provider.createClient(target(), resolved.value.profile);
+    try {
+      expect((await client.execute("health", {})).ok).toBe(true);
+    } finally {
+      await client.close();
+    }
+    expect(launches).toEqual([pinnedLaunch]);
+  });
+
+  it("completes only partial Xtensa overrides of the pinned language", () => {
+    const languageOnly = { languageId: "RISCV:LE:64:default" };
+    const riscv: BinaryTarget = {
+      path: "/riscv.elf",
+      sha256: "c".repeat(64),
+      kind: "executable",
+      format: "elf",
+      architecture: "riscv",
+      availableArchitectures: ["riscv"],
+      riscv: { elfClass: 64, byteOrder: "little", type: 2, flags: 0x5 },
+    };
+    // Older pinned lanes keep their committed language-default profiles.
+    expect(ghidraEffectiveLanguageOverride(riscv, languageOnly)).toBe(
+      languageOnly,
+    );
+    const otherLanguage = { languageId: "Xtensa:BE:32:default" };
+    expect(ghidraEffectiveLanguageOverride(target(), otherLanguage)).toBe(
+      otherLanguage,
+    );
+    expect(
+      ghidraEffectiveLanguageOverride(target(), undefined),
+    ).toBeUndefined();
   });
 };
 

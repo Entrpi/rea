@@ -60,7 +60,9 @@ reports anything else fails instead of returning results.
 
 A caller-selected `REA_GHIDRA_LANGUAGE_ID` or `REA_GHIDRA_COMPILER_SPEC_ID` that
 disagrees with the pin is a configuration error, and the requested settings are
-not changed. A selection that matches the pin is recorded as `configured-v1`.
+not changed. A selection that matches the pin is recorded as `configured-v1`. A
+selection that names only `Xtensa:LE:32:default` keeps the `default` compiler
+specification, so the import and the post-import check still commit to it.
 
 ## Evidence
 

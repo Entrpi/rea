@@ -23,6 +23,7 @@ import {
   ghidraSeedLimitations,
 } from "./GhidraAnalysisSeeds.js";
 import {
+  ghidraEffectiveLanguageOverride,
   ghidraPinnedLanguage,
   ghidraProfileDisabledAnalyzers,
   ghidraProfileLanguageOverride,
@@ -283,7 +284,8 @@ export const createGhidraProviderClient = (input: {
   if (
     !sameGhidraLanguageOverride(
       parameterLanguage,
-      config.ghidraLanguageOverride ?? targetLanguage,
+      ghidraEffectiveLanguageOverride(target, config.ghidraLanguageOverride) ??
+        targetLanguage,
     )
   )
     return err(
