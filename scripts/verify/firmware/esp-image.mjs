@@ -4,13 +4,15 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { withVerifierCleanup } from "../../lib/verifier-cleanup.mjs";
 import {
   assertAgrees,
   buildElf,
-  compilerVersion,
+  checkTools,
+  commands,
   elf2image,
-  esptoolVersion,
   execute,
+  exitOutput,
   extract,
   imageInfo,
   inspect,
@@ -19,19 +21,20 @@ import {
   spell,
   tool,
   xtensa,
-  xtensaVersion,
 } from "./esp-image-tools.mjs";
 
-const workspace = await mkdtemp(join(tmpdir(), "rea-esp-image-proof-"));
+let workspace;
 const path = (name) => join(workspace, name);
 
-const report = {
-  esptool: esptoolVersion,
-  compiler: compilerVersion,
-  images: [],
-  extractions: [],
-};
-try {
+await withVerifierCleanup(async () => {
+  const { compilerVersion, esptoolVersion, xtensaVersion } = await checkTools();
+  workspace = await mkdtemp(join(tmpdir(), "rea-esp-image-proof-"));
+  const report = {
+    esptool: esptoolVersion,
+    compiler: compilerVersion,
+    images: [],
+    extractions: [],
+  };
   const app = await buildElf("app.c", "app.ld", path("app.elf"));
   const boot = await buildElf(
     "bootloader.c",
@@ -295,7 +298,7 @@ try {
   }
   const truncatedOracle = await imageInfo(path("truncated.bin")).then(
     () => "loaded",
-    (failure) => `${failure.stdout}${failure.stderr}`,
+    exitOutput,
   );
   assert.match(truncatedOracle, /End of file reading segment/u);
   const truncated = await inspect(path("truncated.bin"));
@@ -397,6 +400,12 @@ try {
   );
   report.images.push({ name: "esp8266-0x00000.bin", refused: true });
   console.log(JSON.stringify(report, null, 2));
-} finally {
-  await rm(workspace, { recursive: true, force: true });
-}
+}, [
+  // Remove outputs only after every owned command tree has stopped; a failed
+  // close keeps the workspace for inspection.
+  async () => {
+    await commands.close();
+    if (workspace !== undefined)
+      await rm(workspace, { recursive: true, force: true });
+  },
+]);

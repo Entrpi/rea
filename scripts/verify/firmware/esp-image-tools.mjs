@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
+import { createVerifierCommands } from "../../lib/verify-commands.mjs";
 
 // Optional verification tools only; the runtime reader starts no tool.
 const compiler = process.env.REA_RISCV_CLANG ?? "clang";
@@ -9,8 +8,20 @@ const linker = process.env.REA_RISCV_LLD ?? "ld.lld";
 const python = process.env.REA_ESPTOOL_PYTHON ?? "python3";
 // Optional: an Xtensa ESP32 build when Espressif's GCC is supplied.
 export const xtensa = process.env.REA_XTENSA_ESP32_GCC;
-export const execute = promisify(execFile);
+/**
+ * Every tool runs as an owned process tree, so a timeout or close also stops
+ * the children a compiler driver starts. Close it before removing outputs.
+ */
+export const commands = await createVerifierCommands();
 export const options = { maxBuffer: 16 * 1024 * 1024, timeout: 120_000 };
+export const execute = (command, args, settings = options) =>
+  commands.exec(command, args, settings);
+
+/** The output of a command that exited nonzero; other failures propagate. */
+export const exitOutput = (failure) => {
+  if (typeof failure?.code !== "number" || failure.code === 0) throw failure;
+  return `${failure.snapshot.stdout.text}${failure.snapshot.stderr.text}`;
+};
 export const source = (name) =>
   fileURLToPath(
     new URL(`../../../tests/conformance/esp/${name}`, import.meta.url),
@@ -44,53 +55,61 @@ const prerequisite = async (needed, variable, check) => {
 
 const firstLine = ({ stdout }) => stdout.split("\n")[0];
 
-export const compilerVersion = await prerequisite(
-  `a Clang with the RISC-V target (tried ${compiler})`,
-  "REA_RISCV_CLANG",
-  async () => {
-    const targets = await execute(compiler, ["--print-targets"], options);
-    assert.match(targets.stdout, /^\s*riscv32\b/mu, "No riscv32 target.");
-    return firstLine(await execute(compiler, ["--version"], options));
-  },
-);
-await prerequisite(`ld.lld (tried ${linker})`, "REA_RISCV_LLD", () =>
-  execute(linker, ["--version"], options),
-);
-const versionText = await prerequisite(
-  `a Python that runs esptool (tried ${python} -m esptool)`,
-  "REA_ESPTOOL_PYTHON",
-  () => tool("esptool", ["version"]),
-);
-const version = /\bv(\d+)\.(\d+)\.(\d+)\b/u.exec(versionText);
-assert.ok(version, `Unrecognized esptool version: ${versionText}`);
-export const esptoolVersion = version[0];
-const v5 = Number(version[1]) >= 5;
-/** esptool v5 spells commands and options with hyphens. */
-export const spell = (v4, later) => (v5 ? later : v4);
-await prerequisite(
-  `espsecure in the same Python (tried ${python} -m espsecure)`,
-  "REA_ESPTOOL_PYTHON",
-  async () => {
-    const help = await tool("espsecure", ["--help"]);
-    for (const command of [
-      spell("sign_data", "sign-data"),
-      spell("signature_info_v2", "signature-info-v2"),
-    ])
-      assert.ok(help.includes(command), `espsecure has no ${command}.`);
-  },
-);
-if (esptoolVersion !== PINNED_ESPTOOL)
-  console.warn(
-    `verify:esp-images: esptool ${esptoolVersion} is not the pinned ${PINNED_ESPTOOL}, whose sources the reader's layout facts cite.`,
+/** Set by checkTools: esptool v5 spells commands and options with hyphens. */
+let v5;
+export const spell = (v4, later) => {
+  assert.notEqual(v5, undefined, "checkTools must run first");
+  return v5 ? later : v4;
+};
+
+/** Check every tool before any work and report their versions. */
+export const checkTools = async () => {
+  const compilerVersion = await prerequisite(
+    `a Clang with the RISC-V target (tried ${compiler})`,
+    "REA_RISCV_CLANG",
+    async () => {
+      const targets = await execute(compiler, ["--print-targets"], options);
+      assert.match(targets.stdout, /^\s*riscv32\b/mu, "No riscv32 target.");
+      return firstLine(await execute(compiler, ["--version"], options));
+    },
   );
-export const xtensaVersion =
-  xtensa === undefined
-    ? undefined
-    : await prerequisite(
-        `xtensa-esp32-elf-gcc (tried ${xtensa})`,
-        "REA_XTENSA_ESP32_GCC to Espressif's compiler, or unset it to skip that image",
-        async () => firstLine(await execute(xtensa, ["--version"], options)),
-      );
+  await prerequisite(`ld.lld (tried ${linker})`, "REA_RISCV_LLD", () =>
+    execute(linker, ["--version"], options),
+  );
+  const versionText = await prerequisite(
+    `a Python that runs esptool (tried ${python} -m esptool)`,
+    "REA_ESPTOOL_PYTHON",
+    () => tool("esptool", ["version"]),
+  );
+  const version = /\bv(\d+)\.(\d+)\.(\d+)\b/u.exec(versionText);
+  assert.ok(version, `Unrecognized esptool version: ${versionText}`);
+  v5 = Number(version[1]) >= 5;
+  await prerequisite(
+    `espsecure in the same Python (tried ${python} -m espsecure)`,
+    "REA_ESPTOOL_PYTHON",
+    async () => {
+      const help = await tool("espsecure", ["--help"]);
+      for (const command of [
+        spell("sign_data", "sign-data"),
+        spell("signature_info_v2", "signature-info-v2"),
+      ])
+        assert.ok(help.includes(command), `espsecure has no ${command}.`);
+    },
+  );
+  if (version[0] !== PINNED_ESPTOOL)
+    console.warn(
+      `verify:esp-images: esptool ${version[0]} is not the pinned ${PINNED_ESPTOOL}, whose sources the reader's layout facts cite.`,
+    );
+  const xtensaVersion =
+    xtensa === undefined
+      ? undefined
+      : await prerequisite(
+          `xtensa-esp32-elf-gcc (tried ${xtensa})`,
+          "REA_XTENSA_ESP32_GCC to Espressif's compiler, or unset it to skip that image",
+          async () => firstLine(await execute(xtensa, ["--version"], options)),
+        );
+  return { compilerVersion, esptoolVersion: version[0], xtensaVersion };
+};
 
 /** Build a RISC-V ELF from a conformance source; it is never run. */
 export const buildElf = async (program, script, output) => {
@@ -135,7 +154,7 @@ export const elf2image = (chip, elf, output, extra = []) =>
 export const imageInfo = async (file, chip) => {
   const text = await tool("esptool", [
     ...(chip === undefined ? [] : ["--chip", chip]),
-    ...(v5 ? ["image-info", file] : ["image_info", "--version", "2", file]),
+    ...spell(["image_info", "--version", "2", file], ["image-info", file]),
   ]);
   const field = (label) =>
     new RegExp(`^${label}: (.+)$`, "mu").exec(text)?.[1]?.trim();
@@ -190,7 +209,7 @@ export const inspect = async (file) => {
     { ...options, env: { ...process.env, REA_LOG_LEVEL: "silent" } },
   ).then(
     ({ stdout }) => ({ ok: true, stdout }),
-    (failure) => ({ ok: false, stdout: `${failure.stdout}${failure.stderr}` }),
+    (failure) => ({ ok: false, stdout: exitOutput(failure) }),
   );
   if (!result.ok) return { refused: result.stdout };
   const inventory = JSON.parse(result.stdout).normalized_result.substeps[0]

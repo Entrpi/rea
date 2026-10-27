@@ -271,11 +271,16 @@ images. It then checks:
 `REA_XTENSA_ESP32_GCC` adds an ESP32 (Xtensa) app built with Espressif's
 `xtensa-esp32-elf-gcc`. Without it the report marks that image as skipped.
 
+Each command runs as a process tree owned by the shared verifier command
+owner, so a timeout also stops the linker or assembler a compiler driver
+starts. The lane removes its workspace only after every tree has stopped and
+keeps it when that cleanup cannot be confirmed.
+
 The lane ran on macOS arm64 with Node 24.22.1, Homebrew Clang and LLD 21.1.8,
 and `xtensa-esp32-elf-gcc` 14.2.0 (crosstool-NG esp-14.2.0_20251107), once
 with esptool and espsecure v5.6.0 and once with 4.12.0. All checks passed for
 all 13 images in both runs. With v5.6.0 the complete run, including the builds
-and every esptool call, took 10.4 s elapsed, 12.1 s user CPU and 1.4 s system
+and every esptool call, took 21.7 s elapsed, 16.9 s user CPU and 6.1 s system
 CPU under `/usr/bin/time -l` with warm caches. The largest single process
 peaked at a 253 MiB resident set; the combined peak of all processes was not
 measured.
