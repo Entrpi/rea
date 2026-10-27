@@ -188,10 +188,6 @@ const registerPinCases = () => {
     try {
       const health = await client.execute("health", {});
       if (!health.ok) throw health.error;
-      // The lane limitations travel with results, not only the helper.
-      expect(health.value.limitations).toEqual(
-        expect.arrayContaining([...ghidraXtensaLimitations(target())]),
-      );
     } finally {
       await client.close();
     }
@@ -373,13 +369,31 @@ const registerOverrideCases = () => {
 };
 
 const registerProviderCases = () => {
-  it("states the verified scope and the measured decoding gap with every result", () => {
-    const notes = ghidraXtensaLimitations(target());
-    expect(notes).toHaveLength(3);
-    expect(notes[0]).toContain("not verified function by function");
-    expect(notes.join(" ")).not.toMatch(/unverified lane/iu);
-    expect(notes.join(" ")).toContain("Xtensa:LE:32:default");
-    expect(notes[2]).toMatch(/^Measured by REA: .*SALT\/SALTU/u);
+  it("delivers the pinned language and the measured SALT/SALTU gap with results", async () => {
+    const provider = ghidra({}, capturingFactory([]));
+    const resolved = await provider.resolveAnalysisProfile(target());
+    if (!resolved.ok || resolved.value.profile === null)
+      throw new Error("expected an Xtensa profile");
+    const client = provider.createClient(target(), resolved.value.profile);
+    let delivered: readonly string[] = [];
+    try {
+      const health = await client.execute("health", {});
+      if (!health.ok) throw health.error;
+      delivered = health.value.limitations;
+    } finally {
+      await client.close();
+    }
+    expect(delivered).toEqual(
+      expect.arrayContaining([...ghidraXtensaLimitations(target())]),
+    );
+    // Facts, independent of the owner's wording: the pin, and the provenance
+    // of the one Ghidra gap REA reproduced rather than took from upstream.
+    expect(delivered).toContainEqual(
+      expect.stringContaining(PINNED.languageId),
+    );
+    expect(delivered).toContainEqual(
+      expect.stringMatching(/^Measured by REA: .*\bSALT\b.*\bSALTU\b/su),
+    );
     expect(
       ghidraXtensaLimitations({
         path: "/other.elf",
