@@ -84,10 +84,18 @@ export const readXtensaElfAbi = async (
     return unavailable("More than one section is named .xtensa.info.");
   if (info.type !== SHT_NOTE)
     return unavailable(".xtensa.info is not an SHT_NOTE section.");
+  // A validated SHT_NOTE extent lies inside the file, so its size is exact.
   if (info.size > BigInt(XTENSA_INFO_MAX_BYTES))
-    return unavailable(
-      `.xtensa.info declares ${String(info.size)} bytes, above REA's inspected bound of ${XTENSA_INFO_MAX_BYTES} bytes.`,
-    );
+    return {
+      status: "unavailable",
+      reason: `.xtensa.info declares ${String(info.size)} bytes, above REA's fixed ${XTENSA_INFO_MAX_BYTES}-byte inspection bound. This release has no runtime override, and runtime analysis settings do not raise this bound.`,
+      limit: {
+        boundary: "xtensa_info",
+        maximum_bytes: XTENSA_INFO_MAX_BYTES,
+        declared_bytes: Number(info.size),
+        runtime_override: false,
+      },
+    };
   const contents = await read(Number(info.offset), Number(info.size));
   if (contents === undefined) return truncated;
   return parseXtensaInfoAbi(contents, directory.little);

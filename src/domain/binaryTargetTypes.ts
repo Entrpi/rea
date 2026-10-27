@@ -128,7 +128,20 @@ export type XtensaAbiDeclaration =
   /** Examined: no `.xtensa.info` section, or a note without an `ABI=` key. */
   | { readonly status: "absent" }
   /** The declaration is unreadable or malformed; the ABI remains unknown. */
-  | { readonly status: "unavailable"; readonly reason: string };
+  | {
+      readonly status: "unavailable";
+      readonly reason: string;
+      /** Present when a fixed REA bound, not the file, stopped the read. */
+      readonly limit?: XtensaInfoBound;
+    };
+
+/** A fixed inspection bound; this release has no runtime override for it. */
+export interface XtensaInfoBound {
+  readonly boundary: "xtensa_info";
+  readonly maximum_bytes: number;
+  readonly declared_bytes: number;
+  readonly runtime_override: false;
+}
 
 /** Byte range of the selected slice inside its universal Mach-O container. */
 export interface UniversalMachOSlice {

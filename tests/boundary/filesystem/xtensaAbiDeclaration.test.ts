@@ -142,11 +142,6 @@ describe("Xtensa ELF target resolution", () => {
       "not an SHT_NOTE section",
     ],
     [
-      "an oversized .xtensa.info",
-      xtensaElf({ notes: elfNote("Xtensa_Info", 1, Buffer.alloc(5000)) }),
-      "above REA's inspected bound of 4096 bytes",
-    ],
-    [
       "an unreadable section name",
       (() => {
         const bytes = xtensaElf();
@@ -172,6 +167,27 @@ describe("Xtensa ELF target resolution", () => {
     expect(target.xtensa.abi).toMatchObject({
       status: "unavailable",
       reason: expect.stringContaining(reason),
+    });
+    // Only REA's own fixed bound attaches limit facts.
+    expect(target.xtensa.abi).not.toHaveProperty("limit");
+    expect(ghidraXtensaUnsupportedReason(target)).toContain(
+      "does not infer the windowed ABI",
+    );
+  });
+
+  it("reports the fixed .xtensa.info bound as structured limit facts", async () => {
+    // A 12-byte note header, the 12-byte owner and a 5000-byte descriptor.
+    const target = await resolveFixture(
+      xtensaElf({ notes: elfNote("Xtensa_Info", 1, Buffer.alloc(5000)) }),
+    );
+    expect(target.xtensa.abi).toMatchObject({
+      status: "unavailable",
+      limit: {
+        boundary: "xtensa_info",
+        maximum_bytes: 4096,
+        declared_bytes: 5024,
+        runtime_override: false,
+      },
     });
     expect(ghidraXtensaUnsupportedReason(target)).toContain(
       "does not infer the windowed ABI",

@@ -44,7 +44,8 @@ guessing a compatible profile:
 ESP-IDF builds for ESP32, ESP32-S2 and ESP32-S3 declare `e_flags` 0x300 and
 `ABI=0`. The header does not identify the core configuration, so this lane cannot
 tell an ESP32 from another Xtensa core with the same declarations. REA reads at
-most 4096 bytes of `.xtensa.info`; binutils writes 56.
+most 4096 bytes of `.xtensa.info`; binutils writes 56. The bound is fixed: this
+release has no runtime override, and runtime analysis settings do not raise it.
 
 ## Why the language is pinned
 
