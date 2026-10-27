@@ -86,6 +86,7 @@ const artifactFormatSchema = z.enum([
   "file",
   "pyinstaller",
   "node-sea",
+  "esp-image",
   "unknown",
 ]);
 
@@ -93,6 +94,7 @@ const artifactFormatSchema = z.enum([
 const artifactContentFormatSchema = artifactFormatSchema.extract([
   "zip",
   "godot-pck",
+  "esp-image",
   "mach-o-universal",
   "mach-o",
   "elf",

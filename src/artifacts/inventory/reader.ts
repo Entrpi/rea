@@ -69,6 +69,11 @@ export const inventoryCoverage = (
               "Node SEA inventory establishes the injected blob, flags, fuse sentinel, main script, optional code cache, snapshot, and assets. V8 snapshots and code cache are not deserialized, and the application is not executed.",
             ]
           : []),
+        ...(reader.format === "esp-image"
+          ? [
+              "ESP image inventory reads the header-declared segments, checksum, appended SHA-256, descriptor and Secure Boot v2 signature blocks. Segment classification follows ESP-IDF v6.1 should_map and should_load for a cold boot and does not check RAM ranges; signatures are not cryptographically verified, and code is not disassembled.",
+            ]
+          : []),
         ...traversal.limitations,
       ],
     };
@@ -92,7 +97,8 @@ export const inventoryCoverage = (
     format === "directory" ||
     format === "asar" ||
     format === "godot-pck" ||
-    format === "node-sea"
+    format === "node-sea" ||
+    format === "esp-image"
   )
     return {
       coverage: { scope: "container-entries", status: "unknown" },

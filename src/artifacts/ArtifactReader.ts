@@ -179,6 +179,7 @@ export interface ArtifactReader {
     | "godot-pck"
     | "pyinstaller"
     | "node-sea"
+    | "esp-image"
     | "file";
   entries(
     signal?: AbortSignal,
