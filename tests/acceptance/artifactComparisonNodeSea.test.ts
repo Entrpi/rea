@@ -7,7 +7,10 @@ import {
   artifactInventoryResultSchema,
   type ArtifactInventoryResult,
 } from "../../src/domain/artifactGraph.js";
-import { artifactComparisonResultSchema } from "../../src/domain/artifactComparison.js";
+import {
+  artifactComparisonResultSchema,
+  FORMAT_DECLARATION_UNKNOWN_LIMITATION,
+} from "../../src/domain/artifactComparison.js";
 import { artifactInspectionResultSchema } from "../../src/domain/artifactInspection.js";
 import {
   artifactGraphDigest,
@@ -175,6 +178,7 @@ it("compares raw SEA asset keys without interpreting serialization order as meta
     dimensions: ["availability"],
     evidence_links: [historical.evidence_id, right.evidence_id],
   });
+  expect(unknown.limitations).toContain(FORMAT_DECLARATION_UNKNOWN_LIMITATION);
   const reversed = await compare(right, historical);
   expect(
     reversed.changes.find(({ logical_path }) => logical_path === nfc),

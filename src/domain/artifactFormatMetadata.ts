@@ -122,11 +122,6 @@ export const nodeSeaEntryMetadataSchema = z.strictObject({
   index: uint32,
 });
 
-/** Runtime member identity, independent of blob layout and directory order. */
-export const nodeSeaEntryDeclaration = (
-  metadata: z.infer<typeof nodeSeaEntryMetadataSchema>,
-) => ({ role: metadata.role, source_path: metadata.source_path });
-
 const uint8 = z.number().int().min(0).max(0xff);
 const uint16 = z.number().int().min(0).max(0xffff);
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/u);
@@ -233,14 +228,6 @@ export type EspImageSegmentMetadata = z.infer<
   typeof espImageSegmentMetadataSchema
 >;
 
-/**
- * What a segment header declares: where its bytes load and how many there
- * are. Header offsets are layout, and the classification is derived.
- */
-export const espImageSegmentDeclaration = (
-  metadata: EspImageSegmentMetadata,
-) => ({ load_addr: metadata.load_addr, data_len: metadata.data_len });
-
 /** One Secure Boot v2 block with its 0xE7 magic and a matching CRC32. */
 export const espImageSignatureBlockMetadataSchema = z.strictObject({
   kind: z.literal("esp-image-signature-block"),
@@ -294,21 +281,6 @@ export const espFlashPartitionMetadataSchema = z.strictObject({
 export type EspFlashPartitionMetadata = z.infer<
   typeof espFlashPartitionMetadataSchema
 >;
-
-/** What a partition entry declares; its index is layout. */
-export const espFlashPartitionDeclaration = (
-  metadata: EspFlashPartitionMetadata,
-) => ({
-  label: metadata.label,
-  label_hex: metadata.label_hex,
-  type: metadata.type,
-  subtype: metadata.subtype,
-  flash_address: metadata.flash_address,
-  size: metadata.size,
-  encrypted: metadata.encrypted,
-  readonly: metadata.readonly,
-  unknown_flags: metadata.unknown_flags,
-});
 
 /** ESP image facts for a region of a dump; offsets are relative to the region. */
 const espFlashImageFactsSchema = z.strictObject({
@@ -444,3 +416,117 @@ export const artifactFormatMetadataSchema = z.discriminatedUnion("kind", [
 export type ArtifactFormatMetadata = z.infer<
   typeof artifactFormatMetadataSchema
 >;
+
+type FormatMetadataByKind = {
+  readonly [Metadata in ArtifactFormatMetadata as Metadata["kind"]]: Metadata;
+};
+type FormatMetadataKind = keyof FormatMetadataByKind;
+
+/**
+ * What each kind declares beyond its own bytes, which artifact comparison
+ * compares, or why comparison uses none of its facts. Every kind needs an
+ * entry, so a new kind does not compile without this decision; a new field
+ * of an existing kind still needs a review of its projection. For node-less
+ * metadata records, the projection is everything comparison checks.
+ */
+const declarationsByKind: {
+  readonly [Kind in FormatMetadataKind]:
+    | {
+        readonly declaration: (
+          metadata: FormatMetadataByKind[Kind],
+        ) => FormatMetadataDeclaration["facts"];
+      }
+    | { readonly notCompared: string };
+} = {
+  "godot-pck": {
+    notCompared:
+      "Its fields come from the pack's own bytes, which content comparison covers.",
+  },
+  "godot-pck-entry": {
+    notCompared:
+      "index and declared_offset are layout; flags and md5_status repeat occurrence facts; source_path spells Godot's lookup path in a version-dependent way. docs/godot-pck.md gives the evidence.",
+  },
+  pyinstaller: {
+    notCompared:
+      "Its fields come from the archive's own bytes, which content comparison covers.",
+  },
+  /** Declaration identity that is stable across archive layout changes. */
+  "pyinstaller-entry": {
+    declaration: (metadata) => ({
+      container: metadata.container,
+      container_name: metadata.container_name,
+      source_name: metadata.source_name,
+      type_code: metadata.type_code,
+    }),
+  },
+  "node-sea": {
+    notCompared:
+      "Its fields come from the carrier's own bytes, which content comparison covers.",
+  },
+  /** Runtime member identity, independent of blob layout and directory order. */
+  "node-sea-entry": {
+    declaration: (metadata) => ({
+      role: metadata.role,
+      source_path: metadata.source_path,
+    }),
+  },
+  "esp-image": {
+    notCompared:
+      "Its fields come from the image's own bytes, which content comparison covers.",
+  },
+  /**
+   * What a segment header declares: where its bytes load and how many there
+   * are. Header offsets are layout, and the classification is derived.
+   */
+  "esp-image-segment": {
+    declaration: (metadata) => ({
+      load_addr: metadata.load_addr,
+      data_len: metadata.data_len,
+    }),
+  },
+  "esp-image-signature-block": {
+    notCompared:
+      "Its fields come from the block's own bytes, which content comparison covers, and image_digest_matches follows the image's content.",
+  },
+  "esp-flash-image": {
+    notCompared:
+      "Its fields come from the dump's bytes and from the caller's flash_offset and partition_table_offset, which are target identity; each partition's range, compared by content, reflects them.",
+  },
+  /** What a partition entry declares; its index is layout. */
+  "esp-flash-partition": {
+    declaration: (metadata) => ({
+      label: metadata.label,
+      label_hex: metadata.label_hex,
+      type: metadata.type,
+      subtype: metadata.subtype,
+      flash_address: metadata.flash_address,
+      size: metadata.size,
+      encrypted: metadata.encrypted,
+      readonly: metadata.readonly,
+      unknown_flags: metadata.unknown_flags,
+    }),
+  },
+};
+
+/** A declaration that artifact comparison compares within its kind. */
+export interface FormatMetadataDeclaration {
+  readonly kind: FormatMetadataKind;
+  readonly facts: Readonly<Record<string, unknown>>;
+}
+
+// Generic in the kind, so each projection receives its own metadata type.
+const declarationOf = <Kind extends FormatMetadataKind>(
+  kind: Kind,
+  metadata: FormatMetadataByKind[Kind],
+): FormatMetadataDeclaration | undefined => {
+  const entry = declarationsByKind[kind];
+  return "declaration" in entry
+    ? { kind, facts: entry.declaration(metadata) }
+    : undefined;
+};
+
+/** The compared declaration, or undefined when comparison uses none. */
+export const formatMetadataDeclaration = (
+  metadata: ArtifactFormatMetadata | undefined,
+): FormatMetadataDeclaration | undefined =>
+  metadata === undefined ? undefined : declarationOf(metadata.kind, metadata);

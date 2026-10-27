@@ -16,6 +16,25 @@ by default; `--integrity-policy record-and-continue` retains the observed bytes
 and an explicit untrusted contradiction. An all-zero MD5 is an unknown claim,
 not a verified digest.
 
+Artifact comparison pairs members by `logical_path`, the stored path without
+`res://`, and compares their bytes and occurrence facts. It does not compare
+`godot-pck-entry` metadata. Godot 4.3
+[stores `res://` paths](https://github.com/godotengine/godot/blob/77dcf97d82cbfe4e4615475fa52ca03da645dbd8/editor/export/editor_export_platform.cpp#L228)
+and [keys members by them](https://github.com/godotengine/godot/blob/77dcf97d82cbfe4e4615475fa52ca03da645dbd8/core/io/file_access_pack.cpp#L50-L52).
+Godot 4.4.1
+[stores paths without the prefix](https://github.com/godotengine/godot/blob/49a5bc7b616bd04689a2c89e89bda41f50241464/editor/export/editor_export_platform.cpp#L257-L260)
+and [removes it before keying](https://github.com/godotengine/godot/blob/49a5bc7b616bd04689a2c89e89bda41f50241464/core/io/file_access_pack.cpp#L48-L50).
+Each version finds `res://scenes/main.gd` in its own export, but comparing the
+stored `source_path` would mark every member changed between such exports.
+`logical_path` names the member Godot's lookup finds, except in two cases.
+REA normalizes Unicode to NFC, so a member renamed only between Unicode forms
+compares unchanged, although Godot treats it as another path. Godot reads `\`
+as `/` and REA keeps it literal, so a member spelled with backslashes compares
+as removed and added. Directory order and offsets are layout. The encryption
+bit, the only member flag REA admits, is the occurrence's `encrypted` field; a
+member that becomes encrypted compares `unknown`, because its bytes are
+unavailable.
+
 ## CLI
 
 Start with a compact summary and keep the complete Evidence bundle:
