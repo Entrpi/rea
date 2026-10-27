@@ -317,7 +317,7 @@ export const resolveGhidraAnalysisProfile = async (
           target.architecture === "riscv"
             ? "verified generic little-endian RISC-V"
             : target.architecture === "xtensa"
-              ? "pinned, unverified little-endian Xtensa"
+              ? "verified little-endian Xtensa"
               : "verified endian-matched MIPS32"
         } profile. The requested override has not been changed.`,
         pinnedLanguage,

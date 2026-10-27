@@ -373,11 +373,13 @@ const registerOverrideCases = () => {
 };
 
 const registerProviderCases = () => {
-  it("labels the lane unverified with every result", () => {
+  it("states the verified scope and the measured decoding gap with every result", () => {
     const notes = ghidraXtensaLimitations(target());
     expect(notes).toHaveLength(3);
-    expect(notes[0]).toContain("Unverified lane");
+    expect(notes[0]).toContain("not verified function by function");
+    expect(notes.join(" ")).not.toMatch(/unverified lane/iu);
     expect(notes.join(" ")).toContain("Xtensa:LE:32:default");
+    expect(notes[2]).toMatch(/^Measured by REA: .*SALT\/SALTU/u);
     expect(
       ghidraXtensaLimitations({
         path: "/other.elf",

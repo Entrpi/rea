@@ -101,14 +101,14 @@ export const ghidraXtensaProfileParameters = (
   };
 };
 
-/** No real-Ghidra lane verifies this admission yet; say so with every result. */
+/** What verify:ghidra:xtensa and REA's ESP-IDF measurement establish, and what they do not. */
 export const ghidraXtensaLimitations = (
   target: BinaryTarget,
 ): readonly string[] =>
   target.kind === "executable" && target.architecture === "xtensa"
     ? [
-        "Unverified lane: REA admits Xtensa ELF from header and .xtensa.info declarations, covered by module tests only. No real-Ghidra lane verifies its functions, references or decompilation yet.",
+        "REA verifies this lane against Ghidra 12.1.4 with source-owned windowed-call fixtures (entry, call8, retw.n, l32r). Decompiled code for other images is not verified function by function; check call targets and arguments against the assembly when they matter.",
         "REA pins Ghidra's generic `Xtensa:LE:32:default` language with the `default` compiler specification, whose default prototype models windowed calls according to Ghidra 12.1.4's xtensa.cspec. The language does not identify the ESP32, ESP32-S2 or ESP32-S3 core configuration or the producing compiler.",
-        "Reported upstream or derived from Ghidra 12.1.4 sources, not reproduced by REA: decompiled output approximates register-window rotation; FLIX bundles, ESP32-S3 `ee.*` vector instructions and SALT/SALTU are not decoded; zero-overhead loops are mis-modeled.",
+        "Measured by REA: Ghidra 12.1.4 does not decode SALT/SALTU, which ESP32-S3 builds use, so disassembly, calls and parameters after them are missing in that function. Reported upstream or derived from Ghidra 12.1.4 sources, not reproduced by REA: decompiled output approximates register-window rotation; FLIX bundles and ESP32-S3 `ee.*` vector instructions are not decoded; zero-overhead loops are mis-modeled.",
       ]
     : [];

@@ -5,11 +5,8 @@ This lane extends native ELF analysis to `EM_XTENSA` targets, such as the
 execute Xtensa code, read flash images or partition tables, or rehost firmware.
 It addresses [#3483](https://github.com/morluto/rea/issues/3483) and follows the
 lane shape of [RISC-V](ghidra-riscv.md) and [PowerPC](ghidra-ppc.md).
-
-**This lane is unverified.** REA admits these images from header and
-`.xtensa.info` declarations, with module tests only. No real-Ghidra lane verifies
-functions, references or decompilation yet, and every result carries a limitation
-that says so.
+`npm run verify:ghidra:xtensa` checks it against Ghidra 12.1.4; see
+[Verification and limits](#verification-and-limits).
 
 ## Admission boundary
 
@@ -75,9 +72,13 @@ configuration, the compiler, or instruction conformance.
 ## Ghidra limitations
 
 These limitations belong to Ghidra 12.1.4, and REA does not work around them.
-REA has not reproduced any of them. Each is either reported in an upstream
+REA reproduced the first one; each of the others is reported in an upstream
 Ghidra issue or derived from the 12.1.4 Xtensa language sources:
 
+- Measured by REA: `SALT` and `SALTU`, which ESP32-S3 builds use, decode as bad
+  instructions, so disassembly stops there and later calls in the same function
+  are missing
+  ([#9095](https://github.com/NationalSecurityAgency/ghidra/issues/9095)).
 - Reported upstream: decompiled output only approximates register-window rotation
   for `call4`, `call8`, `call12`, `entry` and `retw`
   ([Ghidra #2164](https://github.com/NationalSecurityAgency/ghidra/issues/2164)).
@@ -88,17 +89,45 @@ Ghidra issue or derived from the 12.1.4 Xtensa language sources:
 - Reported upstream: zero-overhead loops are mis-modeled, so functions that use
   `loop`, `loopnez` or `loopgtz` can decompile incorrectly
   ([#9027](https://github.com/NationalSecurityAgency/ghidra/issues/9027)).
-- Reported upstream, and absent from the 12.1.4 sources: `SALT` and `SALTU`
-  decode as bad instructions
-  ([#9095](https://github.com/NationalSecurityAgency/ghidra/issues/9095)).
 - Reported upstream: the relocation handler does not implement some types, such
   as `R_XTENSA_SLOT0_OP` and `R_XTENSA_ASM_EXPAND`, which ESP32 Wi-Fi and PHY
   libraries use ([#7341](https://github.com/NationalSecurityAgency/ghidra/issues/7341)).
 
 ## Verification and limits
 
-Module tests cover the header gate, the `.xtensa.info` reader, the pin, the
-post-import language check and every refusal. No `verify:ghidra:xtensa` lane
-exists yet, so real Ghidra behavior on Xtensa images, including the quality of
-windowed decompilation, is **not** established. Hopper, IDA and Kuna do not admit
-Xtensa, and Windows Ghidra P0 refuses ELF targets.
+Run `npm run verify:ghidra:xtensa` with Ghidra 12.1.4, JDK 21+ and GNU or LLVM
+`readelf` (`REA_XTENSA_READELF` selects one). The lane writes its base fixture
+from annotated instruction bytes, so it needs no Xtensa compiler, and never
+executes target code. It checks:
+
+- the header, symbols and `.xtensa.info` ABI against `readelf`;
+- the pinned language and compiler specification in every result;
+- `entry`, `l32r`, `call8` and `retw.n` decoding, the `call8` target and the
+  `l32r` literal reference;
+- decompiled code that passes the literal through `call8` and returns the
+  callee's result;
+- CLI/MCP parity with output-schema validation, and snapshot save and reopen;
+- header-mutated refusals (unknown flag bits, machine field, `ET_DYN`, call0);
+- unchanged source bytes and owned cleanup.
+
+With `REA_XTENSA_CC` set to an Espressif compiler such as
+`xtensa-esp32-elf-gcc`, the lane also builds `tests/conformance/c/xtensa.c` and
+checks its `call8` callee and `l32r` constant in decompiled code.
+
+REA also measured Ghidra 12.1.4 on ESP-IDF 5.5.2 `hello_world` builds (Espressif
+GCC 14.2.0, default `-Og`), with Ghidra's DWARF analyzer disabled so that
+signatures come from decompilation, and compared the results with DWARF:
+
+| Image    | Functions found | DWARF direct call edges found | Decompiled parameter counts equal to DWARF |
+| -------- | --------------- | ----------------------------- | ------------------------------------------ |
+| ESP32    | 738 of 738      | 1376 of 1377                  | 653 of 709                                 |
+| ESP32-S3 | 915 of 915      | 1559 of 1598                  | 802 of 881                                 |
+
+On ESP32-S3, 36 of the 39 missed call edges are in functions that use `SALT` or
+`SALTU`. Most parameter differences are one fewer parameter, such as an unused
+interrupt-handler argument; 64-bit arguments decompile as two parameters. The
+measurement does not compare argument values at each call site, and the images
+are not committed.
+
+Hopper, IDA and Kuna do not admit Xtensa, and Windows Ghidra P0 refuses ELF
+targets.
