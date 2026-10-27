@@ -13,7 +13,12 @@ import {
   RAW_ARCHITECTURE_VARIANT_NAMES,
   RAW_ARCHITECTURE_VARIANTS,
 } from "../domain/rawArchitectureVariant.js";
-import { rawLoadAtEntry } from "../domain/rawBinary.fixture.js";
+import type { RawBinaryLoad } from "../domain/binaryTargetTypes.js";
+import {
+  admittedRawLoad,
+  vectorTableWords,
+  rawLoadAtEntry,
+} from "../domain/rawBinary.fixture.js";
 
 describe("raw-binary Ghidra language binding", () => {
   it("maps the big-endian m68k family to the default 68000 language", () => {
@@ -329,5 +334,201 @@ describe("raw-binary independent load-image checks", () => {
         f.observation,
       ).ok,
     ).toBe(false);
+  });
+});
+
+const thumbImage = (rawLoad: RawBinaryLoad, tmode: string | null = "0x1") => {
+  const f = fixtureRawBinaryLoadImage();
+  const target = {
+    ...f.target,
+    architecture: "arm" as const,
+    availableArchitectures: ["arm" as const],
+    rawLoad,
+  };
+  const mapping = f.observation.mappings[0];
+  if (mapping === undefined) throw new Error("Missing source mapping fixture");
+  mapping.start = rawLoad.baseAddress;
+  mapping.end = `0x${(BigInt(rawLoad.baseAddress) + 3n).toString(16)}`;
+  f.observation.language_id = ghidraRawBinaryLanguage(
+    "arm",
+    rawLoad.architectureVariant,
+  ).languageId;
+  // Processor-defined labels are not applied, so the seeded entry is the only one.
+  f.observation.entry_points = [rawLoad.entryPoint];
+  f.observation.entry_context = [
+    {
+      address: rawLoad.entryPoint,
+      registers: [{ name: "TMode", value_hex: tmode }],
+    },
+  ];
+  return { ...f, target };
+};
+const resetLoad = admittedRawLoad(
+  {
+    architecture: "arm",
+    architectureVariant: "armv8-m.main",
+    entryPoint: undefined,
+    baseAddress: "0x08000000",
+    fileBytes: 8,
+  },
+  vectorTableWords(0x20005000, 0x08000003),
+);
+
+describe("raw-binary segments load image", () => {
+  it("verifies a Reset-derived Thumb entry at the base", () => {
+    const f = thumbImage(resetLoad);
+    const result = attestGhidraRawBinaryLoadImage(
+      f.snapshot,
+      f.target,
+      f.observation,
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        status: "verified",
+        variant: "segments",
+        version: 1,
+        format: "raw-binary",
+        architecture: "arm",
+        architecture_variant: "armv8-m.main",
+        language_id: "ARM:LE:32:v8-m",
+        file_bytes: 4,
+        segments: [
+          {
+            name: "image",
+            address: "0x8000000",
+            size: 4,
+            backing: { kind: "source-range", source: 0, offset: 0 },
+          },
+        ],
+        entries: [
+          {
+            address: "0x8000002",
+            isa_mode: "thumb",
+            role: "reset",
+            basis: "vector-table",
+          },
+        ],
+        vector_table: {
+          address: "0x8000000",
+          initial_stack_pointer: "0x20005000",
+          reset_vector: "0x08000003",
+        },
+        checks: expect.arrayContaining([
+          expect.objectContaining({
+            name: "entry_context.TMode",
+            matched: true,
+            observed: "0x1",
+          }),
+        ]),
+      },
+    });
+  });
+
+  it.each([null, "0x0"])("refuses verification when TMode is %s", (tmode) => {
+    const f = thumbImage(resetLoad, tmode);
+    expect(
+      attestGhidraRawBinaryLoadImage(f.snapshot, f.target, f.observation),
+    ).toMatchObject({
+      ok: true,
+      value: {
+        status: "mismatch",
+        checks: expect.arrayContaining([
+          expect.objectContaining({
+            name: "entry_context.TMode",
+            matched: false,
+            observed: tmode,
+          }),
+        ]),
+      },
+    });
+  });
+
+  it("refuses verification when Ghidra reports another entry", () => {
+    const f = thumbImage(resetLoad);
+    // Applying ARMCortex.pspec's labels would make each vector slot an entry.
+    f.observation.entry_points = ["0x4", "0x8", resetLoad.entryPoint];
+    expect(
+      attestGhidraRawBinaryLoadImage(f.snapshot, f.target, f.observation),
+    ).toMatchObject({
+      ok: true,
+      value: {
+        status: "mismatch",
+        checks: expect.arrayContaining([
+          expect.objectContaining({ name: "entry_points", matched: false }),
+        ]),
+      },
+    });
+  });
+
+  it("retains a mismatch when Ghidra used the generic ARM decoder", () => {
+    const f = thumbImage(resetLoad);
+    f.observation.language_id = "ARM:LE:32:v7";
+    expect(
+      attestGhidraRawBinaryLoadImage(f.snapshot, f.target, f.observation),
+    ).toMatchObject({ ok: true, value: { status: "mismatch" } });
+  });
+
+  it("describes a caller-named Thumb entry without a vector table", () => {
+    const f = thumbImage(
+      admittedRawLoad({
+        architecture: "arm",
+        architectureVariant: "armv7-m",
+        baseAddress: "0x8000000",
+        entryPoint: "0x8000002",
+        fileBytes: 4,
+      }),
+    );
+    const result = attestGhidraRawBinaryLoadImage(
+      f.snapshot,
+      f.target,
+      f.observation,
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        status: "verified",
+        variant: "segments",
+        architecture_variant: "armv7-m",
+        language_id: "ARM:LE:32:Cortex",
+        entries: [
+          {
+            address: "0x8000002",
+            isa_mode: "thumb",
+            role: "entry",
+            basis: "caller",
+          },
+        ],
+      },
+    });
+    if (!result.ok) throw new Error(result.error);
+    expect(result.value).not.toHaveProperty("vector_table");
+  });
+
+  it("reports the same load image for spellings of the same load", () => {
+    // A reused session keeps the first admitted load; it must report what the
+    // current request would.
+    const spelled = (baseAddress: string, vectorTableAddress?: string) => {
+      const f = thumbImage(
+        admittedRawLoad(
+          {
+            architecture: "arm",
+            architectureVariant: "armv8-m.main",
+            entryPoint: undefined,
+            baseAddress,
+            ...(vectorTableAddress === undefined ? {} : { vectorTableAddress }),
+            fileBytes: 8,
+          },
+          vectorTableWords(0x20005000, 0x08000003),
+        ),
+      );
+      return attestGhidraRawBinaryLoadImage(
+        f.snapshot,
+        f.target,
+        f.observation,
+      );
+    };
+    expect(spelled("0x8000000")).toEqual(spelled("0x08000000"));
+    expect(spelled("0x8000000")).toEqual(spelled("0x8000000", "0x08000000"));
   });
 });

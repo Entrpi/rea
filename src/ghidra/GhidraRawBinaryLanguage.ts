@@ -2,7 +2,11 @@ import type {
   RawArchitectureVariant,
   RawEntryIsaMode,
 } from "../domain/rawArchitectureVariant.js";
-import type { RawBinaryAdmission } from "../domain/rawBinary.js";
+import type { RawBinaryLoad } from "../domain/binaryTargetTypes.js";
+import {
+  isLegacyRawLoad,
+  type RawBinaryAdmission,
+} from "../domain/rawBinary.js";
 
 /** Bound Ghidra language for a caller-supplied raw-binary architecture. */
 export interface GhidraRawBinaryLanguage {
@@ -115,3 +119,30 @@ export const ghidraRawBinaryLanguage = (
       };
   }
 };
+
+const GENERIC_RAW_LANGUAGES =
+  "Little-endian generic Ghidra languages are used for x86, x86_64, arm, arm64, and NMOS 6502; m68k uses the big-endian 68000 default language, which decodes the 68040 superset. Big-endian ARM, 65C02, 65816, separate 68020/68030/CPU32/ColdFire variants, and other processor variants are unsupported; ARM M-profile code needs architecture_variant.";
+
+/** Limitations that every result from a raw-binary session carries. */
+export const ghidraRawBinaryLimitations = (
+  load: RawBinaryLoad,
+  language: GhidraRawBinaryLanguage,
+): string[] =>
+  isLegacyRawLoad(load)
+    ? [
+        "Headerless raw-binary analysis uses the caller-supplied architecture and entry address; file offset 0 is mapped at that address. Headers are not discovered from file bytes.",
+        GENERIC_RAW_LANGUAGES,
+        "Static analysis does not emulate reset vectors, memory-mapped I/O, or firmware boot sequences.",
+      ]
+    : [
+        `Headerless raw-binary analysis maps file offset 0 at ${load.baseAddress} and seeds the entry ${load.entryPoint}. Headers are not discovered from file bytes.`,
+        load.architectureVariant === undefined
+          ? GENERIC_RAW_LANGUAGES
+          : `The caller-named ${load.architectureVariant} variant is decoded with ${language.languageId} in Thumb state. The decoder does not refuse instructions that this profile lacks, and floating-point and TrustZone state are not modeled.`,
+        ...(load.entrySource.kind === "vector-table"
+          ? [
+              `The entry is the Reset vector ${load.entrySource.resetVector} read from the vector table at ${load.entrySource.address}, with bit 0 cleared. The initial stack pointer ${load.entrySource.initialStackPointer} is recorded and not validated.`,
+            ]
+          : []),
+        "Only the file is mapped. SRAM, peripheral and system blocks are not created; Ghidra's processor-defined vector labels are not applied, so vectors other than Reset are neither labels nor entries; and reset, memory-mapped I/O, and boot sequences are not emulated.",
+      ];
