@@ -553,6 +553,12 @@ public final class ReaGhidraBridge extends HeadlessScript {
         String softFloat = currentProgram.getOptions(ghidra.program.model.listing.Program.PROGRAM_INFO)
             .getString("REA MIPS soft-float storage", null);
         if (softFloat != null) result.add("mips_soft_float_storage", JsonParser.parseString(softFloat));
+        // Written by ReaGhidraDwarfCallingConvention before auto-analysis; REA
+        // requires it exactly when the committed profile names a DWARF prototype.
+        String dwarfCallingConvention = currentProgram.getOptions(ghidra.program.model.listing.Program.PROGRAM_INFO)
+            .getString("REA DWARF calling convention", null);
+        if (dwarfCallingConvention != null)
+            result.add("dwarf_calling_convention", JsonParser.parseString(dwarfCallingConvention));
         return result;
     }
 

@@ -6,10 +6,14 @@ sequence, or rehost firmware. Headerless dumps use the
 [raw-binary M-profile inputs](raw-binary.md#arm-m-profile-images) instead.
 
 Ghidra 12.1.4 chooses the language of an ELF from its header. Its `ARM.opinion`
-selects `ARM:LE:32:v8` for every little-endian `EM_ARM` image. That language
-starts in ARM state, and its processor specification names the A-profile
-exception vectors at `0x0`. M-profile code runs only in Thumb state, so REA
-selects the M-profile decoder from the image's build attributes.
+selects `ARM:LE:32:v8` for every little-endian `EM_ARM` image. That language's
+default instruction state is ARM, it has no v8-M system registers such as
+`MSPLIM`, and its processor specification names the A-profile exception vectors
+at `0x0`. Ghidra decodes the entry, the functions that the ELF's symbols mark as
+Thumb and the code they call correctly under either language, but code without
+such a marker, such as a seeded vector handler, decodes in ARM state. M-profile
+code runs only in Thumb state, so REA selects the M-profile decoder from the
+image's build attributes.
 
 ## M-profile lane
 

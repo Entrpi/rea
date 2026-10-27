@@ -11,6 +11,18 @@ export interface GhidraLanguageOverride {
   readonly compilerSpecId?: string;
 }
 
+/**
+ * Whether a caller-selected language asks for a lane's pinned one: the same
+ * language, with the same compiler specification or none.
+ */
+export const ghidraLanguageOverrideMatches = (
+  override: GhidraLanguageOverride,
+  pinned: GhidraLanguageOverride,
+): boolean =>
+  override.languageId === pinned.languageId &&
+  (override.compilerSpecId === undefined ||
+    override.compilerSpecId === pinned.compilerSpecId);
+
 // Ghidra language IDs are four colon-separated fields; variants may contain
 // spaces ("x86:LE:16:Real Mode") but never leading or trailing whitespace.
 // Stock .ldefs also use "/" in processors ("M16C/60") and LEBE for ARM BE8

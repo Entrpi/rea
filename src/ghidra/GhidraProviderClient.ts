@@ -87,6 +87,13 @@ import {
   GHIDRA_PSP_LIMITATIONS,
 } from "./GhidraPspProfile.js";
 import { ghidraPspExtensionSchema } from "./GhidraPspExtension.js";
+import {
+  ghidraArmDwarfCallingConvention,
+  ghidraArmDwarfCallingConventionFailure,
+  ghidraArmDwarfCallingConventionLimitations,
+  ghidraArmLimitations,
+  ghidraArmProfileMismatchReason,
+} from "./GhidraArmProfile.js";
 import { ghidraRiscvLimitations } from "./GhidraRiscvProfile.js";
 import { ghidraPePdbLimitations } from "./GhidraPeProfile.js";
 import { unverifiedGhidraBuildLimitation } from "./GhidraReleasePolicy.js";
@@ -310,6 +317,21 @@ export const createGhidraProviderClient = (input: {
         diagnostics: { reason: mipsProfileMismatch },
       }),
     );
+  const armProfileMismatch = ghidraArmProfileMismatchReason(
+    target,
+    committedProfile.parameters,
+    parameterLanguage,
+  );
+  if (armProfileMismatch !== null)
+    return err(
+      new ProviderAdapterError("ghidra", "open_binary", {
+        diagnostics: { reason: armProfileMismatch },
+      }),
+    );
+  // Bound to the committed profile, which the check above ties to the target.
+  const armDwarfCallingConvention = ghidraArmDwarfCallingConvention(
+    committedProfile.parameters,
+  );
   const importLanguage = parameterLanguage;
   const disabledAnalyzers = ghidraProfileDisabledAnalyzers(
     committedProfile.parameters,
@@ -351,6 +373,8 @@ export const createGhidraProviderClient = (input: {
   ];
   // Replaced by the reported per-program outcome once the handshake is checked.
   const disabledAnalyzerLimitations: string[] = [];
+  // Replaced by the reported DWARF prototype outcome once the handshake is checked.
+  const armDwarfLimitations: string[] = [];
   const rawLanguage =
     target.format === "raw-binary"
       ? ghidraRawBinaryLanguage(
@@ -391,6 +415,7 @@ export const createGhidraProviderClient = (input: {
     ...ghidraMipsRelocatableLimitations(target),
     ...ghidraMipsSharedLimitations(target),
     ...ghidraRiscvLimitations(target),
+    ...ghidraArmLimitations(target, committedProfile.parameters),
   ];
   const providerLimitations =
     installation.platform === "win32"
@@ -475,7 +500,17 @@ export const createGhidraProviderClient = (input: {
           }
         : importLanguage === undefined
           ? {}
-          : { languageOverride: importLanguage }),
+          : {
+              languageOverride: importLanguage,
+              // The M-profile ARM ELF profile commits the same label policy.
+              ...(target.format === "elf" &&
+              committedProfile.parameters.processor_labels === "not-applied-v1"
+                ? { applyProcessorLabels: false as const }
+                : {}),
+              ...(armDwarfCallingConvention === undefined
+                ? {}
+                : { dwarfCallingConvention: armDwarfCallingConvention }),
+            }),
       ...(config.ghidraDisabledAnalyzers === undefined
         ? {}
         : { disabledAnalyzers: config.ghidraDisabledAnalyzers }),
@@ -558,6 +593,10 @@ export const createGhidraProviderClient = (input: {
         softFloat,
         info.mips_soft_float_storage,
       );
+      const dwarfReason = ghidraArmDwarfCallingConventionFailure(
+        armDwarfCallingConvention,
+        info.dwarf_calling_convention,
+      );
       extensionFailure =
         ghidraExtensionFailure(
           extensions,
@@ -574,6 +613,11 @@ export const createGhidraProviderClient = (input: {
           ? undefined
           : new ProviderAdapterError("ghidra", operation, {
               diagnostics: { reason: softFloatReason },
+            })) ??
+        (dwarfReason === undefined
+          ? undefined
+          : new ProviderAdapterError("ghidra", operation, {
+              diagnostics: { reason: dwarfReason },
             }));
       if (extensionFailure === undefined && info.analysis_seeds !== undefined)
         seedLimitations.splice(
@@ -595,6 +639,14 @@ export const createGhidraProviderClient = (input: {
           0,
           disabledAnalyzerLimitations.length,
           ...ghidraDisabledAnalyzerLimitations(info.disabled_analyzers),
+        );
+      if (extensionFailure === undefined)
+        armDwarfLimitations.splice(
+          0,
+          armDwarfLimitations.length,
+          ...ghidraArmDwarfCallingConventionLimitations(
+            info.dwarf_calling_convention,
+          ),
         );
     }
     if (extensionFailure === undefined) return undefined;
@@ -633,6 +685,7 @@ export const createGhidraProviderClient = (input: {
     ...targetLimitations,
     ...(psp ? GHIDRA_PSP_LIMITATIONS : []),
     ...softFloatLimitations,
+    ...armDwarfLimitations,
     ...ghidraExtensionLimitations(extensions),
     ...seedLimitations,
     ...disabledAnalyzerLimitations,
@@ -774,7 +827,8 @@ export const createGhidraProviderClient = (input: {
         extensions.length > 0 ||
         seeds !== undefined ||
         disabledAnalyzers !== undefined ||
-        softFloat
+        softFloat ||
+        armDwarfCallingConvention !== undefined
       ) {
         const started = await startSession(operation, options);
         if (!started.ok) return started;

@@ -6,7 +6,10 @@ import type {
 import { createFunctionCoordinateContext } from "../domain/native/functionCoordinateContext.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { createAnalysisProfile } from "../domain/analysisProfile.js";
-import type { GhidraLanguageOverride } from "../config/ghidraLanguageOverride.js";
+import {
+  ghidraLanguageOverrideMatches,
+  type GhidraLanguageOverride,
+} from "../config/ghidraLanguageOverride.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import {
   AnalysisCancelledError,
@@ -23,6 +26,10 @@ import {
   ghidraMipsProfileParameters,
   ghidraMipsLanguageOverride,
 } from "./GhidraMipsProfile.js";
+import {
+  ghidraArmLanguageOverride,
+  ghidraArmProfileParameters,
+} from "./GhidraArmProfile.js";
 import {
   ghidraRiscvLanguageOverride,
   ghidraRiscvProfileParameters,
@@ -84,6 +91,7 @@ export const ghidraPinnedLanguage = (
 ): GhidraLanguageOverride | undefined =>
   ghidraMipsLanguageOverride(target) ??
   ghidraRiscvLanguageOverride(target) ??
+  ghidraArmLanguageOverride(target) ??
   ghidraPowerPcLanguage(target);
 
 /** Policy conflicts belong to the selected settings, not to the target's support. */
@@ -274,16 +282,18 @@ export const resolveGhidraAnalysisProfile = async (
   const dosCom = target.format === "dos-com";
   const dos = dosMz || dosCom;
   const pinnedLanguage = ghidraPinnedLanguage(target);
-  const callerMaySelectLegacyMipsLanguage =
-    target.architecture === "mips" && isLegacyMipsAdmission(target);
+  // A deliberate override still wins over these pins: PowerPC variants such
+  // as Gekko, and lanes pinned after their targets already loaded under a
+  // caller-selected language (legacy MIPS and M-profile ARM ELF).
+  const callerMaySelectLanguage =
+    target.architecture === "powerpc" ||
+    target.architecture === "arm" ||
+    (target.architecture === "mips" && isLegacyMipsAdmission(target));
   if (
     pinnedLanguage !== undefined &&
-    target.architecture !== "powerpc" &&
-    !callerMaySelectLegacyMipsLanguage &&
+    !callerMaySelectLanguage &&
     languageOverride !== undefined &&
-    (languageOverride.languageId !== pinnedLanguage.languageId ||
-      (languageOverride.compilerSpecId !== undefined &&
-        languageOverride.compilerSpecId !== pinnedLanguage.compilerSpecId))
+    !ghidraLanguageOverrideMatches(languageOverride, pinnedLanguage)
   )
     return err(
       languageOverrideConflict(
@@ -401,6 +411,7 @@ export const resolveGhidraAnalysisProfile = async (
         ...analyzerParameters,
         ...ghidraMipsProfileParameters(target, languageOverride),
         ...ghidraRiscvProfileParameters(target),
+        ...ghidraArmProfileParameters(target, languageOverride),
         ...ghidraPowerPcProfileParameters(target),
         ...(pspExtension?.ok === true
           ? {
