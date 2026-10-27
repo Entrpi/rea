@@ -7,6 +7,7 @@ import {
 import type { BinaryTarget } from "../../domain/binaryTargetTypes.js";
 import { executableFormatHintSchema } from "../../domain/dosCom.js";
 import { createEvidence, parseEvidence } from "../../domain/evidence.js";
+import { rawLoadAtEntry } from "../../domain/rawBinary.fixture.js";
 import {
   createImmutableEvidenceBundle,
   parseEvidenceBundle,
@@ -82,8 +83,7 @@ const TARGETS: TargetFixtures = {
     format: "raw-binary",
     architecture: "m68k",
     availableArchitectures: ["m68k"],
-    entryPoint: "0x1000",
-    entryPointSource: "0x1000",
+    rawLoad: rawLoadAtEntry("0x1000"),
   },
   "gamecube-dol": {
     ...identity,
@@ -120,6 +120,7 @@ const TARGETS: TargetFixtures = {
   "godot-pck": { ...archive, format: "godot-pck" },
   dmg: { ...archive, format: "dmg" },
   pkg: { ...archive, format: "pkg" },
+  "esp-image": { ...archive, format: "esp-image" },
   plist: { ...artifact, format: "plist" },
   javascript: { ...artifact, format: "javascript" },
   "source-map": { ...artifact, format: "source-map" },
