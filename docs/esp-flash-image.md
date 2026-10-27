@@ -228,21 +228,25 @@ REA_ESP_IDF_PATH=/path/to/esp-idf \
   npm run verify:esp-flash
 ```
 
-It converts the conformance ELFs with esptool, builds a default and a
-relocated partition table with `gen_esp32part.py`, assembles dumps with
-`esptool merge-bin`, one of them written from flash `0x1000` with
-`--target-offset`, and writes OTA records with `otatool` through
-`tests/conformance/esp/flash_file_tool.py`. That script replaces parttool's
-esptool calls with reads and writes of the dump file, so otatool's own OTA
-logic runs unchanged. The lane then checks:
+It converts the conformance ELFs with esptool, builds a default, a
+relocated and a primary-entry partition table with `gen_esp32part.py`,
+assembles dumps with `esptool merge-bin`, one of them written from flash
+`0x1000` with `--target-offset`, and writes OTA records with `otatool`
+through `tests/conformance/esp/flash_file_tool.py`. That script replaces
+parttool's esptool calls with reads and writes of the dump file, so
+otatool's own OTA logic runs unchanged. The lane then checks:
 
 - the bootloader and app facts against `esptool image-info`;
 - every partition against `gen_esp32part.py`'s decoding of the table REA
   extracted;
-- both OTA records against `otatool read_otadata` after switching to slot 0
-  and then to slot 1, and the derived slot after each switch;
+- both OTA records against `otatool read_otadata` after switching to slot 0,
+  then to slot 1, then erasing the otadata, and the derived selection after
+  each: slot 0, slot 1, then the factory fallback;
 - that each extracted file is the dump's bytes at its range and that the
   source is unchanged;
+- a table with the primary `bootloader` and `partition_table` entries that
+  `--primary-bootloader-offset` fills, read with complete coverage and no
+  overlap or misplacement limitation;
 - the relocated table, found by scanning and named with
   `partition_table_offset`, and the dump written from `0x1000`, read with
   `flash_offset` and, without it, left an ESP image;
@@ -252,10 +256,11 @@ The lane ran on macOS arm64 with Node 24.22.1, Homebrew Clang and LLD 21.1.8
 and ESP-IDF v5.5.2's `gen_esp32part.py`, `otatool.py` and `parttool.py`,
 once with esptool v5.6.0 and once with 4.12.0. Its `gen_esp32part.py` is
 identical to v6.1's, and its otatool and parttool differ only in import style
-and esptool command spelling. All checks passed in both runs. With v5.6.0 the
-run took 19.6 s elapsed, 13.4 s user CPU and 5.1 s system CPU under
-`/usr/bin/time -l`; the largest single process peaked at a 256 MiB resident
-set, and the combined peak of all processes was not measured.
+and esptool command spelling. All checks passed in both runs. With v5.6.0 and
+the build already cached, the run took 19.6 s elapsed, 14.7 s user CPU and
+5.1 s system CPU under `/usr/bin/time -l`; the largest single process peaked
+at a 256 MiB resident set, and the combined peak of all processes was not
+measured.
 
 The lane does not establish:
 

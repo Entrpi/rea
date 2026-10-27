@@ -44,6 +44,14 @@ nvs,data,nvs,,0x4000,
 otadata,data,ota,,0x2000,
 factory,app,factory,,0x20000,
 `;
+// ESP-IDF 5.3 entries over the bootloader region and the table sector;
+// gen_esp32part fills their ranges from --primary-bootloader-offset.
+const PRIMARY_CSV = `# Name, Type, SubType, Offset, Size, Flags
+PrimaryBTLDR,bootloader,primary,N/A,N/A,
+PrimaryPrtTable,partition_table,primary,N/A,N/A,
+nvs,data,nvs,0x9000,0x4000,
+factory,app,factory,0x10000,0x20000,
+`;
 
 /** Nested ESP image facts, shaped like a top-level inventory for assertAgrees. */
 const nested = (facts) => ({
@@ -138,10 +146,15 @@ const build = async () => {
   await elf2image("esp32", boot32, path("boot32.bin"));
   await writeFile(path("default.csv"), DEFAULT_CSV);
   await writeFile(path("relocated.csv"), RELOCATED_CSV);
+  await writeFile(path("primary.csv"), PRIMARY_CSV);
   await buildTable(path("default.csv"), path("default-table.bin"));
   await buildTable(path("relocated.csv"), path("relocated-table.bin"), [
     "--offset",
     "0xa000",
+  ]);
+  await buildTable(path("primary.csv"), path("primary-table.bin"), [
+    "--primary-bootloader-offset",
+    "0x0",
   ]);
 };
 
@@ -196,10 +209,53 @@ const defaultLayout = async (report) => {
   await assertOtaAgrees("c3 slot 1", file, switched);
   assert.equal(switched.root.otadata.selected.slot, 1);
   assert.equal(switched.root.otadata.running_partition, "unknown");
+  // Erased records leave the bootloader's factory fallback.
+  await otatool(file, 0, ["erase_otadata"]);
+  const erased = await inspect(file);
+  await assertOtaAgrees("c3 erased", file, erased);
+  const factory = erased.inventory.occurrences.find(
+    ({ format_metadata: m }) => m?.label === "factory",
+  );
+  assert.deepEqual(
+    [
+      erased.root.otadata.selected.basis,
+      erased.root.otadata.selected.partition_index,
+    ],
+    ["factory-fallback", factory?.format_metadata.index],
+  );
   report.cases.push({
     name: "c3.bin",
     partitions: extraction.artifacts.length - 2,
-    selected: [0, 1],
+    selected: [0, 1, "factory-fallback"],
+  });
+};
+
+const primaryEntries = async (report) => {
+  const file = path("primary.bin");
+  await mergeBin(
+    "esp32c3",
+    file,
+    [
+      { at: 0x0, file: path("boot.bin") },
+      { at: 0x8000, file: path("primary-table.bin") },
+      { at: 0x1_0000, file: path("app.bin") },
+    ],
+    padTo("1MB"),
+  );
+  const rea = await inspect(file);
+  assert.equal(rea.inventory.coverage.status, "complete");
+  assert.deepEqual(
+    rea.inventory.limitations.filter((text) =>
+      /overlaps|before the end of the partition table/u.test(text),
+    ),
+    [],
+    "primary entries are not misplaced",
+  );
+  const extraction = await assertExtraction("primary", file, rea);
+  await assertTableAgrees("primary", rea, extraction);
+  report.cases.push({
+    name: "primary.bin",
+    partitions: extraction.artifacts.length - 2,
   });
 };
 
@@ -329,6 +385,7 @@ await withVerifierCleanup(async () => {
   };
   await build();
   await defaultLayout(report);
+  await primaryEntries(report);
   await relocated(report);
   await esp32Origin(report);
   await damaged(report);
