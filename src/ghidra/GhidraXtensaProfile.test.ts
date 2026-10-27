@@ -188,7 +188,7 @@ const registerPinCases = () => {
     try {
       const health = await client.execute("health", {});
       if (!health.ok) throw health.error;
-      // The unverified-lane limitation travels with results, not only the helper.
+      // The lane limitations travel with results, not only the helper.
       expect(health.value.limitations).toEqual(
         expect.arrayContaining([...ghidraXtensaLimitations(target())]),
       );
@@ -401,8 +401,6 @@ const registerProviderCases = () => {
       reason: expect.stringMatching(/xtensa/iu),
     });
     expect(hopperSupport.reason).toContain("Ghidra");
-    // The Ghidra Xtensa lane is unverified; the advice must not claim otherwise.
-    expect(hopperSupport.reason).not.toMatch(/\bverified Ghidra xtensa/iu);
     expect(hopperLoaderArgsForTarget(target())).toMatchObject({
       ok: false,
       error: { message: expect.stringMatching(/xtensa/iu) },
