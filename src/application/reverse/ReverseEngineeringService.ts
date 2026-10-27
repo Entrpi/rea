@@ -34,10 +34,12 @@ import {
   type RizinInput,
 } from "../../domain/reverseEngineering.js";
 import type {
+  ProviderToolIdentification,
   ReverseEngineeringCommandPort,
   ReverseEngineeringProviderCommand,
 } from "./ReverseEngineeringCommandPort.js";
 import {
+  execFileFailureCapturedOutput,
   execFileOutput,
   execFileOutputFailure,
 } from "../../process/ExecFileOutput.js";
@@ -46,6 +48,7 @@ import {
   runOwnedCommand,
 } from "../../process/OwnedCommand.js";
 import type { ProviderProcessSupervisor } from "../../process/ProviderProcess.js";
+import { lookupExecutable } from "../../process/ExecutableLookup.js";
 import { absoluteCallerPath } from "../../filesystem/callerPath.js";
 import { parseAnalysisInput } from "../AnalysisInput.js";
 
@@ -123,6 +126,12 @@ export class ReverseEngineeringService {
     AbortController,
     Promise<Result<Evidence, AnalysisError>>
   >();
+  /**
+   * Completed version probes (a banner, a non-zero exit or a timeout), keyed
+   * by the resolved launch path and that file's digest. Cancelled probes and
+   * probes whose cleanup is incomplete are not kept.
+   */
+  readonly #versionProbes = new Map<string, CompletedVersionProbe>();
   #closing = false;
   #closePromise: Promise<void> | undefined;
 
@@ -441,6 +450,19 @@ export class ReverseEngineeringService {
         ),
       );
     }
+    const environment = {
+      ...this.#environment,
+      ...profile.environmentOverrides,
+    };
+    const identified = await this.#identifyProvider(
+      operation,
+      profile,
+      environment,
+      signal,
+      timeoutMs,
+    );
+    if (!identified.ok) return identified;
+    const identification = identified.value;
     let stdout = "";
     let stderr = "";
     let stdoutBytes = 0;
@@ -457,11 +479,8 @@ export class ReverseEngineeringService {
     let cleanupOwner: ProviderProcessSupervisor | undefined;
     let earlyFailure: AnalysisError | undefined;
     try {
-      const output = await this.#run(command, args, {
-        env: {
-          ...this.#environment,
-          ...profile.environmentOverrides,
-        },
+      const output = await this.#run(identification.executable, args, {
+        env: environment,
         signal,
         timeout: timeoutMs,
         stopSignal: "SIGTERM",
@@ -710,9 +729,7 @@ export class ReverseEngineeringService {
         ? [
             "The objdump version is not reported; the output lists BFD targets advertised by the installed tool and does not establish support for the selected artifact.",
           ]
-        : [
-            "The executable version and supported formats are reported as unknown because no reliable version probe was performed.",
-          ]),
+        : identification.limitations),
       "A non-zero process exit is preserved as an observed command result.",
       ...(operation === "inspect_with_objdump" &&
       typeof parameters.symbol === "string"
@@ -784,7 +801,7 @@ export class ReverseEngineeringService {
       absolutePath === undefined || digest === undefined
         ? undefined
         : { path: absolutePath, sha256: digest, format: "unknown" },
-      profile.identity,
+      identification.identity,
       {
         predicateType: "rea.reverse-engineering.command-observation",
         operation,
@@ -798,6 +815,7 @@ export class ReverseEngineeringService {
               }
             : parameters),
           provider_executable: command,
+          ...identification.parameters,
           command_arguments: [...args],
         },
         rawResult: result,
@@ -817,6 +835,208 @@ export class ReverseEngineeringService {
       : err(failure.retainPartialObservation(evidence));
   }
 
+  /**
+   * Resolve, hash and identify the selected executable, then run that same
+   * file. A completed probe is reused for the same launch path and digest. A
+   * tool that cannot be identified still runs; only cancellation, the call's
+   * deadline and a probe whose process cleanup remains incomplete stop the
+   * command.
+   */
+  async #identifyProvider(
+    operation: ReverseEngineeringOperation,
+    profile: ReverseEngineeringProviderCommand,
+    environment: NodeJS.ProcessEnv,
+    signal: AbortSignal | undefined,
+    timeoutMs: number,
+  ): Promise<Result<ProviderIdentification, AnalysisError>> {
+    const probe = profile.versionProbe;
+    const unidentified = (
+      reason: string,
+      executable = profile.executable,
+      parameters: Readonly<Record<string, JsonValue>> = {},
+    ): ProviderIdentification => ({
+      executable,
+      identity: profile.identity,
+      limitations: [
+        `The executable version and supported formats are reported as unknown because ${reason}.`,
+      ],
+      parameters,
+    });
+    if (probe === undefined)
+      return ok(unidentified("no reliable version probe was performed"));
+    const lookup = await lookupExecutable(
+      profile.executable,
+      process.cwd(),
+      environment.PATH,
+      { signal, timeoutMs, stat: this.#stat },
+    );
+    if (lookup.status === "interrupted")
+      return err(
+        lookup.by === "cancellation"
+          ? new AnalysisCancelledError(operation, { cause: signal?.reason })
+          : new AnalysisTimeoutError(operation, timeoutMs, {
+              diagnostics: { phase: "executable_lookup" },
+              ...reverseCommandTimeoutGuidance(timeoutMs),
+            }),
+      );
+    // The command launch reports an executable that cannot be selected.
+    if (lookup.status !== "found")
+      return ok(unidentified("the executable could not be located"));
+    let sha256: string;
+    try {
+      sha256 = await this.#digest(lookup.path, signal, this.#stat, timeoutMs);
+    } catch (cause) {
+      const code = commandFailureCode(cause);
+      if (preflightCancelled(signal, cause, code))
+        return err(
+          new AnalysisCancelledError(operation, {
+            cause: callerCancellationCause(signal, cause),
+          }),
+        );
+      return ok(
+        unidentified(
+          `the executable could not be read${code === undefined ? "" : ` (${String(code)})`}`,
+        ),
+      );
+    }
+    const parameters = {
+      provider_executable_path: lookup.path,
+      provider_executable_sha256: sha256,
+    };
+    const key = `${lookup.path}\0${sha256}`;
+    let completed = this.#versionProbes.get(key);
+    if (completed === undefined) {
+      const outcome = await this.#runVersionProbe(
+        operation,
+        lookup.path,
+        probe,
+        environment,
+        signal,
+        timeoutMs,
+      );
+      if (!outcome.ok) return outcome;
+      completed = outcome.value;
+      if (completed.status !== "unfinished")
+        this.#rememberVersionProbe(key, completed);
+    }
+    if (completed.status !== "read")
+      return ok(
+        unidentified(
+          `its version probe (${probe.arguments.join(" ")}) ${
+            completed.status === "timed-out"
+              ? "reached the command deadline"
+              : "did not complete successfully"
+          }`,
+          lookup.path,
+          { ...parameters, provider_version_probe: completed.diagnostics },
+        ),
+      );
+    const { identification } = completed;
+    const banner = `its ${probe.arguments.join(" ")} banner`;
+    return ok({
+      executable: lookup.path,
+      identity: identification.identity,
+      limitations: [
+        identification.identity.version === null
+          ? `The executable version and supported formats are reported as unknown because ${banner} did not identify them.`
+          : `The executable version comes from ${banner}; supported formats remain unknown.`,
+        ...identification.limitations,
+      ],
+      parameters: {
+        ...parameters,
+        provider_version_banner: identification.banner,
+      },
+    });
+  }
+
+  /**
+   * Keep a completed probe for its launch path and digest. Concurrent first
+   * calls can each probe, so a later failure never replaces a successful
+   * reading; a success replaces an earlier failure.
+   */
+  #rememberVersionProbe(key: string, completed: CompletedVersionProbe): void {
+    if (
+      completed.status !== "read" &&
+      this.#versionProbes.get(key)?.status === "read"
+    )
+      return;
+    this.#versionProbes.set(key, completed);
+  }
+
+  /**
+   * Run one version probe under the call's deadline and cancellation. Its
+   * output stays separate from the command's; a failed probe keeps bounded
+   * diagnostics.
+   */
+  async #runVersionProbe(
+    operation: ReverseEngineeringOperation,
+    executable: string,
+    probe: NonNullable<ReverseEngineeringProviderCommand["versionProbe"]>,
+    environment: NodeJS.ProcessEnv,
+    signal: AbortSignal | undefined,
+    timeoutMs: number,
+  ): Promise<Result<VersionProbeOutcome, AnalysisError>> {
+    try {
+      const output = await this.#run(executable, probe.arguments, {
+        env: environment,
+        signal,
+        timeout: timeoutMs,
+        stopSignal: "SIGTERM",
+        maxBuffer: MAX_COMBINED_OUTPUT_BYTES,
+      });
+      return ok({
+        status: "read",
+        identification: probe.identify(output.stdout),
+      });
+    } catch (cause) {
+      const capture = execFileOutputFailure(cause);
+      const code = capture?.code ?? commandFailureCode(cause);
+      const cleanupOwner =
+        cause instanceof OwnedOutputFailure ? cause.cleanupOwner : undefined;
+      const probeOutput = {
+        diagnostics: {
+          phase: "version_probe",
+          arguments: [...probe.arguments],
+        },
+        ...(capture === undefined
+          ? {}
+          : { capturedOutput: execFileFailureCapturedOutput(capture) }),
+        ...ownedCleanupOptions(cause),
+      };
+      if (commandCancelled(signal, cause, code ?? undefined))
+        return err(
+          this.#registerCleanupFailure(
+            new AnalysisCancelledError(operation, {
+              cause: callerCancellationCause(signal, cause),
+              ...probeOutput,
+            }),
+            cleanupOwner,
+          ),
+        );
+      if (cause instanceof OwnedOutputFailure && cause.cleanup !== undefined)
+        return err(
+          this.#registerCleanupFailure(
+            new AnalysisOutputError(
+              operation,
+              "The provider version probe's process cleanup remains incomplete.",
+              { cause, ...probeOutput },
+            ),
+            cleanupOwner,
+          ),
+        );
+      const diagnostics = versionProbeDiagnostics(code, capture);
+      // Only an exit or the call's deadline completes a probe; a launch or
+      // collection failure is not a reading of this executable.
+      return ok(
+        code === "ETIMEDOUT"
+          ? { status: "timed-out", diagnostics }
+          : typeof code === "number" || capture?.signal != null
+            ? { status: "failed", diagnostics }
+            : { status: "unfinished", diagnostics },
+      );
+    }
+  }
+
   #registerCleanupFailure(
     failure: AnalysisError,
     cleanupOwner: ProviderProcessSupervisor | undefined,
@@ -826,6 +1046,57 @@ export class ReverseEngineeringService {
     return failure;
   }
 }
+
+/** The executable to run and the identity, limitations and provenance it records. */
+interface ProviderIdentification {
+  readonly executable: string;
+  readonly identity: Evidence["provider"];
+  readonly limitations: readonly string[];
+  readonly parameters: Readonly<Record<string, JsonValue>>;
+}
+
+/** One version probe's outcome; only completed ones are reused. */
+type VersionProbeOutcome =
+  | {
+      readonly status: "read";
+      readonly identification: ProviderToolIdentification;
+    }
+  | {
+      readonly status: "failed" | "timed-out" | "unfinished";
+      readonly diagnostics: Readonly<Record<string, JsonValue>>;
+    };
+type CompletedVersionProbe = Exclude<
+  VersionProbeOutcome,
+  { readonly status: "unfinished" }
+>;
+
+// A banner is one line; this keeps a failed probe's diagnostics small in
+// Evidence while showing why it failed.
+const VERSION_PROBE_DIAGNOSTIC_CHARS = 2_048;
+
+/** Bounded exit facts and output of a probe that printed no usable banner. */
+const versionProbeDiagnostics = (
+  code: string | number | null | undefined,
+  capture: ReturnType<typeof execFileOutputFailure>,
+): Readonly<Record<string, JsonValue>> => {
+  const bounded = (text: string): string =>
+    text.length <= VERSION_PROBE_DIAGNOSTIC_CHARS
+      ? text
+      : text.slice(0, VERSION_PROBE_DIAGNOSTIC_CHARS);
+  const stdout = capture?.stdout ?? "";
+  const stderr = capture?.stderr ?? "";
+  return {
+    exit_code: typeof code === "number" ? code : null,
+    signal: capture?.signal ?? null,
+    error_code: typeof code === "string" ? code : null,
+    stdout: bounded(stdout),
+    stderr: bounded(stderr),
+    output_truncated:
+      capture?.outputTruncated === true ||
+      stdout.length > VERSION_PROBE_DIAGNOSTIC_CHARS ||
+      stderr.length > VERSION_PROBE_DIAGNOSTIC_CHARS,
+  };
+};
 
 interface OwnedOutputFailureOptions {
   readonly stdout: string;
