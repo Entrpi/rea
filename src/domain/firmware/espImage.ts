@@ -6,7 +6,15 @@ import {
   type EspImage,
   type ObservedSegmentHeader,
 } from "./espImageFacts.js";
-import { ESP_APP_DESC_BYTES, u32 } from "./espImageStructures.js";
+import {
+  ESP_APP_DESC_BYTES,
+  ESP_FLASH_SECTOR_BYTES,
+  ESP_IMAGE_DIGEST_BYTES,
+  ESP_IMAGE_SEGMENT_HEADER_BYTES,
+  firstUnerased,
+  offsetText,
+  u32,
+} from "./espImageStructures.js";
 
 /*
  * Layout facts from ESP-IDF v6.1 (`esp_app_format.h`, `esp_image_format.c`
@@ -15,12 +23,8 @@ import { ESP_APP_DESC_BYTES, u32 } from "./espImageStructures.js";
  */
 export const ESP_IMAGE_MAGIC = 0xe9;
 export const ESP_IMAGE_HEADER_BYTES = 24;
-export const ESP_IMAGE_SEGMENT_HEADER_BYTES = 8;
 export const ESP_IMAGE_MAX_SEGMENTS = 16;
-export const ESP_FLASH_SECTOR_BYTES = 4096;
 const CHECKSUM_SEED = 0xef;
-const DIGEST_BYTES = 32;
-const ERASED = 0xff;
 /** `esp_image_spi_freq_t` values; every esptool target uses only these. */
 const SPI_SPEEDS = new Set([0x0, 0x1, 0x2, 0xf]);
 /** The last `esp_image_spi_mode_t` value, `ESP_IMAGE_SPI_MODE_SLOW_READ`. */
@@ -57,19 +61,8 @@ export interface EspImageDecoder {
   finish(): Result<EspImage, EspImageFailure>;
 }
 
-const offsetText = (value: number): string => `0x${value.toString(16)}`;
-
 const alignUp = (value: number, alignment: number): number =>
   Math.ceil(value / alignment) * alignment;
-
-/** File offset of the first byte that is not erased flash, if any. */
-const firstUnerased = (
-  bytes: Uint8Array,
-  offset: number,
-): number | undefined => {
-  const index = bytes.findIndex((byte) => byte !== ERASED);
-  return index < 0 ? undefined : offset + index;
-};
 
 /**
  * Header-level recognition. An ESP8266 v1 or v3 image has its first segment
@@ -152,7 +145,7 @@ class StreamingEspImageDecoder implements EspImageDecoder {
   readonly #segmentHeader = new Uint8Array(ESP_IMAGE_SEGMENT_HEADER_BYTES);
   readonly #segments: ObservedSegmentHeader[] = [];
   readonly #descriptor = new Uint8Array(ESP_APP_DESC_BYTES);
-  readonly #digest = new Uint8Array(DIGEST_BYTES);
+  readonly #digest = new Uint8Array(ESP_IMAGE_DIGEST_BYTES);
   readonly #sector = new Uint8Array(ESP_FLASH_SECTOR_BYTES);
   /** Hash every byte before the sector; signatures cover all of them. */
   readonly #sha256: Hash = createHash("sha256");
@@ -336,7 +329,8 @@ class StreamingEspImageDecoder implements EspImageDecoder {
       case "checksum":
         // The appended digest covers every byte through the checksum.
         this.#imageSha256 = this.#sha256.copy().digest("hex");
-        if (this.#header[23] === 1) this.#enter("digest", DIGEST_BYTES);
+        if (this.#header[23] === 1)
+          this.#enter("digest", ESP_IMAGE_DIGEST_BYTES);
         else this.#endImage();
         return;
       case "digest":

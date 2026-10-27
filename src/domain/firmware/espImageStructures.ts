@@ -8,12 +8,19 @@ import type {
 
 /*
  * Fixed-layout structures inside an ESP image, from ESP-IDF v6.1
- * (`esp_app_desc.h`, `esp_bootloader_desc.h`, `esp_bootloader_desc.c`, the
- * ROM `secure_boot.h` headers, `docs/en/security/secure-boot-v2.rst`) and
- * esptool v5.6.0's espsecure.
+ * (`esp_app_format.h`, `esp_image_format.h`, `esp_app_desc.h`,
+ * `esp_bootloader_desc.h`, `esp_bootloader_desc.c`, the ROM `secure_boot.h`
+ * headers, `docs/en/security/secure-boot-v2.rst`) and esptool v5.6.0's
+ * espsecure.
  */
+export const ESP_IMAGE_SEGMENT_HEADER_BYTES = 8;
+/** `ESP_IMAGE_HASH_LEN`: the SHA-256 appended after the checksum. */
+export const ESP_IMAGE_DIGEST_BYTES = 32;
+/** Flash sector; a signature sector begins at the next such boundary. */
+export const ESP_FLASH_SECTOR_BYTES = 4096;
 export const ESP_APP_DESC_BYTES = 256;
 export const ESP_SIGNATURE_BLOCK_BYTES = 1216;
+const ERASED = 0xff;
 const APP_DESC_MAGIC = 0xabcd_5432;
 const BOOTLOADER_DESC_MAGIC = 0x50;
 const BOOTLOADER_DESC_BYTES = 80;
@@ -32,6 +39,17 @@ export const u16 = (bytes: Uint8Array, at: number): number =>
 
 export const hex = (bytes: Uint8Array): string =>
   Buffer.from(bytes).toString("hex");
+
+export const offsetText = (value: number): string => `0x${value.toString(16)}`;
+
+/** File offset of the first byte of `bytes` that is not erased flash, if any. */
+export const firstUnerased = (
+  bytes: Uint8Array,
+  offset: number,
+): number | undefined => {
+  const index = bytes.findIndex((byte) => byte !== ERASED);
+  return index < 0 ? undefined : offset + index;
+};
 
 const allZero = (bytes: Uint8Array): boolean =>
   bytes.every((byte) => byte === 0);
@@ -118,7 +136,7 @@ export const espSignatureSlot = (slot: Uint8Array): EspSignatureSlot => {
       u32(slot, SIGNATURE_CRC_OFFSET)
   )
     return "block";
-  return slot.every((byte) => byte === 0xff) ? "erased" : "other";
+  return slot.every((byte) => byte === ERASED) ? "erased" : "other";
 };
 
 /** Field offsets inside a signature block, from the ROM `secure_boot.h`. */

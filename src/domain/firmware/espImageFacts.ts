@@ -11,19 +11,21 @@ import {
   type EspChip,
 } from "./espChips.js";
 import {
+  ESP_FLASH_SECTOR_BYTES,
+  ESP_IMAGE_DIGEST_BYTES,
+  ESP_IMAGE_SEGMENT_HEADER_BYTES,
   ESP_SIGNATURE_BLOCK_BYTES,
   decodeEspDescriptor,
   decodeEspSignatureBlock,
   espSignatureSlot,
+  firstUnerased,
   hex,
+  offsetText,
   u16,
   u32,
   type EspSignedContentDigests,
 } from "./espImageStructures.js";
 
-const SEGMENT_HEADER_BYTES = 8;
-const DIGEST_BYTES = 32;
-const SECTOR_BYTES = 4096;
 const SIGNATURE_SLOTS = 3;
 
 /** One header-declared segment; `availableLength` is what the file holds. */
@@ -55,9 +57,9 @@ export interface ObservedSegmentHeader {
 }
 
 /**
- * What one in-order pass over an image observed. `observedEnd` is where
- * reading stopped: the file size, or the first non-erased byte after the
- * signature sector.
+ * What one in-order pass over an image observed. `observedEnd` is the end of
+ * the last chunk read: the file size, or the end of the chunk that holds the
+ * first non-erased byte after the signature sector, where reading stops.
  */
 export interface EspImageObservations {
   readonly fileSize: number;
@@ -86,8 +88,6 @@ export interface EspImageObservations {
 
 type ByteRange = EspImageMetadata["undescribed_trailing"][number];
 
-const offsetText = (value: number): string => `0x${value.toString(16)}`;
-
 const hexByte = (value: number): string =>
   `0x${value.toString(16).padStart(2, "0")}`;
 
@@ -102,7 +102,7 @@ export const deriveEspImage = (observed: EspImageObservations): EspImage => {
       ? null
       : decodeEspDescriptor(
           observed.descriptorBytes,
-          first.headerOffset + SEGMENT_HEADER_BYTES,
+          first.headerOffset + ESP_IMAGE_SEGMENT_HEADER_BYTES,
           limitations,
         );
   const segments = observed.segments.map((segment) =>
@@ -183,7 +183,7 @@ const segmentFacts = (
   segment: ObservedSegmentHeader,
   chip: EspChip | undefined,
 ): EspImageSegment => {
-  const dataOffset = segment.headerOffset + SEGMENT_HEADER_BYTES;
+  const dataOffset = segment.headerOffset + ESP_IMAGE_SEGMENT_HEADER_BYTES;
   return {
     dataOffset,
     availableLength: Math.max(
@@ -300,7 +300,7 @@ const digestFacts = (
   if (
     offset === null ||
     computed === null ||
-    observed.observedEnd < offset + DIGEST_BYTES
+    observed.observedEnd < offset + ESP_IMAGE_DIGEST_BYTES
   ) {
     if (computed !== null && offset !== null)
       limitations.push(
@@ -353,17 +353,12 @@ const trailingFacts = (
       };
     else undescribed.push({ offset: from, length: to - from });
   };
-  /** File offset of the first byte of `bytes` that is not 0xFF. */
-  const unerased = (bytes: Uint8Array, offset: number): number | undefined => {
-    const index = bytes.findIndex((byte) => byte !== 0xff);
-    return index < 0 ? undefined : offset + index;
-  };
   add(observed.gapFirstUnerased, Math.min(sector, fileSize));
   const held = observed.sector.subarray(
     0,
-    Math.max(0, Math.min(SECTOR_BYTES, fileSize - sector)),
+    Math.max(0, Math.min(ESP_FLASH_SECTOR_BYTES, fileSize - sector)),
   );
-  const slots = [0, 1, 2].map((index) => {
+  const slots = Array.from({ length: SIGNATURE_SLOTS }, (_, index) => {
     const from = index * ESP_SIGNATURE_BLOCK_BYTES;
     const bytes = held.subarray(from, from + ESP_SIGNATURE_BLOCK_BYTES);
     return {
@@ -384,11 +379,11 @@ const trailingFacts = (
         `Secure Boot v2 slot ${String(index)} at offset ${offsetText(offset)} has the 0xE7 magic but not a matching CRC32 or a complete block; it is not a valid signature block.`,
       );
   }
-  const sectorEnd = sector + SECTOR_BYTES;
+  const sectorEnd = sector + ESP_FLASH_SECTOR_BYTES;
   const slotsEnd = sector + SIGNATURE_SLOTS * ESP_SIGNATURE_BLOCK_BYTES;
   if (blocks.length === 0) {
     // Without a block, the sector is ordinary trailing bytes.
-    add(unerased(held, sector), sector + held.length);
+    add(firstUnerased(held, sector), sector + held.length);
     add(observed.restFirstUnerased, fileSize);
     if (undescribed.length > 0 || fileSize >= slotsEnd)
       return { blocks, undescribed, truncated: false };
@@ -401,7 +396,7 @@ const trailingFacts = (
   for (const { offset, bytes, kind } of slots)
     if (kind === "other") add(offset, offset + bytes.length);
   const slack = held.subarray(SIGNATURE_SLOTS * ESP_SIGNATURE_BLOCK_BYTES);
-  add(unerased(slack, slotsEnd), sector + held.length);
+  add(firstUnerased(slack, slotsEnd), sector + held.length);
   add(observed.restFirstUnerased, fileSize);
   if (fileSize < sectorEnd) {
     limitations.push(
