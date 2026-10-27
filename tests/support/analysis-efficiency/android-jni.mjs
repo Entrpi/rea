@@ -30,6 +30,7 @@ const { values } = parseArgs({
     repeats: { type: "string", default: "2" },
     proof: { type: "boolean", default: false },
     detail: { type: "string", default: "complete" },
+    "omit-detail": { type: "boolean", default: false },
     pages: { type: "boolean", default: false },
     cli: { type: "boolean", default: false },
     "retained-removal": { type: "boolean", default: false },
@@ -45,6 +46,10 @@ for (const name of [
 ])
   assert.ok(values[name], `Missing --${name}`);
 assert.ok(["complete", "summary"].includes(values.detail));
+assert.ok(
+  !values["omit-detail"] || values.detail === "summary",
+  "--omit-detail verifies the summary default",
+);
 assert.ok(
   values.detail !== "summary" || values.proof,
   "Summary verification requires its full proof export",
@@ -813,16 +818,23 @@ try {
   validateJniOutput = contracts.get("inspect_android_jni_bindings").output;
   const invoke = async (name, args) => {
     const contract = contracts.get(name);
-    assert.ok(contract.input(args), JSON.stringify(contract.input.errors));
+    const sent = { ...args };
+    if (
+      values["omit-detail"] &&
+      name === "inspect_android_jni_bindings" &&
+      sent.detail === "summary"
+    )
+      delete sent.detail;
+    assert.ok(contract.input(sent), JSON.stringify(contract.input.errors));
     const start = performance.now();
     const result = await client.callTool(
-      { name, arguments: args },
+      { name, arguments: sent },
       { toolDefinition: contract.definition, timeout: 120000 },
     );
     calls.push({
       phase: callPhase,
       name,
-      arguments: args,
+      arguments: sent,
       result,
       elapsed_ms: performance.now() - start,
     });
@@ -952,6 +964,7 @@ try {
     targetSha,
     variant: values.variant,
     detail: values.detail,
+    omit_detail: values["omit-detail"],
     proof: values.proof,
     pages: values.pages,
     question:

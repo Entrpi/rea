@@ -197,6 +197,38 @@ family, with an 8 GiB RSS guard and 4 GiB host-availability guard. Peak memory i
 the sum of family RSS sampled every 100 ms: shared pages can be double-counted
 and short peaks can be missed. No guard stop or OOM occurred.
 
+### Default-summary delivery confirmation
+
+The new MCP operation now defaults to retained `summary` when `detail` is omitted.
+Explicit `complete` remains supported; the CLI retains its common explicit-detail
+policy. The actual SDK regression verifies both modes, caller selectors and
+reading an unselected declaration from the complete parent after source removal.
+Type/lint/build and all five cases in that MCP boundary file pass: 80.012 seconds,
+CPU 110.240 seconds, peak sampled family RSS 4747.6 MiB. An earlier attempt stopped
+at the test-function length lint rule; the fixture helper was extracted before
+this successful gate.
+
+A fresh genuine Conscrypt workflow omits `detail` on JNI investigation calls and
+passes 33 SDK calls, all 12 retained pages, proof export, one cold CLI parity
+check and the separate owned-copy removal qualification. The same investigation
+fact digest above is retained. Cold/warm task times are 15.608/0.481 seconds;
+whole process-family time is 45.239 seconds, CPU 61.038 seconds, peak sampled RSS
+1431.2 MiB. Warm text/SDK token estimates are 31,928/348,516 using the same cost
+method. This adds a tenth CLI check and brings the successful public qualification
+total to 338 SDK calls. Explicit-complete removal qualification remains separate
+from the investigation task; default summaries do not discard the full parent.
+
+Final `docs:check`, `format:check` and `docs:build` also pass: 77.269 seconds,
+CPU 70.506 seconds, peak sampled family RSS 1191.1 MiB.
+
+The updated harness adds `--omit-detail` (with `--detail summary`), SHA-256
+`c2a5d090f32429c852e3c974083bb9c21a0dc6a608407687031f155a722b53d7`.
+The earlier cohort tables use the original frozen harness below. Default-run
+summary/catalog/call receipt SHA-256 values are respectively
+`c10e4d702b9694b0ccc69926a4e1f688fa8dea33a3de2e2837ea15190a706b37`,
+`0c36244f5ff788fabd5491144b0711e99ad211ce3c09e1812d1d4da5753624ac`, and
+`e1f021f0a7a92f101a037a1467a3428b4c620482eb556d81501a5ea64226ab82`.
+
 ## Reproduction and limitations
 
 Build the runtime, generate the source fixtures using selected existing JDK,

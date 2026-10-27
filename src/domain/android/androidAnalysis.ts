@@ -98,7 +98,7 @@ export const androidSymbolInspectionInputSchemas = {
 export const androidJniInspectionInputSchema =
   androidInputSchemas.inspect_android_jni_bindings
     .extend({
-      detail: z.enum(["complete", "summary"]).optional(),
+      detail: z.enum(["complete", "summary"]).default("summary"),
       view: androidJniViewRequestSchema.optional(),
     })
     .superRefine(validateAndroidPackageDelivery);

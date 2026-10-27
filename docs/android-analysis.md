@@ -356,6 +356,8 @@ When advertised, `inspect_android_jni_bindings` links original `ACC_NATIVE`
 declarations from standard root `classes*.dex` members to bundled ELF libraries.
 The supplied JAR's DEX reader preserves duplicate declarations before decompiler
 deduplication. This operation does not load the APK into the decompiler.
+MCP defaults to retained summary delivery when `detail` is omitted; select
+`complete` explicitly to receive the full report inline.
 
 ```json
 {
@@ -424,7 +426,8 @@ Collections also include `declarations`, `candidates` and `libraries`, with
 exact filters and batch lookup by declaration/candidate/library IDs. `row_index`
 is the original parent collection index; DEX and
 ZIP source ordinals stay separate. Complete detail returns the full report.
-CLI uses the same selection and delivery contracts:
+CLI uses the same selection and delivery contracts. Its common one-shot
+default remains complete; summary delivery requires an explicit Evidence path:
 
 ```sh
 rea inspect-android-jni-bindings /absolute/Example.apk \
