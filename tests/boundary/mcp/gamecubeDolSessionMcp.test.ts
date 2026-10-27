@@ -8,6 +8,7 @@ import { expect, it } from "vitest";
 import { z } from "zod";
 
 import { createApplicationMcpHarness } from "../../fixtures/applicationMcpHarness.js";
+import { SNAPSHOT_REPLAY_LIMITATION } from "../../../src/application/binary/AnalysisSnapshotCache.js";
 import { readAnalysisSnapshot } from "../../../src/application/binary/AnalysisSnapshotFiles.js";
 import { toolContract } from "../../../src/contracts/toolContracts.js";
 import { parseEvidence } from "../../../src/domain/evidence.js";
@@ -133,10 +134,10 @@ it("saves a GameCube DOL snapshot and replays it after reopening", async () => {
   const replayed = parseEvidence(
     (await client.callTool(query)).structuredContent,
   );
+  expect(original.normalized_result).toBe("address_name");
   expect(replayed.subject).toEqual(original.subject);
-  expect(replayed.limitations).toContain(
-    "Loaded from a local REA analysis snapshot; this call did not re-run the provider.",
-  );
+  expect(replayed.normalized_result).toEqual(original.normalized_result);
+  expect(replayed.limitations).toContain(SNAPSHOT_REPLAY_LIMITATION);
   expect(calls.filter((operation) => operation === "address_name")).toEqual([
     "address_name",
   ]);
