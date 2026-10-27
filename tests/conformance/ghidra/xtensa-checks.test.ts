@@ -5,6 +5,7 @@ import { parseBinaryTarget } from "../../../src/application/BinaryTargetResolver
 import { ghidraXtensaUnsupportedReason } from "../../../src/ghidra/GhidraXtensaProfile.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import {
+  assertXtensaCFixturePseudocode,
   assertXtensaFixtureInstructions,
   assertXtensaFixturePseudocode,
   parseXtensaReadelf,
@@ -86,6 +87,26 @@ const decoded = {
 };
 const addresses = { leaf: "0x40080014", literal: "0x40080000" };
 
+// Ghidra 12.1.4 decompiled the fixtures this way in verify:ghidra:xtensa.
+const ENTRY =
+  "\nundefined4 rea_xtensa_entry(void)\n\n{\n  undefined4 uVar1;\n  \n  uVar1 = rea_xtensa_leaf(0x12345678);\n  return uVar1;\n}\n\n";
+const LEAF =
+  "\nint rea_xtensa_leaf(int param_1)\n\n{\n  return param_1 + 7;\n}\n\n";
+const C_ENTRY =
+  "\n/* WARNING: Unknown calling convention -- yet parameter storage is locked */\n\nuint rea_xtensa_c_entry(void)\n\n{\n  uint uVar1;\n  \n  memw();\n  uVar1 = rea_xtensa_c_scale(rea_xtensa_c_global,5);\n  return uVar1;\n}\n\n";
+const C_SCALE =
+  "\nuint rea_xtensa_c_scale(uint value,uint factor)\n\n{\n  return value * factor + 0x1234567;\n}\n\n";
+const VALUES = { literal: 0x12345678, addend: 7 };
+const C_VALUES = {
+  global: "rea_xtensa_c_global",
+  factor: 5,
+  constant: 0x1234567,
+};
+const entryWith = (body: string) =>
+  `undefined4 rea_xtensa_entry(void)\n{\n  ${body}\n}`;
+const leafWith = (body: string) =>
+  `int rea_xtensa_leaf(int param_1)\n{\n  ${body}\n}`;
+
 describe("Xtensa lane oracle and assertions", () => {
   it("reads the header, symbols and windowed declaration GNU readelf reports", () => {
     expect(parseXtensaReadelf(readelf, names)).toEqual({
@@ -132,24 +153,6 @@ describe("Xtensa lane oracle and assertions", () => {
     ).toThrow(/no reference to its literal/u);
   });
 
-  it("requires the literal argument and the addend in decompiled code", () => {
-    const values = { literal: 0x12345678, addend: 7 };
-    const leaf =
-      "int rea_xtensa_leaf(int param_1)\n{\n  return param_1 + 7;\n}";
-    const entry =
-      "int rea_xtensa_entry(void)\n{\n  int iVar1;\n  iVar1 = rea_xtensa_leaf(0x12345678);\n  return iVar1;\n}";
-    expect(() =>
-      assertXtensaFixturePseudocode(entry, leaf, values),
-    ).not.toThrow();
-    expect(() =>
-      assertXtensaFixturePseudocode(
-        entry.replace("0x12345678", "in_a10"),
-        leaf,
-        values,
-      ),
-    ).toThrow(/l32r literal/u);
-  });
-
   it("writes a fixture REA admits, and the mutations the lane refuses", async () => {
     const directory = await createTestTempDirectory("rea-xtensa-fixture-");
     const fixture = await writeXtensaFixture(directory);
@@ -180,5 +183,102 @@ describe("Xtensa lane oracle and assertions", () => {
       if (!mutated.ok) throw mutated.error;
       expect(ghidraXtensaUnsupportedReason(mutated.value)).toContain(reason);
     }
+  });
+});
+
+describe("Xtensa lane decompiled dataflow", () => {
+  it.each([
+    { name: "Ghidra 12.1.4 output", entry: ENTRY, leaf: LEAF },
+    {
+      name: "a direct return with a cast and a decimal literal",
+      entry: entryWith("return (undefined4)rea_xtensa_leaf(305419896);"),
+      leaf: leafWith("return 7 + param_1;"),
+    },
+  ])("accepts the call8 dataflow in $name", ({ entry, leaf }) => {
+    expect(() =>
+      assertXtensaFixturePseudocode(entry, leaf, VALUES),
+    ).not.toThrow();
+  });
+
+  it.each([
+    {
+      name: "the literal returned instead of passed",
+      entry: entryWith("rea_xtensa_leaf(0);\n  return 0x12345678;"),
+      leaf: LEAF,
+      error: /must pass 0x12345678 to rea_xtensa_leaf/u,
+    },
+    {
+      name: "an unmodeled argument register",
+      entry: ENTRY.replace("0x12345678", "in_a10"),
+      leaf: LEAF,
+      error: /must pass 0x12345678 to rea_xtensa_leaf/u,
+    },
+    {
+      name: "the call result discarded",
+      entry: entryWith("rea_xtensa_leaf(0x12345678);\n  return 0;"),
+      leaf: LEAF,
+      error: /must return the rea_xtensa_leaf result/u,
+    },
+    {
+      name: "the call result overwritten",
+      entry: ENTRY.replace("return uVar1", "uVar1 = 0;\n  return uVar1"),
+      leaf: LEAF,
+      error: /must return the rea_xtensa_leaf result/u,
+    },
+    {
+      name: "a leaf that ignores its argument",
+      entry: ENTRY,
+      leaf: leafWith("return in_a2 + 7;"),
+      error: /must return its argument plus 7/u,
+    },
+  ])("refuses $name", ({ entry, leaf, error }) => {
+    expect(() => assertXtensaFixturePseudocode(entry, leaf, VALUES)).toThrow(
+      error,
+    );
+  });
+
+  it.each([
+    { name: "Ghidra 12.1.4 output", entry: C_ENTRY, scale: C_SCALE },
+    {
+      name: "a direct return and reordered operands",
+      entry:
+        "uint rea_xtensa_c_entry(void)\n{\n  return rea_xtensa_c_scale(rea_xtensa_c_global,5);\n}",
+      scale: C_SCALE.replace(
+        "value * factor + 0x1234567",
+        "0x1234567 + (factor * value)",
+      ),
+    },
+  ])("accepts the C fixture dataflow in $name", ({ entry, scale }) => {
+    expect(() =>
+      assertXtensaCFixturePseudocode(entry, scale, C_VALUES),
+    ).not.toThrow();
+  });
+
+  it.each([
+    {
+      name: "swapped call8 arguments",
+      entry: C_ENTRY.replace("rea_xtensa_c_global,5", "5,rea_xtensa_c_global"),
+      scale: C_SCALE,
+      error: /must pass rea_xtensa_c_global, 0x5 to rea_xtensa_c_scale/u,
+    },
+    {
+      name: "the C call result discarded",
+      entry: C_ENTRY.replace(
+        "uVar1 = rea_xtensa_c_scale",
+        "rea_xtensa_c_scale",
+      ).replace("return uVar1", "return 0"),
+      scale: C_SCALE,
+      error: /must return the rea_xtensa_c_scale result/u,
+    },
+    {
+      name: "the constant without the product",
+      entry: C_ENTRY,
+      scale: C_SCALE.replace("value * factor + ", ""),
+      error: /must return value \* factor \+ 0x1234567/u,
+    },
+  ])("refuses $name", ({ entry, scale, error }) => {
+    expect(() =>
+      assertXtensaCFixturePseudocode(entry, scale, C_VALUES),
+    ).toThrow(error);
   });
 });

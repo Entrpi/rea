@@ -24,6 +24,7 @@ import { parseEvidence } from "../dist/domain/evidence.js";
 import { functionDossierSchema } from "../dist/domain/native/functionDossier.js";
 import { inspectVerifierGhidraInstallation } from "./lib/ghidra-installation-inspection.mjs";
 import {
+  assertXtensaCFixturePseudocode,
   assertXtensaFixtureInstructions,
   assertXtensaFixturePseudocode,
   inspectXtensaReadelf,
@@ -34,6 +35,7 @@ import {
   buildXtensaCFixture,
   mutateXtensaFixture,
   writeXtensaFixture,
+  XTENSA_C_FIXTURE_VALUES,
   XTENSA_FIXTURE_ADDEND,
   XTENSA_FIXTURE_INSTRUCTIONS,
   XTENSA_FIXTURE_LITERAL,
@@ -366,7 +368,8 @@ try {
       "readelf header, symbols and Xtensa_Info ABI",
       "pinned language and compiler identity",
       "entry, l32r, call8 and retw.n decoding",
-      "call8 target and l32r literal in decompiled code",
+      "decompiled call8 argument is the l32r literal; caller returns the callee result",
+      "decompiled leaf returns its argument plus the addend",
       "CLI/MCP parity with output-schema validation",
       "snapshot save and reopen",
       "header-mutated refusals",
@@ -406,12 +409,18 @@ try {
           BigInt(address) === BigInt(readelf.symbols.rea_xtensa_c_scale),
       ),
     );
-    const scale = await call(
-      "procedure_pseudo_code",
-      { procedure: readelf.symbols.rea_xtensa_c_scale },
-      built.sha256,
+    const decompiled = {};
+    for (const name of cNames)
+      decompiled[name] = await call(
+        "procedure_pseudo_code",
+        { procedure: readelf.symbols[name] },
+        built.sha256,
+      );
+    assertXtensaCFixturePseudocode(
+      decompiled.rea_xtensa_c_entry,
+      decompiled.rea_xtensa_c_scale,
+      XTENSA_C_FIXTURE_VALUES,
     );
-    assert.match(scale, /0x1234567\b/iu, scale);
     await call("close_binary");
     reports.push({
       fixture: "c-compiled",
@@ -420,9 +429,11 @@ try {
       checks: [
         "readelf symbols",
         "call8 callee",
-        "l32r literal in decompiled code",
+        "decompiled call8 arguments are the global and the factor; caller returns the callee result",
+        "decompiled callee returns value * factor plus its l32r constant",
       ],
-      scale_pseudocode: scale,
+      entry_pseudocode: decompiled.rea_xtensa_c_entry,
+      scale_pseudocode: decompiled.rea_xtensa_c_scale,
     });
   }
 } catch (cause) {

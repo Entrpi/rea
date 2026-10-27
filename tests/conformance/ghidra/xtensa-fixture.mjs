@@ -43,6 +43,12 @@ export const XTENSA_FIXTURE_INSTRUCTIONS = {
 /** The literal `l32r` loads and the leaf's addend. */
 export const XTENSA_FIXTURE_LITERAL = 0x12345678;
 export const XTENSA_FIXTURE_ADDEND = 7;
+/** What `../c/xtensa.c` passes through call8 and the constant it loads. */
+export const XTENSA_C_FIXTURE_VALUES = {
+  global: "rea_xtensa_c_global",
+  factor: 5,
+  constant: 0x1234567,
+};
 
 const TEXT_OFFSET = 0x1000;
 const INFO_DESCRIPTOR = "USE_ABSOLUTE_LITERALS=0\nABI=0\n";

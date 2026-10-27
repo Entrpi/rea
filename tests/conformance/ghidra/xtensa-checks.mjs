@@ -123,27 +123,195 @@ export function assertXtensaFixtureInstructions(instructions, addresses) {
   );
 }
 
+const RETURN = /^return\b(.*)$/su;
+const ASSIGNMENT = /^(\w+)\s*=(?!=)(.*)$/su;
+/** A cast Ghidra prints before an operand, such as `(int)` or `(uint *)`. */
+const CAST =
+  /^\(\s*[A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)*(?:\s*\*)*\s*\)\s*(?=[\w(])/u;
+const INTEGER = /^(0x[\da-f]+|\d+)[lu]*$/iu;
+
+const closingParenthesis = (text, open) => {
+  let depth = 0;
+  for (let index = open; index < text.length; index += 1) {
+    if (text[index] === "(") depth += 1;
+    else if (text[index] === ")") {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+};
+
+/** Operands separated by `separator` outside parentheses. */
+const topLevel = (text, separator) => {
+  const parts = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === "(") depth += 1;
+    else if (text[index] === ")") depth -= 1;
+    else if (depth === 0 && text[index] === separator) {
+      parts.push(text.slice(start, index));
+      start = index + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts;
+};
+
+/** An operand without casts or enclosing parentheses: an integer or its text. */
+const operand = (text) => {
+  const value = text.trim();
+  const cast = CAST.exec(value);
+  if (cast !== null) return operand(value.slice(cast[0].length));
+  if (
+    value.startsWith("(") &&
+    closingParenthesis(value, 0) === value.length - 1
+  )
+    return operand(value.slice(1, -1));
+  const integer = INTEGER.exec(value);
+  return integer === null ? value : BigInt(integer[1]);
+};
+
 /**
- * The windowed caller passes the literal through call8 (a10 becomes the
+ * Whether `text` computes `expected`: an operand, or `[operator, left, right]`
+ * for a commutative `+` or `*`. Expected trees nest `*` under `+` only.
+ */
+const computes = (text, expected) => {
+  if (!Array.isArray(expected)) return operand(text) === expected;
+  const value = operand(text);
+  if (typeof value !== "string") return false;
+  const [operator, left, right] = expected;
+  const parts = topLevel(value, operator);
+  return (
+    parts.length === 2 &&
+    ((computes(parts[0], left) && computes(parts[1], right)) ||
+      (computes(parts[0], right) && computes(parts[1], left)))
+  );
+};
+
+/** Parameter names and statements of a straight-line decompiled function. */
+const decompiledFunction = (code, name) => {
+  const match = new RegExp(
+    `\\b${name}\\s*\\(([^)]*)\\)\\s*\\{([^{}]*)\\}`,
+    "u",
+  ).exec(code.replaceAll(/\/\*[^]*?\*\//gu, " "));
+  assert.ok(match, `${name} is not one straight-line function: ${code}`);
+  return {
+    parameters: match[1]
+      .split(",")
+      .map((parameter) => /(\w+)\s*$/u.exec(parameter)?.[1])
+      .filter((parameter) => parameter !== undefined && parameter !== "void"),
+    statements: match[2]
+      .split(";")
+      .map((statement) => statement.trim())
+      .filter((statement) => statement !== ""),
+  };
+};
+
+/** The single expression a straight-line function returns. */
+const returnedExpression = (code, name) => {
+  const { parameters, statements } = decompiledFunction(code, name);
+  const returns = statements
+    .map((statement) => RETURN.exec(statement))
+    .filter((match) => match !== null);
+  assert.equal(returns.length, 1, `${name} must return once: ${code}`);
+  return { parameters, expression: returns[0][1] };
+};
+
+/** The statement returns `call`, or assigns it to a temporary returned later. */
+const returnsResult = (statements, index, call) => {
+  const direct = RETURN.exec(statements[index]);
+  if (direct !== null) return operand(direct[1]) === call;
+  const assignment = ASSIGNMENT.exec(statements[index]);
+  if (assignment === null || operand(assignment[2]) !== call) return false;
+  const [, temporary] = assignment;
+  const reassigned = new RegExp(
+    `^${temporary}\\s*(?:[-+*/%&|^]|<<|>>)?=(?!=)`,
+    "u",
+  );
+  for (const statement of statements.slice(index + 1)) {
+    const returned = RETURN.exec(statement);
+    if (returned !== null) return operand(returned[1]) === temporary;
+    if (reassigned.test(statement)) return false;
+  }
+  return false;
+};
+
+const display = (value) =>
+  typeof value === "bigint" ? `0x${value.toString(16)}` : value;
+
+/**
+ * The caller calls `callee` once with exactly `args` and returns its result,
+ * directly or through a temporary; Ghidra prints either form.
+ */
+const assertReturnedCall = (code, { caller, callee, args }) => {
+  const { statements } = decompiledFunction(code, caller);
+  const calls = statements.flatMap((statement, index) =>
+    [...statement.matchAll(new RegExp(`\\b${callee}\\s*\\(`, "gu"))].map(
+      (match) => ({
+        index,
+        start: match.index,
+        open: match.index + match[0].length - 1,
+      }),
+    ),
+  );
+  assert.equal(calls.length, 1, `${caller} must call ${callee} once: ${code}`);
+  const [{ index, start, open }] = calls;
+  const statement = statements[index];
+  const close = closingParenthesis(statement, open);
+  assert.notEqual(close, -1, `${caller} has an unbalanced call: ${code}`);
+  const list = statement.slice(open + 1, close);
+  assert.deepEqual(
+    list.trim() === "" ? [] : topLevel(list, ",").map(operand),
+    args,
+    `${caller} must pass ${args.map(display).join(", ")} to ${callee}: ${code}`,
+  );
+  assert.ok(
+    returnsResult(statements, index, statement.slice(start, close + 1)),
+    `${caller} must return the ${callee} result: ${code}`,
+  );
+};
+
+/**
+ * The windowed caller passes the l32r literal through call8 (a10 becomes the
  * callee's a2) and returns the callee's result; the leaf adds its addend.
  */
 export function assertXtensaFixturePseudocode(entry, leaf, values) {
-  assert.match(
-    leaf,
-    new RegExp(
-      `\\+\\s*(?:${values.addend}|0x${values.addend.toString(16)})\\b`,
-      "u",
-    ),
-    `leaf decompilation lacks the addend: ${leaf}`,
+  const callee = returnedExpression(leaf, "rea_xtensa_leaf");
+  assert.ok(
+    computes(callee.expression, [
+      "+",
+      callee.parameters[0],
+      BigInt(values.addend),
+    ]),
+    `rea_xtensa_leaf must return its argument plus ${values.addend}: ${leaf}`,
   );
-  assert.match(
-    entry,
-    /\brea_xtensa_leaf\s*\(/u,
-    `entry lacks the call: ${entry}`,
+  assertReturnedCall(entry, {
+    caller: "rea_xtensa_entry",
+    callee: "rea_xtensa_leaf",
+    args: [BigInt(values.literal)],
+  });
+}
+
+/**
+ * The C caller passes the volatile global and the factor through call8 and
+ * returns the result; the callee adds its l32r constant to the product.
+ */
+export function assertXtensaCFixturePseudocode(entry, scale, values) {
+  const callee = returnedExpression(scale, "rea_xtensa_c_scale");
+  const [value, factor] = callee.parameters;
+  assert.ok(
+    computes(callee.expression, [
+      "+",
+      ["*", value, factor],
+      BigInt(values.constant),
+    ]),
+    `rea_xtensa_c_scale must return value * factor + ${display(BigInt(values.constant))}: ${scale}`,
   );
-  assert.match(
-    entry,
-    new RegExp(`0x${values.literal.toString(16)}\\b`, "iu"),
-    `entry lacks the l32r literal as the call argument: ${entry}`,
-  );
+  assertReturnedCall(entry, {
+    caller: "rea_xtensa_c_entry",
+    callee: "rea_xtensa_c_scale",
+    args: [values.global, BigInt(values.factor)],
+  });
 }

@@ -9,6 +9,11 @@ export const XTENSA_FIXTURE_INSTRUCTIONS: Record<
 >;
 export const XTENSA_FIXTURE_LITERAL: number;
 export const XTENSA_FIXTURE_ADDEND: number;
+export const XTENSA_C_FIXTURE_VALUES: {
+  global: string;
+  factor: number;
+  constant: number;
+};
 export function xtensaFixtureBytes(): Buffer;
 export function mutateXtensaFixture(
   bytes: Buffer,

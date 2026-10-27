@@ -24,3 +24,8 @@ export function assertXtensaFixturePseudocode(
   leaf: string,
   values: { literal: number; addend: number },
 ): void;
+export function assertXtensaCFixturePseudocode(
+  entry: string,
+  scale: string,
+  values: { global: string; factor: number; constant: number },
+): void;
