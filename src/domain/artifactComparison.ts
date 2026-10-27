@@ -412,7 +412,11 @@ const classifyPath = (input: ClassifyPathInput): ArtifactChange | null => {
     left === undefined ||
     right === undefined
   )
-    return classifyChecks(base, declared, true);
+    return classifyChecks(
+      base,
+      [...declared, ["metadata", declaredDigestsDiffer(input)]],
+      true,
+    );
   return classifyChecks(
     base,
     [...declared, ...nodeChecks(input, left, right)],
@@ -529,6 +533,23 @@ const isDeclarationRecord = (input: ClassifyPathInput): boolean =>
   input.leftOccurrence.artifact_id === null &&
   input.rightOccurrence.artifact_id === null &&
   input.metadata.formatDeclaration !== "absent";
+
+/**
+ * Without observed content on both sides, the container's declared digests
+ * are the remaining content evidence: claims of one algorithm that differ
+ * declare different content. Equal claims are unverified, so they do not
+ * establish equality, and observed bytes replace both claims when present.
+ */
+const declaredDigestsDiffer = (input: OccurrencePair): boolean => {
+  const left = input.leftOccurrence?.declared_integrity;
+  const right = input.rightOccurrence?.declared_integrity;
+  return (
+    left !== undefined &&
+    right !== undefined &&
+    left.algorithm === right.algorithm &&
+    left.digest !== right.digest
+  );
+};
 
 /** Facts that both occurrences declare, which need no content. */
 const declaredChecks = (input: ClassifyPathInput): DimensionCheck[] => [

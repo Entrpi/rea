@@ -34,6 +34,15 @@ as removed and added. Directory order and offsets are layout. The encryption
 bit, the only member flag REA admits, is the occurrence's `encrypted` field. A
 member whose encryption changes compares `changed` in `metadata` and
 `availability`: the change is known, but REA does not read encrypted bytes.
+Godot's exporter
+[stores the MD5 of a member's original bytes](https://github.com/godotengine/godot/blob/a13da4feb8d8aefc283c3763d33a2f170a18d541/editor/export/editor_export_platform.cpp#L465-L468),
+as the 4.3 and 4.4.1 exporters do, so the declared MD5 does not depend on the
+encryption IV. Encrypted members whose declared MD5s differ therefore compare
+`changed` in `metadata` and `availability`; equal MD5s add no change, because
+REA cannot verify them. For a readable member, whether the directory declares
+an MD5 only decides whether REA can check its bytes, so a readable member that
+differs only in that compares unchanged. An encrypted member with an MD5 on
+only one side stays `unknown`.
 
 ## CLI
 

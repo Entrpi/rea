@@ -1238,13 +1238,19 @@ permission bits never mark it `executable`, because running a symlink runs
 its target. When either side's content is unavailable, the change also
 includes `availability`. For example, REA does not read symlink targets, so
 a non-executable file that becomes a symlink compares `changed` in
-`metadata` and `availability`, not `unknown`. Declared sizes and integrity
-digests do not count without content: REA compares observed sizes and
-checks a declared digest against observed bytes. For a node-less metadata
+`metadata` and `availability`, not `unknown`. Declared sizes do not count
+without content: REA compares observed sizes. For a node-less metadata
 record with a compared declaration, only that declaration, these fields and
 any recorded ASAR storage decide the comparison. Such a record adds
 `availability` only when a declaration is unknown. REA does not compare the
 record's unread payload.
+
+When either side has no content, `compare_artifacts` also compares the
+occurrences' `declared_integrity` claims, which Godot PCK and ASAR readers
+record. Claims of one algorithm that differ declare different content, so the
+path compares `changed` in `metadata` and `availability`; equal claims add no
+change, because REA cannot verify them. With content on both sides, the
+observed bytes decide.
 
 `compare_artifacts` does not compare limitations. They explain what an
 observation could establish, such as a case collision with another
