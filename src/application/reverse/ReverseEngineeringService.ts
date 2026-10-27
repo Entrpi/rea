@@ -917,7 +917,7 @@ export class ReverseEngineeringService {
       if (!outcome.ok) return outcome;
       completed = outcome.value;
       if (completed.status !== "unfinished")
-        this.#versionProbes.set(key, completed);
+        this.#rememberVersionProbe(key, completed);
     }
     if (completed.status !== "read")
       return ok(
@@ -947,6 +947,20 @@ export class ReverseEngineeringService {
         provider_version_banner: identification.banner,
       },
     });
+  }
+
+  /**
+   * Keep a completed probe for its launch path and digest. Concurrent first
+   * calls can each probe, so a later failure never replaces a successful
+   * reading; a success replaces an earlier failure.
+   */
+  #rememberVersionProbe(key: string, completed: CompletedVersionProbe): void {
+    if (
+      completed.status !== "read" &&
+      this.#versionProbes.get(key)?.status === "read"
+    )
+      return;
+    this.#versionProbes.set(key, completed);
   }
 
   /**

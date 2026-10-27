@@ -288,6 +288,76 @@ posix(
   },
 );
 
+posix.each([
+  { first: "success", second: "timeout" },
+  { first: "exit", second: "success" },
+] as const)(
+  "keeps the successful reading when concurrent probes end in $first then $second",
+  async ({ first: firstEnds, second: secondEnds }) => {
+    const { executable, path } = await fixture();
+    const started = [gate(), gate()] as const;
+    const release = [gate(), gate()] as const;
+    const ends = [firstEnds, secondEnds] as const;
+    const run = vi.fn(
+      async (
+        _command: string,
+        args: readonly string[],
+        _options?: ExecFileOutputOptions,
+      ) => {
+        if (args[0] !== "-v") return { stdout: "command output", stderr: "" };
+        const index = probes(run) === 1 ? 0 : 1;
+        started[index].open();
+        await release[index].opened;
+        if (ends[index] === "success")
+          return { stdout: "rizin 0.9.1 @ linux-x86-64", stderr: "" };
+        throw Object.assign(
+          new Error("probe failed"),
+          ends[index] === "timeout"
+            ? { code: "ETIMEDOUT", signal: "SIGTERM", stdout: "", stderr: "" }
+            : { code: 2, signal: null, stdout: "", stderr: "usage\n" },
+        );
+      },
+    );
+    const service = new TestReverseEngineeringService({
+      run,
+      environment: { REA_RIZIN_COMMAND: executable },
+    });
+    const pending: Promise<unknown>[] = [];
+    try {
+      const first = service.executeRizinCommand({ path, command: "iI" });
+      pending.push(first);
+      await awaitAcknowledgement(started[0].opened, first, "first probe");
+      const second = service.executeRizinCommand({ path, command: "iS" });
+      pending.push(second);
+      await awaitAcknowledgement(started[1].opened, second, "second probe");
+      // Each call reports its own probe, in the order the probes end.
+      for (const [index, call] of [first, second].entries()) {
+        release[index]?.open();
+        const result = await within(call, `call ${String(index + 1)}`);
+        if (!result.ok) throw result.error;
+        expect(result.value.provider.version).toBe(
+          ends[index] === "success" ? "0.9.1" : null,
+        );
+      }
+      const later = await within(
+        service.executeRizinCommand({ path, command: "iz" }),
+        "later call",
+      );
+      if (!later.ok) throw later.error;
+      expect(later.value.provider).toEqual({
+        id: "rizin",
+        name: "Rizin",
+        version: "0.9.1",
+      });
+      expect(probes(run)).toBe(2);
+    } finally {
+      for (const each of release) each.open();
+      await Promise.allSettled(pending);
+      await service.close();
+    }
+  },
+);
+
 posix("keys completed probes by launch path as well as digest", async () => {
   const { executable, path } = await fixture();
   const other = join(dirname(executable), "other");

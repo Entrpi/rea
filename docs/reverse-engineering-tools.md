@@ -100,8 +100,8 @@ banner leaves the version unknown, and the command still runs; a failed probe's
 exit status and bounded output are recorded in `provider_version_probe`. Each
 call's probe uses that call's `command_timeout_ms` budget and cancellation. A
 completed probe (a banner, a non-zero exit or a timeout) is reused for the same
-resolved path and SHA-256 for the life of the server process; a cancelled probe
-is not.
+resolved path and SHA-256 for the life of the server process, and a later
+failure never replaces a successful reading; a cancelled probe is not reused.
 
 Captured stdout and stderr are retained up to a 16 MiB combined limit; `output_truncated` marks output beyond that limit. One-shot commands use the `command_timeout_ms` budget described above. That 16 MiB cap has no runtime override.
 
