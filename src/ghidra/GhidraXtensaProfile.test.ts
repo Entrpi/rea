@@ -1,7 +1,7 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, parse, relative } from "node:path";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
 import { parseConfig } from "../config/parseConfig.js";
 import type {
   BinaryTarget,
@@ -92,18 +92,7 @@ const target = (
 
 /** Ghidra installation holding only the Xtensa language definitions. */
 const xtensaInstallation = async (): Promise<string> => {
-  const root =
-    process.platform === "win32" ? join(process.cwd(), "build") : tmpdir();
-  await mkdir(root, { recursive: true });
-  const owned = await mkdtemp(join(root, "rea-ghidra-xtensa-"));
-  onTestFinished(async () => {
-    await rm(owned, { recursive: true, force: true });
-  });
-  // The simulated Linux host needs a POSIX absolute path on the same drive.
-  const installDir =
-    process.platform === "win32"
-      ? `/${relative(parse(owned).root, owned).replaceAll("\\", "/")}`
-      : owned;
+  const installDir = await createTestTempDirectory("rea-ghidra-xtensa-");
   const languages = join(installDir, "Ghidra/Processors/Xtensa/data/languages");
   await mkdir(languages, { recursive: true });
   await writeFile(join(languages, "xtensa.ldefs"), XTENSA_LDEFS);
