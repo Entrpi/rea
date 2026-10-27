@@ -216,6 +216,11 @@ const HOPPER_DECLINED_GHIDRA_LANES: Record<
   hexagon: "unverified",
 };
 
+/** Whether REA has verified the Ghidra lane that a declined family is pointed to. */
+export const hopperDeclinedGhidraLane = (
+  architecture: ElfMetadataArchitecture | "hexagon",
+): "verified" | "unverified" => HOPPER_DECLINED_GHIDRA_LANES[architecture];
+
 /** Families with no verified Hopper lane, declined before any loader selection. */
 export type HopperDeclinedArchitecture =
   | ElfMetadataArchitecture
@@ -235,7 +240,7 @@ export const hopperDeclinedArchitectureReason = (
   if (architecture === "arm64_32")
     return "REA's Hopper adapter has no verified arm64_32 lane.";
   return `REA's Hopper adapter does not admit ${architecture} targets. ${
-    HOPPER_DECLINED_GHIDRA_LANES[architecture] === "verified"
+    hopperDeclinedGhidraLane(architecture) === "verified"
       ? `Select a verified Ghidra ${architecture} profile instead.`
       : "Ghidra admits them through a lane REA has not verified."
   }`;

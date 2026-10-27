@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { parseConfig } from "../config/parseConfig.js";
+import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import { silentLogger } from "../logger.js";
 import { ok } from "../domain/result.js";
-import { hopperDeclinedArchitectureReason } from "./HopperAnalysisProfile.js";
+import {
+  hopperDeclinedArchitectureReason,
+  hopperDeclinedGhidraLane,
+} from "./HopperAnalysisProfile.js";
 import { HopperClient } from "./HopperClient.js";
 import { HopperProvider } from "./HopperProvider.js";
 
@@ -78,30 +82,54 @@ describe("Hopper provider capabilities", () => {
       reason: expect.stringContaining("Ghidra"),
     });
   });
-  it("declines Hexagon targets toward Ghidra without claiming a verified lane", () => {
-    const config = parseConfig({});
-    if (!config.ok) throw new Error("expected valid configuration");
-    const provider = new HopperProvider(config.value, silentLogger, {});
-    const support = provider.inspectTargetSupport({
+  it("records which declined families have a verified Ghidra lane", () => {
+    expect({
+      mips: hopperDeclinedGhidraLane("mips"),
+      riscv: hopperDeclinedGhidraLane("riscv"),
+      powerpc: hopperDeclinedGhidraLane("powerpc"),
+      hexagon: hopperDeclinedGhidraLane("hexagon"),
+    }).toEqual({
+      mips: "verified",
+      riscv: "verified",
+      powerpc: "verified",
+      hexagon: "unverified",
+    });
+    // The advice follows the lane's status, not only the family name.
+    expect(hopperDeclinedArchitectureReason("mips")).not.toBe(
+      hopperDeclinedArchitectureReason("hexagon").replaceAll("hexagon", "mips"),
+    );
+  });
+  it.each([
+    {
       path: "/tmp/chre_pal.so",
       sha256: "a".repeat(64),
       kind: "executable",
       format: "elf",
       architecture: "hexagon",
       availableArchitectures: ["hexagon"],
-    });
-    if (support.status !== "unsupported") throw new Error("Expected a refusal");
-    expect(support.code).toBe("architecture_unsupported");
-    expect(support.reason).toContain("hexagon");
-    expect(support.reason).toContain("Ghidra");
-    expect(support.reason).toContain("not verified");
-  });
-  it("keeps the verified Ghidra pointer for a family whose lane is verified", () => {
-    const reason = hopperDeclinedArchitectureReason("mips");
-    expect(reason).toContain("mips");
-    expect(reason).toContain("Ghidra");
-    expect(reason).not.toContain("not verified");
-  });
+    },
+    {
+      path: "/tmp/router.elf",
+      sha256: "a".repeat(64),
+      kind: "executable",
+      format: "elf",
+      architecture: "mips",
+      availableArchitectures: ["mips"],
+      mips: { elfClass: 32, byteOrder: "big", type: 2, flags: 0 },
+    },
+  ] as const satisfies readonly BinaryTarget[])(
+    "declines $architecture targets with the owned reason",
+    (target) => {
+      const config = parseConfig({});
+      if (!config.ok) throw new Error("expected valid configuration");
+      const provider = new HopperProvider(config.value, silentLogger, {});
+      expect(provider.inspectTargetSupport(target)).toMatchObject({
+        status: "unsupported",
+        code: "architecture_unsupported",
+        reason: hopperDeclinedArchitectureReason(target.architecture),
+      });
+    },
+  );
   it("declines thin arm64_32 Mach-O targets without a verified lane", () => {
     const config = parseConfig({});
     if (!config.ok) throw new Error("expected valid configuration");

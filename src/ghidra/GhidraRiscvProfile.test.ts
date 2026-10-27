@@ -12,7 +12,10 @@ import { HopperProvider } from "../hopper/HopperProvider.js";
 import { hopperLoaderArgsForTarget } from "../hopper/HopperAnalysisProfile.js";
 import { IdaProvider } from "../ida/IdaProvider.js";
 import { GhidraProvider } from "./GhidraProvider.js";
-import { ghidraRiscvLimitations } from "./GhidraRiscvProfile.js";
+import {
+  ghidraRiscvLimitations,
+  ghidraRiscvUnsupportedReason,
+} from "./GhidraRiscvProfile.js";
 import { ghidraProfileInstallationHost as host } from "./GhidraInstallation.fixture.js";
 import {
   ghidraPinnedLanguage,
@@ -200,7 +203,7 @@ const registerRiscvAdmissionAndCapabilityCases = () => {
     [{ type: 3 }, "fixed-address ET_EXEC only"],
     [{ type: 1 }, "fixed-address ET_EXEC only"],
     [{ type: 0xffa0 }, "e_type 65440"],
-    [{ flags: 0xc }, "16-register ABI (x0-x15)"],
+    [{ flags: 0xc }, "EF_RISCV_RVE"],
     [{ flags: 0x14 }, "EF_RISCV_TSO"],
     [{ flags: 0x1 }, "soft-float convention"],
     [{ flags: 0x3 }, "single-float"],
@@ -212,11 +215,14 @@ const registerRiscvAdmissionAndCapabilityCases = () => {
     async (change, reason) => {
       const provider = ghidra();
       const value = target(change);
+      // The provider delivers the lane's own refusal, which names the
+      // offending declaration or value.
       expect(provider.inspectTargetSupport(value)).toMatchObject({
         status: "unsupported",
         code: "architecture_unsupported",
-        reason: expect.stringContaining(reason),
+        reason: ghidraRiscvUnsupportedReason(value),
       });
+      expect(ghidraRiscvUnsupportedReason(value)).toContain(reason);
       expect(await provider.resolveAnalysisProfile(value)).toEqual(
         expect.objectContaining({ ok: false }),
       );
