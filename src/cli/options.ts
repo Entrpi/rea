@@ -7,9 +7,15 @@ import {
 import type { BinaryArchitecture } from "../domain/binaryTargetTypes.js";
 import {
   binaryArchitectureSchema,
+  rawBinaryBaseAddressSchema,
   rawBinaryEntryPointSchema,
+  rawBinaryVectorTableAddressSchema,
   type NativeLoadSelection,
 } from "../domain/rawBinary.js";
+import {
+  rawArchitectureVariantSchema,
+  type RawArchitectureVariant,
+} from "../domain/rawArchitectureVariant.js";
 import { analysisProviderSelectorSchema } from "../domain/providerSelection.js";
 import type { AnalysisProviderSelector } from "../domain/providerSelection.js";
 import type { Logger } from "pino";
@@ -50,14 +56,36 @@ export const architectureSelectionOption = binaryArchitectureSchema
 export const entryPointSelectionOption = rawBinaryEntryPointSchema
   .optional()
   .describe(
-    "Caller-supplied load and entry address (0xhex); required with --target-format raw-binary, optional with gamecube-dol (must equal the DOL header entry)",
+    "Caller-supplied code entry address (0xhex), also the load address without --base-address; required with --target-format raw-binary unless --architecture-variant and --base-address are given, optional with gamecube-dol (must equal the DOL header entry)",
   );
+
+export const baseAddressSelectionOption = rawBinaryBaseAddressSchema
+  .optional()
+  .describe(
+    "Address of raw file offset 0 (0xhex) for an --architecture-variant image, separate from --entry-point; defaults to it",
+  );
+
+export const architectureVariantSelectionOption = rawArchitectureVariantSchema
+  .optional()
+  .describe(
+    "ARM M-profile variant of a raw image, decoded in Thumb state; requires --architecture arm",
+  );
+
+export const vectorTableAddressSelectionOption =
+  rawBinaryVectorTableAddressSchema
+    .optional()
+    .describe(
+      "Address of the M-profile vector table (0xhex) when --entry-point is omitted and the table is not at --base-address",
+    );
 
 /** Shared CLI flags that bind a native target interpretation. */
 export const nativeOpenOptionFields = {
   "target-format": formatSelectionOption,
   architecture: architectureSelectionOption,
   "entry-point": entryPointSelectionOption,
+  "base-address": baseAddressSelectionOption,
+  "architecture-variant": architectureVariantSelectionOption,
+  "vector-table-address": vectorTableAddressSelectionOption,
   provider: providerSelectionOption,
 };
 
@@ -68,10 +96,13 @@ export interface NativeOpenCliFlags {
   readonly "target-format"?: ExecutableFormatHint | undefined;
   readonly architecture?: BinaryArchitecture | undefined;
   readonly "entry-point"?: string | undefined;
+  readonly "base-address"?: string | undefined;
+  readonly "architecture-variant"?: RawArchitectureVariant | undefined;
+  readonly "vector-table-address"?: string | undefined;
 }
 
 /** Collect the native load flags into the selection that target admission owns. */
-const nativeLoadSelectionFromCli = (
+export const nativeLoadSelectionFromCli = (
   options: NativeOpenCliFlags,
 ): NativeLoadSelection => ({
   ...(options["target-format"] === undefined
@@ -83,6 +114,15 @@ const nativeLoadSelectionFromCli = (
   ...(options["entry-point"] === undefined
     ? {}
     : { entryPoint: options["entry-point"] }),
+  ...(options["base-address"] === undefined
+    ? {}
+    : { baseAddress: options["base-address"] }),
+  ...(options["architecture-variant"] === undefined
+    ? {}
+    : { architectureVariant: options["architecture-variant"] }),
+  ...(options["vector-table-address"] === undefined
+    ? {}
+    : { vectorTableAddress: options["vector-table-address"] }),
 });
 
 /** Map native CLI flags onto the shared one-shot analysis options. */

@@ -2,6 +2,12 @@ import { z } from "zod";
 import { nativeMetadataRecoverySummarySchema } from "./nativeMetadataRecovery.js";
 import { jsonValueSchema } from "../jsonValue.js";
 import { binaryArchitectureSchema } from "../rawBinary.js";
+import {
+  RAW_ENTRY_BASES,
+  RAW_ENTRY_ISA_MODES,
+  RAW_ENTRY_ROLES,
+  rawArchitectureVariantSchema,
+} from "../rawArchitectureVariant.js";
 import { nativeAddressObservationSchema } from "./nativeAddress.js";
 
 const integer = z.int().min(0).max(Number.MAX_SAFE_INTEGER);
@@ -125,6 +131,62 @@ export const nativeRawLoadImageSchema = z.strictObject({
   checks: z.array(nativeLoadImageCheckSchema),
   limitations: z.array(z.string().min(1)),
 });
+/**
+ * Version 1 of a raw load that names a separate base, an architecture variant
+ * or a Reset-derived entry. A load with its base at a caller-selected entry and
+ * no variant keeps the raw-binary shape above, so its saved Evidence is unchanged.
+ */
+export const nativeSegmentsLoadImageSchema = z.strictObject({
+  status: z.enum(["verified", "mismatch"]),
+  variant: z.literal("segments"),
+  version: z.literal(1),
+  format: z.literal("raw-binary"),
+  target_sha256: digest,
+  architecture: binaryArchitectureSchema,
+  architecture_variant: rawArchitectureVariantSchema.exactOptional(),
+  language_id: z.string().min(1),
+  compiler_spec_id: z.string().min(1),
+  file_bytes: integer.min(1),
+  // One file-backed segment today; the array leaves room for more segments later.
+  segments: z
+    .array(
+      z.strictObject({
+        name: z.string().min(1),
+        address: nativeAddressObservationSchema,
+        size: integer.min(1),
+        backing: z.strictObject({
+          kind: z.literal("source-range"),
+          source: integer,
+          offset: integer,
+        }),
+      }),
+    )
+    .min(1),
+  // One entry today; the array leaves room for more entries later.
+  entries: z
+    .array(
+      z.strictObject({
+        address: nativeAddressObservationSchema,
+        isa_mode: z.enum(RAW_ENTRY_ISA_MODES).exactOptional(),
+        role: z.enum(RAW_ENTRY_ROLES),
+        basis: z.enum(RAW_ENTRY_BASES),
+      }),
+    )
+    .min(1),
+  // Present only for an entry whose basis is the vector table: the table address
+  // and the two words read from it. The initial stack pointer is observed and
+  // not validated.
+  vector_table: z
+    .strictObject({
+      address: nativeAddressObservationSchema,
+      initial_stack_pointer: z.string().regex(/^0x[0-9a-f]{8}$/u),
+      reset_vector: z.string().regex(/^0x[0-9a-f]{8}$/u),
+    })
+    .exactOptional(),
+  observations: nativeLoadImageObservationSchema,
+  checks: z.array(nativeLoadImageCheckSchema),
+  limitations: z.array(z.string().min(1)),
+});
 export const nativeDolLoadImageSchema = z.strictObject({
   status: z.enum(["verified", "mismatch"]),
   format: z.literal("gamecube-dol"),
@@ -157,6 +219,7 @@ export const nativeLoadImageSchema = z.union([
   nativeUnsupportedLoadImageSchema,
   nativeDosLoadImageSchema,
   nativeRawLoadImageSchema,
+  nativeSegmentsLoadImageSchema,
   nativeDolLoadImageSchema,
 ]);
 

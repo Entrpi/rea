@@ -268,6 +268,9 @@ const readOpenedBinaryTarget = async (
     const admitted = admitRawBinary({
       architecture: loadSelection.architecture,
       entryPoint: loadSelection.entryPoint,
+      baseAddress: loadSelection.baseAddress,
+      architectureVariant: loadSelection.architectureVariant,
+      vectorTableAddress: loadSelection.vectorTableAddress,
       fileBytes: metadata.size,
     });
     if (!admitted.ok)
@@ -291,7 +294,7 @@ const readOpenedBinaryTarget = async (
   const pairing = rawBinarySelectionError(loadSelection);
   if (pairing !== undefined)
     return err(
-      new BinaryTargetError(path, pairing, {
+      new BinaryTargetError(path, pairing.message, {
         constraint: "load_selection_rejected",
       }),
     );

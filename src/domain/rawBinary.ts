@@ -7,6 +7,10 @@ import type {
   RawOnlyArchitecture,
 } from "./binaryTargetTypes.js";
 import type { ExecutableFormatHint } from "./dosCom.js";
+import {
+  rawArchitectureVariantRow,
+  type RawArchitectureVariant,
+} from "./rawArchitectureVariant.js";
 import { err, ok, type Result } from "./result.js";
 
 /** Caller-visible CPU families admitted for headerless raw binaries. */
@@ -29,6 +33,21 @@ export const rawBinaryEntryPointSchema = z
   .string()
   .regex(RAW_BINARY_ENTRY_POINT, {
     message: "entry_point must be a hexadecimal address of the form 0x…",
+  });
+
+/** Hexadecimal address of raw file offset 0 when it differs from the entry. */
+export const rawBinaryBaseAddressSchema = z
+  .string()
+  .regex(RAW_BINARY_ENTRY_POINT, {
+    message: "base_address must be a hexadecimal address of the form 0x…",
+  });
+
+/** Hexadecimal address of an M-profile vector table inside the mapped image. */
+export const rawBinaryVectorTableAddressSchema = z
+  .string()
+  .regex(RAW_BINARY_ENTRY_POINT, {
+    message:
+      "vector_table_address must be a hexadecimal address of the form 0x…",
   });
 
 /** Canonicalized caller-supplied raw-binary entry with the original spelling. */
@@ -68,6 +87,9 @@ export interface NativeLoadSelection {
   readonly format?: ExecutableFormatHint;
   readonly architecture?: BinaryArchitecture;
   readonly entryPoint?: string;
+  readonly baseAddress?: string;
+  readonly architectureVariant?: RawArchitectureVariant;
+  readonly vectorTableAddress?: string;
 }
 
 /** Admitted headerless load identity used by target resolution and profiles. */
@@ -99,8 +121,21 @@ const addressWidth = (architecture: BinaryArchitecture): bigint =>
 export const admitRawBinary = (input: {
   readonly architecture: unknown;
   readonly entryPoint: unknown;
+  readonly baseAddress?: unknown;
+  readonly architectureVariant?: unknown;
+  readonly vectorTableAddress?: unknown;
   readonly fileBytes: number;
 }): Result<RawBinaryAdmission, RawBinaryAdmissionRejection> => {
+  if (
+    input.baseAddress !== undefined ||
+    input.architectureVariant !== undefined ||
+    input.vectorTableAddress !== undefined
+  )
+    return err({
+      reason:
+        "base_address, architecture_variant and vector_table_address are not admitted yet",
+      constraint: "load_selection_rejected",
+    });
   const architecture = binaryArchitectureSchema.safeParse(input.architecture);
   if (!architecture.success)
     return err({
@@ -158,26 +193,128 @@ export const admitRawBinary = (input: {
   });
 };
 
-/** Describe the format/architecture/entry pairing without performing I/O. */
+/** A load selection refused before any file is read, naming the input to correct. */
+export interface LoadSelectionIssue {
+  readonly field:
+    | "architecture"
+    | "entry_point"
+    | "base_address"
+    | "architecture_variant"
+    | "vector_table_address";
+  readonly message: string;
+}
+
+const RAW_ONLY_INPUTS =
+  "base_address, architecture_variant and vector_table_address apply only with format=raw-binary";
+
+/**
+ * Rules for the variant, base and vector-table inputs of a raw-binary
+ * selection. The boundary pairing check and admission both apply them, so they
+ * refuse the same selections in the same words. Legacy selections pass.
+ */
+export const rawBinaryVariantSelectionIssue = (input: {
+  readonly architecture?: unknown;
+  readonly entryPoint?: unknown;
+  readonly baseAddress?: unknown;
+  readonly architectureVariant?: unknown;
+  readonly vectorTableAddress?: unknown;
+}): LoadSelectionIssue | undefined => {
+  const variant = rawArchitectureVariantRow(input.architectureVariant);
+  if (variant !== undefined && variant.architecture !== input.architecture)
+    return {
+      field: "architecture_variant",
+      message: `architecture_variant ${variant.name} requires architecture ${variant.architecture}`,
+    };
+  // Narrow first: only the M-profile lane is verified with a separate base.
+  if (
+    input.baseAddress !== undefined &&
+    input.architectureVariant === undefined
+  )
+    return {
+      field: "base_address",
+      message: "base_address applies only with architecture_variant",
+    };
+  if (input.entryPoint !== undefined)
+    return input.vectorTableAddress === undefined
+      ? undefined
+      : {
+          field: "vector_table_address",
+          message:
+            "vector_table_address locates Reset only when entry_point is omitted",
+        };
+  if (
+    input.baseAddress === undefined &&
+    input.architectureVariant === undefined &&
+    input.vectorTableAddress === undefined
+  )
+    return undefined;
+  return input.architectureVariant !== undefined &&
+    input.baseAddress !== undefined
+    ? undefined
+    : {
+        field: "entry_point",
+        message:
+          "entry_point may be omitted only with architecture_variant and base_address; Reset is then read from the vector table",
+      };
+};
+
+/** Describe the pairing of the selected load inputs without performing I/O. */
 export const rawBinarySelectionError = (input: {
   readonly format?: ExecutableFormatHint;
   readonly architecture?: unknown;
   readonly entryPoint?: unknown;
-}): string | undefined => {
+  readonly baseAddress?: unknown;
+  readonly architectureVariant?: unknown;
+  readonly vectorTableAddress?: unknown;
+}): LoadSelectionIssue | undefined => {
   const hasArchitecture = input.architecture !== undefined;
   const hasEntry = input.entryPoint !== undefined;
+  const hasBase = input.baseAddress !== undefined;
+  const hasVariant = input.architectureVariant !== undefined;
+  const hasVectorTable = input.vectorTableAddress !== undefined;
+  const rawOnlyField = hasBase
+    ? "base_address"
+    : hasVariant
+      ? "architecture_variant"
+      : hasVectorTable
+        ? "vector_table_address"
+        : undefined;
   if (input.format === "gamecube-dol") {
     // The DOL header fixes architecture; entry_point is checked against it at admission.
-    return hasArchitecture
-      ? "format=gamecube-dol takes its architecture from the DOL header; omit architecture"
-      : undefined;
+    if (hasArchitecture)
+      return {
+        field: "architecture",
+        message:
+          "format=gamecube-dol takes its architecture from the DOL header; omit architecture",
+      };
+    return rawOnlyField === undefined
+      ? undefined
+      : { field: rawOnlyField, message: RAW_ONLY_INPUTS };
   }
   if (input.format === "raw-binary") {
-    if (!hasArchitecture || !hasEntry)
-      return "format=raw-binary requires architecture and entry_point";
-    return undefined;
+    if (!hasArchitecture)
+      return {
+        field: "architecture",
+        message:
+          rawOnlyField === undefined
+            ? "format=raw-binary requires architecture and entry_point"
+            : "format=raw-binary requires architecture",
+      };
+    const issue = rawBinaryVariantSelectionIssue(input);
+    if (issue !== undefined) return issue;
+    return hasEntry || rawOnlyField !== undefined
+      ? undefined
+      : {
+          field: "entry_point",
+          message: "format=raw-binary requires architecture and entry_point",
+        };
   }
   if (hasArchitecture || hasEntry)
-    return "architecture and entry_point apply only with format=raw-binary";
-  return undefined;
+    return {
+      field: hasArchitecture ? "architecture" : "entry_point",
+      message: "architecture and entry_point apply only with format=raw-binary",
+    };
+  return rawOnlyField === undefined
+    ? undefined
+    : { field: rawOnlyField, message: RAW_ONLY_INPUTS };
 };

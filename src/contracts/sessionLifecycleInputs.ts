@@ -5,10 +5,13 @@ import {
 import { absoluteLocalPathStringSchema } from "../domain/localPath.js";
 import {
   binaryArchitectureSchema,
+  rawBinaryBaseAddressSchema,
   rawBinaryEntryPointSchema,
   rawBinarySelectionError,
+  rawBinaryVectorTableAddressSchema,
   type NativeLoadSelection,
 } from "../domain/rawBinary.js";
+import { rawArchitectureVariantSchema } from "../domain/rawArchitectureVariant.js";
 import { z } from "zod";
 import { analysisProviderSelectorSchema } from "../domain/providerSelection.js";
 
@@ -27,12 +30,26 @@ export const openBinaryLoadSelection = (input: {
   readonly format?: ExecutableFormatHint | undefined;
   readonly architecture?: NativeLoadSelection["architecture"] | undefined;
   readonly entry_point?: string | undefined;
+  readonly base_address?: string | undefined;
+  readonly architecture_variant?:
+    | NativeLoadSelection["architectureVariant"]
+    | undefined;
+  readonly vector_table_address?: string | undefined;
 }): NativeLoadSelection => ({
   ...(input.format === undefined ? {} : { format: input.format }),
   ...(input.architecture === undefined
     ? {}
     : { architecture: input.architecture }),
   ...(input.entry_point === undefined ? {} : { entryPoint: input.entry_point }),
+  ...(input.base_address === undefined
+    ? {}
+    : { baseAddress: input.base_address }),
+  ...(input.architecture_variant === undefined
+    ? {}
+    : { architectureVariant: input.architecture_variant }),
+  ...(input.vector_table_address === undefined
+    ? {}
+    : { vectorTableAddress: input.vector_table_address }),
 });
 
 /** Input contract for opening a target with an optional staged snapshot. */
@@ -52,7 +69,22 @@ export const openBinaryInputSchema = z
     entry_point: rawBinaryEntryPointSchema
       .optional()
       .describe(
-        "Caller-supplied load and entry address (0xhex). File offset 0 is mapped here. Required with format=raw-binary; rejected otherwise. Optional with format=gamecube-dol; must equal the DOL header entry.",
+        "Caller-supplied code entry address (0xhex). Without base_address, file offset 0 is also mapped here. Required with format=raw-binary unless architecture_variant and base_address are given, when Reset is read from the vector table; rejected with other formats except gamecube-dol, where it is optional and must equal the DOL header entry.",
+      ),
+    base_address: rawBinaryBaseAddressSchema
+      .optional()
+      .describe(
+        "Address of raw file offset 0 (0xhex) for an architecture_variant image, separate from entry_point. Defaults to entry_point. Only with format=raw-binary.",
+      ),
+    architecture_variant: rawArchitectureVariantSchema
+      .optional()
+      .describe(
+        "ARM M-profile variant of a raw image (raw dumps do not record it). Requires format=raw-binary and architecture=arm. Code is decoded in Thumb state; an odd entry_point is refused.",
+      ),
+    vector_table_address: rawBinaryVectorTableAddressSchema
+      .optional()
+      .describe(
+        "Address of the M-profile vector table (0xhex) when it is not at base_address, for example after a bootloader header. Only when entry_point is omitted.",
       ),
     provider_id: analysisProviderSelectorSchema.optional(),
     snapshot_path: snapshotPathSchema.optional(),
@@ -62,15 +94,8 @@ export const openBinaryInputSchema = z
     if (pairing === undefined) return;
     context.addIssue({
       code: "custom",
-      path:
-        value.format === "raw-binary"
-          ? value.architecture === undefined
-            ? ["architecture"]
-            : ["entry_point"]
-          : value.architecture === undefined
-            ? ["entry_point"]
-            : ["architecture"],
-      message: pairing,
+      path: [pairing.field],
+      message: pairing.message,
     });
   });
 

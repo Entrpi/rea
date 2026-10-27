@@ -4,7 +4,15 @@ import { describe, expect, it } from "vitest";
 
 import { attestGhidraRawBinaryLoadImage } from "./GhidraLoadImageValues.js";
 import { fixtureRawBinaryLoadImage } from "./GhidraRawBinaryLoadImage.fixture.js";
-import { ghidraRawBinaryLanguage } from "./GhidraRawBinaryLanguage.js";
+import {
+  GHIDRA_RAW_ENTRY_CONTEXT,
+  GHIDRA_RAW_VARIANT_LANGUAGES,
+  ghidraRawBinaryLanguage,
+} from "./GhidraRawBinaryLanguage.js";
+import {
+  RAW_ARCHITECTURE_VARIANT_NAMES,
+  RAW_ARCHITECTURE_VARIANTS,
+} from "../domain/rawArchitectureVariant.js";
 import { rawLoadAtEntry } from "../domain/rawBinary.fixture.js";
 
 describe("raw-binary Ghidra language binding", () => {
@@ -36,6 +44,28 @@ describe("raw-binary Ghidra language binding", () => {
       compilerSpecId: "default",
       defaultAddressSpace: "ram",
     });
+  });
+});
+
+describe("raw-binary variant Ghidra binding", () => {
+  it.each(RAW_ARCHITECTURE_VARIANT_NAMES)(
+    "binds %s to its little-endian ARM decoder and Thumb entry context",
+    (variant) => {
+      const row = RAW_ARCHITECTURE_VARIANTS[variant];
+      expect(ghidraRawBinaryLanguage(row.architecture, variant)).toEqual({
+        languageId: GHIDRA_RAW_VARIANT_LANGUAGES[variant],
+        compilerSpecId: "default",
+        defaultAddressSpace: "ram",
+      });
+      expect(GHIDRA_RAW_VARIANT_LANGUAGES[variant]).toMatch(/^ARM:LE:32:/u);
+      expect(GHIDRA_RAW_ENTRY_CONTEXT[row.isaMode]).toEqual({
+        register: "TMode",
+        value: "0x1",
+      });
+    },
+  );
+  it("keeps the generic ARM decoder when no variant is named", () => {
+    expect(ghidraRawBinaryLanguage("arm").languageId).toBe("ARM:LE:32:v7");
   });
 });
 

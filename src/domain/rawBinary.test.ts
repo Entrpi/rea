@@ -241,9 +241,10 @@ describe("m68k raw-binary admission", () => {
 
 describe("raw-binary selection pairing", () => {
   it("requires architecture and entry with format=raw-binary", () => {
-    expect(rawBinarySelectionError({ format: "raw-binary" })).toBe(
-      "format=raw-binary requires architecture and entry_point",
-    );
+    expect(rawBinarySelectionError({ format: "raw-binary" })).toEqual({
+      field: "architecture",
+      message: "format=raw-binary requires architecture and entry_point",
+    });
     expect(
       rawBinarySelectionError({
         format: "raw-binary",
@@ -255,10 +256,16 @@ describe("raw-binary selection pairing", () => {
   it("rejects architecture or entry without format=raw-binary", () => {
     expect(
       rawBinarySelectionError({ architecture: "arm", entryPoint: "0x1" }),
-    ).toBe("architecture and entry_point apply only with format=raw-binary");
+    ).toEqual({
+      field: "architecture",
+      message: "architecture and entry_point apply only with format=raw-binary",
+    });
     expect(
-      rawBinarySelectionError({ format: "dos-com", architecture: "x86" }),
-    ).toBe("architecture and entry_point apply only with format=raw-binary");
+      rawBinarySelectionError({ format: "dos-com", entryPoint: "0x1" }),
+    ).toEqual({
+      field: "entry_point",
+      message: "architecture and entry_point apply only with format=raw-binary",
+    });
   });
 });
 
@@ -356,7 +363,7 @@ describe("raw-binary admission results", () => {
               ...(format === undefined ? {} : { format }),
               architecture,
               entryPoint,
-            }) ?? null,
+            })?.message ?? null,
           ]),
         ),
     );
