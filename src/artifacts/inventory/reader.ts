@@ -71,7 +71,7 @@ export const inventoryCoverage = (
           : []),
         ...(reader.format === "esp-image"
           ? [
-              "ESP image inventory reads the header-declared segments, checksum, appended SHA-256, descriptor and Secure Boot v2 signature blocks. Segment classification follows ESP-IDF v6.1 should_map and should_load for a cold boot; signatures are not cryptographically verified, and code is not disassembled.",
+              "ESP image inventory reads the header-declared segments, checksum, appended SHA-256, descriptor and Secure Boot v2 signature blocks. Segment classification follows ESP-IDF v6.1 should_map and should_load for a cold boot and does not check RAM ranges; signatures are not cryptographically verified, and code is not disassembled.",
             ]
           : []),
         ...traversal.limitations,

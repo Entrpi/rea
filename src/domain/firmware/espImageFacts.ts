@@ -8,6 +8,7 @@ import {
   classifyEspSegment,
   espChipForId,
   espPageSizedMappingAmbiguity,
+  espSegmentLengthLimit,
   type EspChip,
 } from "./espChips.js";
 import {
@@ -221,11 +222,23 @@ const segmentLimitations = (
     limitations.push(
       `${chip.target} maps flash through 256 MMU pages of the bootloader's configured size, which the image does not record; segments from ${offsetText(ambiguity.low)} to ${offsetText(ambiguity.high)} are unclassified.`,
     );
-  for (const { metadata } of segments)
+  const lengthLimit =
+    chip === undefined ? undefined : espSegmentLengthLimit(chip);
+  for (const { metadata } of segments) {
+    const segment = `ESP image segment ${String(metadata.index)} length ${offsetText(metadata.data_len)}`;
     if (metadata.data_len % 4 !== 0)
       limitations.push(
-        `ESP image segment ${String(metadata.index)} length ${offsetText(metadata.data_len)} is not a multiple of 4; ESP-IDF rejects such an image.`,
+        `${segment} is not a multiple of 4; ESP-IDF rejects such an image.`,
       );
+    if (
+      chip !== undefined &&
+      lengthLimit !== undefined &&
+      metadata.data_len >= lengthLimit
+    )
+      limitations.push(
+        `${segment} is ${String(lengthLimit / 0x10_0000)} MiB or more; ESP-IDF rejects such an image for ${chip.target}.`,
+      );
+  }
   return limitations;
 };
 

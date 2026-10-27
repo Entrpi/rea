@@ -661,9 +661,10 @@ observed `header` and `descriptor` (its `kind` is the app or bootloader role)
 and the derived `chip`, `checksum`, `appended_sha256` and
 `undescribed_trailing` ranges. Segment rows (`segment-NN.bin`) carry
 `load_addr`, `classification` (`mapped`, `loaded`, `not-loaded` or `unknown`,
-per ESP-IDF `should_map`/`should_load`) and `source_location`; select them
-with `inspect_analysis_view` and `logical_paths`. Signature blocks are
-`unverified`; `public_key_sha256` matches eFuse key digests.
+per ESP-IDF `should_map`/`should_load`; RAM ranges are not checked) and
+`source_location`; select them with `inspect_analysis_view` and
+`logical_paths`. Signature blocks are `unverified`; `public_key_sha256`
+matches eFuse key digests.
 
 Unknown `source_coverage` means truncation or undescribed trailing bytes, such
 as the flash segments of a `--ram-only-header` image; do not infer absence

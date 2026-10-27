@@ -410,6 +410,32 @@ describe("ESP image integrity", () => {
       "ESP image segment 1 length 0x6 is not a multiple of 4; ESP-IDF rejects such an image.",
     ]);
   });
+
+  it.each([
+    ["esp32c3", 0x0005, true],
+    ["esp32s3", 0x0009, false],
+  ] as const)(
+    "applies ESP-IDF's 16 MiB segment limit to %s by its cache address width",
+    (target, chipId, limited) => {
+      const bytes = Buffer.from(
+        espImage({
+          chipId,
+          segments: [{ address: 0x3fc8_8000, data: pattern(16, 1) }],
+        }),
+      );
+      // Segment 0 declares 16 MiB; the file holds only its first bytes.
+      bytes.writeUInt32LE(0x100_0000, 28);
+      const decoded = image(bytes);
+      expect(decoded.limitations).toEqual([
+        ...(limited
+          ? [
+              `ESP image segment 0 length 0x1000000 is 16 MiB or more; ESP-IDF rejects such an image for ${target}.`,
+            ]
+          : []),
+        `ESP image is truncated: segment 0 declares 16777216 bytes at offset 0x20, but the file holds ${String(bytes.length - 0x20)}.`,
+      ]);
+    },
+  );
 });
 
 describe("ESP image trailing bytes", () => {

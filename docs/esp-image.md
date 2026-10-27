@@ -114,12 +114,19 @@ example `segment-00.bin`, so two builds pair segments by position. Its
 `classification` follows ESP-IDF's bootloader (`should_map` and
 `should_load` in `esp_image_format.c`) on a cold boot:
 
-| Value        | Meaning                                                                                                   |
-| ------------ | --------------------------------------------------------------------------------------------------------- |
-| `mapped`     | Inside the chip's IROM, DROM or, where the MMU is per memory type, PSRAM range (`soc.h`)                  |
-| `loaded`     | `should_load` selects it: not mapped, at or above `0x10000000`. The bootloader still checks the RAM range |
-| `not-loaded` | Below `0x10000000`: the padding segments esptool writes at address 0, including `--secure-pad-v2`         |
-| `unknown`    | The chip is unknown, or the mapping depends on the bootloader's MMU page size                             |
+| Value        | Meaning                                                                                           |
+| ------------ | ------------------------------------------------------------------------------------------------- |
+| `mapped`     | Inside the chip's IROM, DROM or, where the MMU is per memory type, PSRAM range (`soc.h`)          |
+| `loaded`     | `should_load` selects it: not mapped, at or above `0x10000000`. RAM ranges are not checked        |
+| `not-loaded` | Below `0x10000000`: the padding segments esptool writes at address 0, including `--secure-pad-v2` |
+| `unknown`    | The chip is unknown, or the mapping depends on the bootloader's MMU page size                     |
+
+`loaded` does not mean the bootloader accepts the segment. Before loading,
+ESP-IDF's `verify_load_addresses` rejects the image when a loaded segment is
+not entirely in the chip's DRAM, IRAM, RTC memory or SPM, or overlaps the
+bootloader's own stack, data or loader code. For example, an ESP32-C6
+segment at `0x43000000` is `loaded` here and rejected there. REA models no
+RAM ranges.
 
 Padding segments are inventoried and extractable, but are never load regions.
 When waking from deep sleep, ESP-IDF also skips RTC-memory segments; that
@@ -166,16 +173,22 @@ Bytes after the image are described when they are erased flash (`0xFF`) or a
 signature sector's blocks; erased slots and slack in that sector count as
 erased flash. Every other byte is in `undescribed_trailing`.
 
-| Situation                                                   | Outcome                                                                                                    |
-| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Segment data or a segment header beyond the end of the file | Truncation limitation; checksum and SHA-256 `unavailable`; coverage `unknown`                              |
-| File ends before the checksum or the appended digest        | That status is `unavailable`, with a limitation; coverage `unknown`, since a signature sector could follow |
-| Checksum or SHA-256 mismatch                                | `invalid`, with a limitation; coverage is unchanged                                                        |
-| Erased flash after the image that runs past the three slots | Described; no limitation                                                                                   |
-| Erased flash that ends before the three slots are complete  | Limitation; coverage `unknown`, since a signed image cut there would have lost its sector                  |
-| A signature sector the file cuts short                      | Limitation; coverage `unknown`                                                                             |
-| Any other bytes after the image                             | Ranges in `undescribed_trailing`, a limitation, and coverage `unknown`                                     |
-| Segment length that is not a multiple of 4                  | Limitation: ESP-IDF rejects such an image                                                                  |
+| Situation                                                              | Outcome                                                                                                    |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Segment data or a segment header beyond the end of the file            | Truncation limitation; checksum and SHA-256 `unavailable`; coverage `unknown`                              |
+| File ends before the checksum or the appended digest                   | That status is `unavailable`, with a limitation; coverage `unknown`, since a signature sector could follow |
+| Checksum or SHA-256 mismatch                                           | `invalid`, with a limitation; coverage is unchanged                                                        |
+| Erased flash after the image that runs past the three slots            | Described; no limitation                                                                                   |
+| Erased flash that ends before the three slots are complete             | Limitation; coverage `unknown`, since a signed image cut there would have lost its sector                  |
+| A signature sector the file cuts short                                 | Limitation; coverage `unknown`                                                                             |
+| Any other bytes after the image                                        | Ranges in `undescribed_trailing`, a limitation, and coverage `unknown`                                     |
+| Segment length that is not a multiple of 4                             | Limitation: ESP-IDF rejects such an image                                                                  |
+| Segment of 16 MiB or more, except on chips with 32-bit cache addresses | Limitation: ESP-IDF rejects such an image                                                                  |
+
+ESP32-S3, ESP32-P4, ESP32-C5, ESP32-C61, ESP32-H4 and ESP32-S31 map flash
+through 32-bit cache addresses (`SOC_SPI_MEM_SUPPORT_CACHE_32BIT_ADDR_MAP`), so
+ESP-IDF sets no 16 MiB segment limit for them. For an unknown chip the limit
+is not applied.
 
 Undescribed bytes include other flash contents such as an app partition's
 stale data, a Secure Boot v1 signature, and the flash segments that esptool
