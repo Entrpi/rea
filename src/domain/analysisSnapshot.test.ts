@@ -155,6 +155,18 @@ describe("analysis snapshot target identity", () => {
     };
     const snapshot = snapshotTarget(target);
     const binding = snapshotBinding(ANALYSIS_SNAPSHOT_PROFILE);
+    // Pinned at d6f88becd: a load based at its caller-selected entry keeps
+    // this snapshot target and query identity.
+    expect(snapshot).toStrictEqual({
+      sha256: ANALYSIS_SNAPSHOT_TARGET.sha256,
+      kind: "executable",
+      architecture: "arm",
+      format: "raw-binary",
+      entry_point: "0x8000000",
+    });
+    expect(analysisQueryId(snapshot, binding, "list_procedures", {})).toBe(
+      "query_01cf2c417f0eeab7c65168418bd10966431dd38b7c977191e7e9379088dc2c20",
+    );
     const changed = {
       ...target,
       entryPoint: "0x9000000",

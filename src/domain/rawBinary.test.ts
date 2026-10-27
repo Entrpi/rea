@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import { executableFormatHintSchema } from "./dosCom.js";
@@ -248,5 +250,108 @@ describe("raw-binary selection pairing", () => {
     expect(
       rawBinarySelectionError({ format: "dos-com", architecture: "x86" }),
     ).toBe("architecture and entry_point apply only with format=raw-binary");
+  });
+});
+
+describe("raw-binary admission results", () => {
+  const sha256 = (value: unknown): string =>
+    createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  // Computed at d6f88becd over every combination below. Changing how the
+  // admitted load is represented must not change any accepted value, refusal
+  // reason or constraint.
+  const ADMISSION_GRID_SHA256 =
+    "4799dfa2fdd4abc00afd91441256be5b77aed31a84beccd084a60eb945b2e074";
+  const PAIRING_GRID_SHA256 =
+    "b6447afda4012589d57f8bc0710fa8d85066e332f932103e30556232d1f3eca7";
+  const architectures = [
+    undefined,
+    "x86",
+    "x86_64",
+    "arm",
+    "arm64",
+    "6502",
+    "m68k",
+    "mips",
+    "68000",
+    7,
+  ];
+  const entryPoints = [
+    undefined,
+    "0x0",
+    "0x1",
+    "0x2",
+    "0x3",
+    "0x4",
+    "0x8001",
+    "0xffff",
+    "0x10000",
+    "0x08000000",
+    "0x8000001",
+    "0x8000002",
+    "0xfffffffc",
+    "0xfffffffe",
+    "0xffffffff",
+    "0x100000000",
+    "0xFFFFFFFFFFFFFFFF",
+    "0x",
+    "8000",
+    0x8000,
+  ];
+  const fileSizes = [
+    0,
+    1,
+    2,
+    4,
+    8,
+    65_536,
+    65_537,
+    2 ** 32,
+    -1,
+    1.5,
+    Number.MAX_SAFE_INTEGER + 1,
+  ];
+  const admitted = (result: ReturnType<typeof admitRawBinary>) =>
+    result.ok
+      ? {
+          architecture: result.value.architecture,
+          base: result.value.entryPoint,
+          entry: result.value.entryPoint,
+          entry_source: result.value.entryPointSource,
+        }
+      : { reason: result.error.reason, constraint: result.error.constraint };
+
+  it("keeps every admission result", () => {
+    const rows = architectures.flatMap((architecture) =>
+      entryPoints.flatMap((entryPoint) =>
+        fileSizes.map((fileBytes) => [
+          architecture,
+          entryPoint,
+          fileBytes,
+          admitted(admitRawBinary({ architecture, entryPoint, fileBytes })),
+        ]),
+      ),
+    );
+    expect(rows).toHaveLength(2_200);
+    expect(sha256(rows)).toBe(ADMISSION_GRID_SHA256);
+  });
+
+  it("keeps every format, architecture and entry pairing result", () => {
+    const rows = [undefined, ...executableFormatHintSchema.options].flatMap(
+      (format) =>
+        [undefined, "arm"].flatMap((architecture) =>
+          [undefined, "0x8000000"].map((entryPoint) => [
+            format,
+            architecture,
+            entryPoint,
+            rawBinarySelectionError({
+              ...(format === undefined ? {} : { format }),
+              architecture,
+              entryPoint,
+            }) ?? null,
+          ]),
+        ),
+    );
+    expect(rows).toHaveLength(16);
+    expect(sha256(rows)).toBe(PAIRING_GRID_SHA256);
   });
 });

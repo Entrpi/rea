@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import { attestGhidraRawBinaryLoadImage } from "./GhidraLoadImageValues.js";
@@ -232,6 +234,19 @@ describe("raw-binary independent load-image checks", () => {
         entry: { address: "0x8000000", file_offset: 0 },
       },
     });
+  });
+  it("keeps the complete load image of a load based at its caller entry", () => {
+    const f = fixtureRawBinaryLoadImage();
+    const result = attestGhidraRawBinaryLoadImage(
+      f.snapshot,
+      f.target,
+      f.observation,
+    );
+    if (!result.ok) throw new Error(result.error);
+    // Pinned at d6f88becd: saved raw-binary Evidence keeps this exact shape.
+    expect(
+      createHash("sha256").update(JSON.stringify(result.value)).digest("hex"),
+    ).toBe("22e87550552b7d26eb5547161f6d7b815ceab8e158642058ee4796bc3848f948");
   });
   it("retains mismatch evidence for a drifted language", () => {
     const f = fixtureRawBinaryLoadImage();
