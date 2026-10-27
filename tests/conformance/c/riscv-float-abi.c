@@ -6,7 +6,7 @@
  * variadic call with aligned double pairs, and an indirect call through a
  * typed pointer. It moves floating-point values without arithmetic or
  * comparisons, so a soft-float build links no compiler-rt helpers. The
- * expected storage per ABI is in tests/conformance/ghidra/riscv-float-abi.mjs.
+ * expected storage per ABI is in tests/conformance/ghidra/riscv-checks.mjs.
  */
 #include <stdarg.h>
 

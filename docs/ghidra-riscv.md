@@ -264,9 +264,9 @@ tree ships no host decompiler binary, so `Decompiler/os/<platform>/decompile` an
 [installation](installation.md#ghidra).
 
 Run `npm run verify:ghidra:riscv` with an existing Ghidra 12.1.4 installation,
-JDK 21+, and a RISC-V-capable Clang, LLD and LLVM readelf. The verifier acquires
-no tools and never executes target code. Select installed tools explicitly when
-they are not on `PATH`:
+JDK 21+, and a RISC-V-capable Clang, LLD, LLVM readelf and LLVM objdump. The
+verifier acquires no tools and never executes target code. Select installed
+tools explicitly when they are not on `PATH`:
 
 ```sh
 GHIDRA_INSTALL_DIR=/path/to/ghidra_12.1.4_PUBLIC \
@@ -274,19 +274,49 @@ JAVA_HOME=/path/to/jdk-21 \
 REA_RISCV_CLANG=/path/to/llvm/bin/clang \
 REA_RISCV_LLD=/path/to/lld/bin/ld.lld \
 REA_RISCV_READELF=/path/to/llvm/bin/llvm-readelf \
+REA_RISCV_OBJDUMP=/path/to/llvm/bin/llvm-objdump \
 npm run verify:ghidra:riscv
 ```
 
-The lane builds the committed freestanding C and assembly sources into RV32 and
-RV64 `ET_EXEC` fixtures. Independent LLVM readelf observations establish ELF
-declarations and symbol addresses. Public CLI and stdio MCP workflows verify
-function enumeration, decompilation, pinned language/compiler identity, decoded
-probe bytes, global data, and direct calls. It validates advertised MCP output
-schemas and both JSON representations, saves and reopens snapshots, rejects
-header-mutated soft-float and unsupported high-bit declarations, and checks
-unchanged source bytes and owned cleanup. Failures retain the diagnostic
-workspace; successful runs remove it and report the observed process lineage.
+The lane builds four `ET_EXEC` fixtures from committed freestanding C and
+assembly sources:
 
-Module tests cover admission and malformed headers. Call-graph completeness,
-string inventories, dynamic linkage, Andes or RVE/TSO images, and big-endian
-targets are **not** established by this lane.
+- RV32 and RV64 double-float builds (`rv{32,64}imafdc`) of `riscv.c`.
+- An RV32 soft-float build of `riscv-float-abi.c` with ESP32-C3's
+  `-march=rv32imc_zicsr_zifencei -mabi=ilp32`, typed with DWARF.
+- The same objects linked with `--strip-all`. Every allocated section keeps
+  its address and bytes, so the typed build's symbols locate its functions.
+
+Independent LLVM readelf observations establish ELF declarations,
+`Tag_RISCV_arch` and symbol addresses. Public CLI and stdio MCP workflows verify
+function enumeration, decompilation, pinned language/compiler identity, the
+committed lane and policy, decoded probe bytes, global data, and direct calls.
+They validate advertised MCP output schemas and both JSON representations, save
+and reopen snapshots, and check unchanged source bytes and owned cleanup.
+
+For the soft-float builds the lane also checks:
+
+- `fence.i` and `csrr` decode, as ESP32-C3's Zifencei and Zicsr declare.
+- An LLVM objdump reading of `rea_riscv_abi_caller` finds each call-site word
+  where the [ilp32 policy](#ilp32) puts it: an unaligned `double` in `a1`/`a2`,
+  the `a7`/stack split, two floats in an integer pair, a large structure by
+  reference, aligned variadic pairs, and an indirect call.
+- `inspect_native_api` reports `__rea_ilp32` with exactly that storage for the
+  typed build, and one integer word per location for the stripped build.
+- The caller's pseudocode passes the source constants through that storage and
+  names no floating-point register.
+- Retained Evidence states the prototype outcome; the stripped build has no
+  function definitions.
+
+Header-mutated copies check admission. The RV32 double-float image relabelled as
+soft-float (`e_flags` `0x1`), refused before this lane, is admitted through the
+soft-float lane over CLI and MCP. The soft-float image relabelled as
+single-float, RV64 soft-float, and unsupported high bits are refused with their
+reasons. Failures retain the diagnostic workspace; successful runs remove it and
+report the observed process lineage.
+
+Module tests cover admission, malformed headers and attribute sections, the
+handshake, and the conformance checks against recorded LLVM and Ghidra output.
+Call-graph completeness, string inventories, dynamic linkage, Andes or RVE/TSO
+images, big-endian targets, ilp32f images, and decoding beyond the probes are
+**not** established by this lane.
