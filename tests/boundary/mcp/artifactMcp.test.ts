@@ -1107,6 +1107,81 @@ it("compares PyInstaller declaration facts without inventing payload identity", 
   }
 });
 
+it("retains a changed PyInstaller declaration when member content is unavailable", async () => {
+  const root = await createTestTempDirectory("rea-pyinstaller-link-mcp-");
+  const nfc = "café-link";
+  const nfd = "café-link";
+  const archive = (name: string) =>
+    cArchiveExecutable({
+      layout: "2.1",
+      pythonVersion: 309,
+      members: [
+        {
+          name,
+          typeCode: "n",
+          payload: Buffer.from("target"),
+          compress: false,
+        },
+      ],
+    });
+  const leftPath = join(root, "nfc");
+  const rightPath = join(root, "nfd");
+  await Promise.all([
+    writeFile(leftPath, archive(nfc)),
+    writeFile(rightPath, archive(nfd)),
+  ]);
+  const session = createTestBinarySession(new ArtifactProvider(process.env));
+  const server = createServer({ kind: "session", session });
+  const client = new Client({ name: "pyinstaller-link-test", version: "1" });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const left = await inspectArtifactInventoryThroughMcp(client, leftPath);
+    const right = await inspectArtifactInventoryThroughMcp(client, rightPath);
+    const link = (evidence: ReturnType<typeof parseEvidence>) =>
+      artifactInventoryResultSchema
+        .parse(evidence.normalized_result)
+        .occurrences.find(({ logical_path }) => logical_path === nfc);
+    // Normalization pairs the links; their stored names stay distinct.
+    expect(link(left)).toMatchObject({
+      hash_status: "not-hashed",
+      format_metadata: { source_name: nfc },
+    });
+    expect(link(right)).toMatchObject({
+      hash_status: "not-hashed",
+      format_metadata: { source_name: nfd },
+    });
+    const compared = await compareArtifactEvidenceThroughMcp(
+      client,
+      left,
+      right,
+    );
+    expect(compared.isError).not.toBe(true);
+    expect(
+      z
+        .object({
+          changes: z.array(
+            z.object({
+              logical_path: z.string(),
+              classification: z.string(),
+              dimensions: z.array(z.string()),
+            }),
+          ),
+        })
+        .parse(toolEvidence(compared.structuredContent).normalized_result)
+        .changes.find(({ logical_path }) => logical_path === nfc),
+    ).toEqual({
+      logical_path: nfc,
+      classification: "changed",
+      dimensions: ["metadata", "availability"],
+    });
+  } finally {
+    await Promise.allSettled([client.close(), server.close(), session.close()]);
+  }
+});
+
 it("discovers artifact target prerequisites and preserves typed MCP refusals", async () => {
   const root = await createTestTempDirectory("rea-artifact-availability-mcp-");
   const zip = new ZipWriter(new Uint8ArrayWriter());

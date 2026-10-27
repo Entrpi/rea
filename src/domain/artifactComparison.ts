@@ -15,9 +15,8 @@ import {
   type InventorySet,
 } from "./artifactInventoryEvidence.js";
 import {
-  espImageSegmentDeclaration,
-  nodeSeaEntryDeclaration,
-  pyInstallerEntryDeclaration,
+  formatMetadataDeclaration,
+  type FormatMetadataDeclaration,
 } from "./artifactFormatMetadata.js";
 import { prefixedDigestSchema } from "./../domain/digests.js";
 import { canonicalJson } from "./comparisonSemantics.js";
@@ -190,9 +189,9 @@ export const compareArtifacts = (
           "ASAR packing metadata is recorded on only one side for matching paths; omitted metadata may be a legacy observation and does not establish packed or unpacked storage.",
         ]
       : []),
-    ...(comparison.hasUnknownNodeSeaMetadata
+    ...(comparison.hasUnknownFormatDeclaration
       ? [
-          "Node SEA member metadata is recorded on only one side for matching paths; omitted metadata may be a legacy observation and leaves the complete runtime member declaration unavailable.",
+          "Format metadata declarations are recorded on only one side for matching paths; omitted metadata may be a legacy observation and leaves the complete declaration unavailable.",
         ]
       : []),
     ...(comparison.hasAmbiguousDuplicatePaths
@@ -256,7 +255,7 @@ const compareOccurrences = (
   readonly changes: ArtifactChange[];
   readonly hasAmbiguousDuplicatePaths: boolean;
   readonly hasUnknownAsarPacking: boolean;
-  readonly hasUnknownNodeSeaMetadata: boolean;
+  readonly hasUnknownFormatDeclaration: boolean;
 } => {
   const leftNodes = new Map(left.nodes.map((item) => [item.artifact_id, item]));
   const rightNodes = new Map(
@@ -270,7 +269,7 @@ const compareOccurrences = (
   const output: ArtifactChange[] = [];
   let hasAmbiguousDuplicatePaths = false;
   let hasUnknownAsarPacking = false;
-  let hasUnknownNodeSeaMetadata = false;
+  let hasUnknownFormatDeclaration = false;
   for (const path of paths) {
     const leftMatches = leftByPath.get(path) ?? [];
     const rightMatches = rightByPath.get(path) ?? [];
@@ -293,7 +292,8 @@ const compareOccurrences = (
     const metadata = occurrenceMetadata({ leftOccurrence, rightOccurrence });
     if (leftOccurrence !== undefined && rightOccurrence !== undefined) {
       if (metadata.asarPacking === "unknown") hasUnknownAsarPacking = true;
-      if (metadata.nodeSea === "unknown") hasUnknownNodeSeaMetadata = true;
+      if (metadata.formatDeclaration === "unknown")
+        hasUnknownFormatDeclaration = true;
     }
     const change = classifyPath({
       metadata,
@@ -314,7 +314,7 @@ const compareOccurrences = (
     changes: output,
     hasAmbiguousDuplicatePaths,
     hasUnknownAsarPacking,
-    hasUnknownNodeSeaMetadata,
+    hasUnknownFormatDeclaration,
   };
 };
 
@@ -411,7 +411,7 @@ const classifyPath = (input: ClassifyPathInput): ArtifactChange | null => {
   if (integrity !== null) return integrity;
   const presence = classifyPresence(input, base);
   if (presence !== null) return presence;
-  const declaration = classifyPyInstallerDeclaration(input, base);
+  const declaration = classifyDeclarationRecord(input, base);
   if (declaration.handled) return declaration.change;
   const availability = classifyAvailability(input, base);
   if (availability !== null)
@@ -445,96 +445,70 @@ type OccurrencePair = Pick<
 type MetadataComparison = "unchanged" | "changed" | "unknown";
 
 interface OccurrenceMetadata {
+  /** ASAR storage is an occurrence field, not format metadata. */
   readonly asarPacking: MetadataComparison;
-  readonly nodeSea: MetadataComparison;
-  readonly espImageSegment: MetadataComparison;
-  readonly pyInstaller: MetadataComparison;
+  /** Absent when neither occurrence records a compared declaration. */
+  readonly formatDeclaration: MetadataComparison | "absent";
 }
 
 /** A declaration that differs even when content is unavailable. */
 const declarationChanged = (metadata: OccurrenceMetadata): boolean =>
   metadata.asarPacking === "changed" ||
-  metadata.nodeSea === "changed" ||
-  metadata.espImageSegment === "changed";
+  metadata.formatDeclaration === "changed";
 
-const compareOptionalMetadata = <T>(
-  left: T | undefined,
-  right: T | undefined,
-  declaration: (value: T) => unknown,
-): MetadataComparison => {
-  if (left === undefined || right === undefined)
-    return left === right ? "unchanged" : "unknown";
-  return canonicalJson(declaration(left)) === canonicalJson(declaration(right))
+const compareAsarPacking = (
+  left: boolean | undefined,
+  right: boolean | undefined,
+): MetadataComparison =>
+  left === right
+    ? "unchanged"
+    : left === undefined || right === undefined
+      ? "unknown"
+      : "changed";
+
+/**
+ * Declarations compare within one kind. A declaration that only one side
+ * records, including one whose other side records another kind, is unknown.
+ */
+const compareFormatDeclarations = (
+  left: FormatMetadataDeclaration | undefined,
+  right: FormatMetadataDeclaration | undefined,
+): OccurrenceMetadata["formatDeclaration"] => {
+  if (left === undefined && right === undefined) return "absent";
+  if (left === undefined || right === undefined || left.kind !== right.kind)
+    return "unknown";
+  return canonicalJson(left.facts) === canonicalJson(right.facts)
     ? "unchanged"
     : "changed";
 };
 
-/** Interpret each pair's format declarations once, preserving historical omission. */
+/** Interpret each pair's declarations once, preserving historical omission. */
 const occurrenceMetadata = (input: OccurrencePair): OccurrenceMetadata => {
   const left = input.leftOccurrence;
   const right = input.rightOccurrence;
   return {
-    asarPacking: compareOptionalMetadata(
-      left?.unpacked,
-      right?.unpacked,
-      (value) => value,
-    ),
-    nodeSea: compareOptionalMetadata(
-      left?.format_metadata?.kind === "node-sea-entry"
-        ? left.format_metadata
-        : undefined,
-      right?.format_metadata?.kind === "node-sea-entry"
-        ? right.format_metadata
-        : undefined,
-      nodeSeaEntryDeclaration,
-    ),
-    espImageSegment: compareOptionalMetadata(
-      left?.format_metadata?.kind === "esp-image-segment"
-        ? left.format_metadata
-        : undefined,
-      right?.format_metadata?.kind === "esp-image-segment"
-        ? right.format_metadata
-        : undefined,
-      espImageSegmentDeclaration,
-    ),
-    pyInstaller: compareOptionalMetadata(
-      isPyInstallerEntry(left) ? left.format_metadata : undefined,
-      isPyInstallerEntry(right) ? right.format_metadata : undefined,
-      pyInstallerEntryDeclaration,
+    asarPacking: compareAsarPacking(left?.unpacked, right?.unpacked),
+    formatDeclaration: compareFormatDeclarations(
+      formatMetadataDeclaration(left?.format_metadata),
+      formatMetadataDeclaration(right?.format_metadata),
     ),
   };
 };
 
-const isPyInstallerEntry = (
-  occurrence: ArtifactOccurrence | undefined,
-): occurrence is ArtifactOccurrence & {
-  readonly format_metadata: Extract<
-    NonNullable<ArtifactOccurrence["format_metadata"]>,
-    { readonly kind: "pyinstaller-entry" }
-  >;
-} => occurrence?.format_metadata?.kind === "pyinstaller-entry";
-
-const classifyPyInstallerDeclaration = (
+/** Node-less metadata records compare by the declarations they record. */
+const classifyDeclarationRecord = (
   input: ClassifyPathInput,
   base: ReturnType<typeof buildArtifactChangeBase>,
 ): { readonly handled: boolean; readonly change: ArtifactChange | null } => {
-  const leftIsDeclaration = input.leftOccurrence?.entry_kind === "metadata";
-  const rightIsDeclaration = input.rightOccurrence?.entry_kind === "metadata";
-  if (!leftIsDeclaration && !rightIsDeclaration)
-    return { handled: false, change: null };
-  // Metadata is not inherently a PyInstaller declaration. Only apply this
-  // format-specific comparison when a producer explicitly identified one.
+  // Metadata is not inherently a declaration. Only apply this comparison
+  // when a producer explicitly recorded a compared one.
   if (
-    !isPyInstallerEntry(input.leftOccurrence) &&
-    !isPyInstallerEntry(input.rightOccurrence)
+    input.leftOccurrence?.entry_kind !== "metadata" ||
+    input.rightOccurrence?.entry_kind !== "metadata" ||
+    input.metadata.formatDeclaration === "absent"
   )
     return { handled: false, change: null };
-  if (!leftIsDeclaration || !rightIsDeclaration)
-    return { handled: false, change: null };
-  if (
-    !isPyInstallerEntry(input.leftOccurrence) ||
-    !isPyInstallerEntry(input.rightOccurrence)
-  )
+  if (input.metadata.formatDeclaration === "unknown")
     return {
       handled: true,
       change: {
@@ -543,12 +517,12 @@ const classifyPyInstallerDeclaration = (
         dimensions: ["availability"],
       },
     };
-  const changed = input.metadata.pyInstaller === "changed";
   return {
     handled: true,
-    change: changed
-      ? { ...base, classification: "changed", dimensions: ["metadata"] }
-      : null,
+    change:
+      input.metadata.formatDeclaration === "changed"
+        ? { ...base, classification: "changed", dimensions: ["metadata"] }
+        : null,
   };
 };
 
@@ -614,8 +588,7 @@ const metadataChanged = (
   input.leftOccurrence?.encrypted !== input.rightOccurrence?.encrypted ||
   JSON.stringify(left.limitations) !== JSON.stringify(right.limitations) ||
   JSON.stringify(input.leftOccurrence?.limitations) !==
-    JSON.stringify(input.rightOccurrence?.limitations) ||
-  input.metadata.pyInstaller === "changed";
+    JSON.stringify(input.rightOccurrence?.limitations);
 
 const nodeFor = (
   occurrence: ArtifactOccurrence | undefined,

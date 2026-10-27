@@ -16,6 +16,22 @@ by default; `--integrity-policy record-and-continue` retains the observed bytes
 and an explicit untrusted contradiction. An all-zero MD5 is an unknown claim,
 not a verified digest.
 
+Artifact comparison pairs members by `logical_path` and compares their bytes
+and occurrence facts, such as encryption, but not their `godot-pck-entry`
+metadata. Godot
+[looks up a member](https://github.com/godotengine/godot/blob/06d1e7a34ccde4029eed53d018cfde77dfe771d5/core/io/file_access_pack.cpp#L49-L51)
+by its simplified path without `res://`, which `logical_path` holds apart from
+Unicode normalization. The stored `source_path` is not that key: Godot 4.3
+[stores `res://` paths](https://github.com/godotengine/godot/blob/77dcf97d82cbfe4e4615475fa52ca03da645dbd8/editor/export/editor_export_platform.cpp#L228)
+and 4.4.1
+[stores them without the prefix](https://github.com/godotengine/godot/blob/49a5bc7b616bd04689a2c89e89bda41f50241464/editor/export/editor_export_platform.cpp#L257-L260),
+so comparing it would mark every member changed between those exports of the
+same game. A member
+whose name changes only in Unicode normalization therefore compares unchanged,
+although Godot looks it up by a different key. Directory order and offsets are
+layout, and REA admits only the encryption flag, which the occurrence's
+`encrypted` field records.
+
 ## CLI
 
 Start with a compact summary and keep the complete Evidence bundle:

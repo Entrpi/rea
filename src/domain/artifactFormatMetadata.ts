@@ -122,11 +122,6 @@ export const nodeSeaEntryMetadataSchema = z.strictObject({
   index: uint32,
 });
 
-/** Runtime member identity, independent of blob layout and directory order. */
-export const nodeSeaEntryDeclaration = (
-  metadata: z.infer<typeof nodeSeaEntryMetadataSchema>,
-) => ({ role: metadata.role, source_path: metadata.source_path });
-
 const uint8 = z.number().int().min(0).max(0xff);
 const uint16 = z.number().int().min(0).max(0xffff);
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/u);
@@ -232,14 +227,6 @@ export type EspImageSegmentMetadata = z.infer<
   typeof espImageSegmentMetadataSchema
 >;
 
-/**
- * What a segment header declares: where its bytes load and how many there
- * are. Header offsets are layout, and the classification is derived.
- */
-export const espImageSegmentDeclaration = (
-  metadata: EspImageSegmentMetadata,
-) => ({ load_addr: metadata.load_addr, data_len: metadata.data_len });
-
 /** One Secure Boot v2 block with its 0xE7 magic and a matching CRC32. */
 export const espImageSignatureBlockMetadataSchema = z.strictObject({
   kind: z.literal("esp-image-signature-block"),
@@ -266,16 +253,6 @@ export type EspImageSignatureBlockMetadata = z.infer<
   typeof espImageSignatureBlockMetadataSchema
 >;
 
-/** Declaration identity that is stable across archive layout changes. */
-export const pyInstallerEntryDeclaration = (
-  metadata: PyInstallerEntryMetadata,
-) => ({
-  container: metadata.container,
-  container_name: metadata.container_name,
-  source_name: metadata.source_name,
-  type_code: metadata.type_code,
-});
-
 export const artifactFormatMetadataSchema = z.discriminatedUnion("kind", [
   godotPckMetadataSchema,
   godotPckEntryMetadataSchema,
@@ -290,3 +267,95 @@ export const artifactFormatMetadataSchema = z.discriminatedUnion("kind", [
 export type ArtifactFormatMetadata = z.infer<
   typeof artifactFormatMetadataSchema
 >;
+
+type FormatMetadataByKind = {
+  readonly [Metadata in ArtifactFormatMetadata as Metadata["kind"]]: Metadata;
+};
+type FormatMetadataKind = keyof FormatMetadataByKind;
+
+/**
+ * What each kind declares beyond its own bytes, which artifact comparison
+ * compares, or why comparison uses none of its facts. Every kind needs an
+ * entry, so a new kind does not compile without this decision.
+ */
+const declarationsByKind: {
+  readonly [Kind in FormatMetadataKind]:
+    | {
+        readonly declaration: (metadata: FormatMetadataByKind[Kind]) => unknown;
+      }
+    | { readonly notCompared: string };
+} = {
+  "godot-pck": {
+    notCompared:
+      "Its fields come from the pack's own bytes, which content comparison covers.",
+  },
+  "godot-pck-entry": {
+    notCompared:
+      "index and declared_offset are directory layout. The reader admits only the encryption bit in flags, which the occurrence's encrypted field records, and an all-zero md5_status adds an occurrence limitation. source_path is the stored spelling, not Godot's lookup key: logical_path holds that key apart from Unicode normalization, and Godot 4.4 stopped storing the res:// prefix.",
+  },
+  pyinstaller: {
+    notCompared:
+      "Its fields come from the archive's own bytes, which content comparison covers.",
+  },
+  /** Declaration identity that is stable across archive layout changes. */
+  "pyinstaller-entry": {
+    declaration: (metadata) => ({
+      container: metadata.container,
+      container_name: metadata.container_name,
+      source_name: metadata.source_name,
+      type_code: metadata.type_code,
+    }),
+  },
+  "node-sea": {
+    notCompared:
+      "Its fields come from the carrier's own bytes, which content comparison covers.",
+  },
+  /** Runtime member identity, independent of blob layout and directory order. */
+  "node-sea-entry": {
+    declaration: (metadata) => ({
+      role: metadata.role,
+      source_path: metadata.source_path,
+    }),
+  },
+  "esp-image": {
+    notCompared:
+      "Its fields come from the image's own bytes, which content comparison covers.",
+  },
+  /**
+   * What a segment header declares: where its bytes load and how many there
+   * are. Header offsets are layout, and the classification is derived.
+   */
+  "esp-image-segment": {
+    declaration: (metadata) => ({
+      load_addr: metadata.load_addr,
+      data_len: metadata.data_len,
+    }),
+  },
+  "esp-image-signature-block": {
+    notCompared:
+      "Its fields come from the block's own bytes, which content comparison covers, and image_digest_matches follows the image's content.",
+  },
+};
+
+/** A declaration that artifact comparison compares within its kind. */
+export interface FormatMetadataDeclaration {
+  readonly kind: FormatMetadataKind;
+  readonly facts: unknown;
+}
+
+// Generic in the kind, so each projection receives its own metadata type.
+const declarationOf = <Kind extends FormatMetadataKind>(
+  kind: Kind,
+  metadata: FormatMetadataByKind[Kind],
+): FormatMetadataDeclaration | undefined => {
+  const entry = declarationsByKind[kind];
+  return "declaration" in entry
+    ? { kind, facts: entry.declaration(metadata) }
+    : undefined;
+};
+
+/** The compared declaration, or undefined when comparison uses none. */
+export const formatMetadataDeclaration = (
+  metadata: ArtifactFormatMetadata | undefined,
+): FormatMetadataDeclaration | undefined =>
+  metadata === undefined ? undefined : declarationOf(metadata.kind, metadata);

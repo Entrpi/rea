@@ -175,6 +175,11 @@ it("compares raw SEA asset keys without interpreting serialization order as meta
     dimensions: ["availability"],
     evidence_links: [historical.evidence_id, right.evidence_id],
   });
+  expect(unknown.limitations).toContainEqual(
+    expect.stringContaining(
+      "Format metadata declarations are recorded on only one side",
+    ),
+  );
   const reversed = await compare(right, historical);
   expect(
     reversed.changes.find(({ logical_path }) => logical_path === nfc),
