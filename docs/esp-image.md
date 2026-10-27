@@ -240,9 +240,9 @@ It needs a Clang with the RISC-V target, `ld.lld` and a Python that can run
 `esptool` and `espsecure`. It checks each tool before building anything and
 names the variable to set when one is missing, and it warns when esptool is
 not v5.6.0, the version whose sources the layout facts cite. It builds an
-ESP32-C3 app, the same app with
-`--dont-append-digest`, `--secure-pad-v2`, `--ram-only-header` and
-`--pad-to-size`, a bootloader, and ESP8266 v1 and v3 images. It then checks:
+ESP32-C3 app, the same app with `--dont-append-digest`, `--secure-pad-v2`,
+`--ram-only-header` and `--pad-to-size`, a bootloader, and ESP8266 v1 and v3
+images. It then checks:
 
 - entry point, chip ID, each segment's length, address and header offset,
   checksum, digest and descriptor fields against `image-info`;
@@ -269,7 +269,19 @@ The lane ran on macOS arm64 with Node 24.22.1, Homebrew Clang and LLD 21.1.8,
 and `xtensa-esp32-elf-gcc` 14.2.0 (crosstool-NG esp-14.2.0_20251107), once
 with esptool and espsecure v5.6.0 and once with 4.12.0. All checks passed for
 all 13 images in both runs. With v5.6.0 the complete run, including the builds
-and every esptool call, took 10.1 s elapsed, 11.5 s user CPU and 1.3 s system
+and every esptool call, took 10.4 s elapsed, 12.1 s user CPU and 1.4 s system
 CPU under `/usr/bin/time -l` with warm caches. The largest single process
-peaked at a 258 MiB resident set; the combined peak of all processes was not
+peaked at a 253 MiB resident set; the combined peak of all processes was not
 measured.
+
+The lane does not establish:
+
+- the other chips: only ESP32-C3 (RISC-V) and ESP32 (Xtensa) images come
+  from a real producer; the other rows of the chip table are checked against
+  the ESP-IDF v6.1 headers by reading them;
+- images from a real ESP-IDF project build, an OTA download or a device's
+  flash, none of which it inspects;
+- that a signature is valid: it compares digests, and nothing verifies a
+  signature.
+
+It does not run in CI.
