@@ -200,7 +200,7 @@ const registerRiscvAdmissionAndCapabilityCases = () => {
     [{ type: 3 }, "fixed-address ET_EXEC only"],
     [{ type: 1 }, "fixed-address ET_EXEC only"],
     [{ type: 0xffa0 }, "e_type 65440"],
-    [{ flags: 0xc }, "EF_RISCV_RVE"],
+    [{ flags: 0xc }, "16-register ABI (x0-x15)"],
     [{ flags: 0x14 }, "EF_RISCV_TSO"],
     [{ flags: 0x1 }, "soft-float convention"],
     [{ flags: 0x3 }, "single-float"],
