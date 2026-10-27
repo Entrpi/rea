@@ -594,6 +594,22 @@ describe("binary target I/O: ESP flash layouts", () => {
     });
   });
 
+  it("keeps refusing an ESP8266 dump that has an ESP-IDF-style table", async () => {
+    const directory = await createTestTempDirectory("rea-esp8266-flash-");
+    const dump = join(directory, "esp8266-flash.bin");
+    await writeFile(
+      dump,
+      espFlashDump({ bootloader: { at: 0, bytes: esp8266Image() } }),
+    );
+    expect(await parseBinaryTarget(dump)).toMatchObject({
+      ok: false,
+      error: {
+        constraint: "file_format_rejected",
+        reason: ESP8266_REFUSAL,
+      },
+    });
+  });
+
   it("reads a selected flash dump with caller inputs and refuses bad pairings", async () => {
     const directory = await createTestTempDirectory("rea-esp-flash-select-");
     const esp32 = espImage({

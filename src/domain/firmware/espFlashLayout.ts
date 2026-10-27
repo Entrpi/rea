@@ -2,14 +2,18 @@ import { offsetText } from "./espImageStructures.js";
 import type { EspBootloaderLocation } from "./espFlashBootloader.js";
 import {
   ESP_PARTITION_TABLE_SECTOR_BYTES,
+  espBootPartitions,
   espPartitionSubtypeName,
   espPartitionTypeName,
-  isEspOtaData,
+  espPrimaryLayoutRole,
+  type EspBootPartitions,
   type EspPartition,
   type EspPartitionTable,
 } from "./espPartitionTable.js";
 import {
+  ESP_OTA_DATA_MIN_BYTES,
   ESP_OTA_DATA_SECTOR_BYTES,
+  ESP_OTA_SELECT_ENTRY_BYTES,
   decodeEspOtaRecord,
   selectEspOtaSlot,
   type EspOtaRecord,
@@ -46,6 +50,13 @@ export interface EspFlashPlanInput {
   readonly table: EspPartitionTable;
 }
 
+/** One otadata record within its partition, and whether the file holds it. */
+export interface EspOtaRecordPlan {
+  readonly index: 0 | 1;
+  readonly fileOffset: number;
+  readonly available: boolean;
+}
+
 /** Regions to inventory and the byte ranges the adapter must still read. */
 export interface EspFlashPlan {
   readonly input: EspFlashPlanInput;
@@ -55,11 +66,13 @@ export interface EspFlashPlan {
     readonly offset: number;
     readonly length: number;
   }[];
-  /** File offsets of the two otadata records, when the file holds them. */
+  /** The partitions the bootloader keeps from the table. */
+  readonly boot: EspBootPartitions;
+  /** The otadata partition the bootloader uses and its records. */
   readonly otadata:
     | {
         readonly partition: EspPartition;
-        readonly records: readonly [number, number];
+        readonly records: readonly EspOtaRecordPlan[];
       }
     | undefined;
   readonly limitations: readonly string[];
@@ -68,21 +81,26 @@ export interface EspFlashPlan {
 const SAFE_LABEL = /^(?=.*[A-Za-z_])[A-Za-z0-9_][A-Za-z0-9._-]{0,15}$/u;
 
 /**
- * Partition paths use the label when it is a safe, unique path segment
- * with a letter or underscore, else the table index, which then cannot
- * collide with a label.
+ * Partition paths use the label when it is a safe path segment with a
+ * letter or underscore that no other label repeats, ignoring case as some
+ * file systems do; else the table index, which cannot collide with a label.
  */
 const partitionPaths = (
   partitions: readonly EspPartition[],
 ): ReadonlyMap<number, string> => {
   const counts = new Map<string, number>();
   for (const { label } of partitions)
-    if (label !== null) counts.set(label, (counts.get(label) ?? 0) + 1);
+    if (label !== null) {
+      const folded = label.toLowerCase();
+      counts.set(folded, (counts.get(folded) ?? 0) + 1);
+    }
   return new Map(
     partitions.map((part) => {
       const label = part.label;
       const named =
-        label !== null && SAFE_LABEL.test(label) && counts.get(label) === 1;
+        label !== null &&
+        SAFE_LABEL.test(label) &&
+        counts.get(label.toLowerCase()) === 1;
       return [
         part.index,
         `partitions/${named ? label : String(part.index)}.bin`,
@@ -103,6 +121,39 @@ const region = (
 
 const rangeText = (address: number, length: number): string =>
   `${offsetText(address)}-${offsetText(address + length)}`;
+
+const partitionName = (part: EspPartition): string =>
+  part.label ?? `#${String(part.index)}`;
+
+/** The records the otadata partition holds, each where the file holds it. */
+const otadataPlan = (
+  input: EspFlashPlanInput,
+  partition: EspPartition,
+  limitations: string[],
+): NonNullable<EspFlashPlan["otadata"]> => {
+  const name = partitionName(partition);
+  const small = partition.size < ESP_OTA_DATA_MIN_BYTES;
+  if (small)
+    limitations.push(
+      `The otadata partition ${name} is ${offsetText(partition.size)} bytes, smaller than the two 4 KiB sectors ESP-IDF's bootloader reads; the bootloader resets without selecting an app.`,
+    );
+  const records: EspOtaRecordPlan[] = [];
+  for (const index of [0, 1] as const) {
+    const within = index * ESP_OTA_DATA_SECTOR_BYTES;
+    // A record past the declared size belongs to whatever follows.
+    if (within + ESP_OTA_SELECT_ENTRY_BYTES > partition.size) continue;
+    const fileOffset = partition.offset + within - input.origin.value;
+    const available =
+      fileOffset >= 0 &&
+      fileOffset + ESP_OTA_SELECT_ENTRY_BYTES <= input.fileSize;
+    if (!available)
+      limitations.push(
+        `otadata record ${String(index)} of partition ${name} at flash ${offsetText(partition.offset + within)} is outside the dump${small ? "." : "; the OTA selection is unknown."}`,
+      );
+    records.push({ index, fileOffset, available });
+  }
+  return { partition, records };
+};
 
 /** Lay the bootloader, table and partitions over the dump. */
 export const planEspFlashLayout = (input: EspFlashPlanInput): EspFlashPlan => {
@@ -145,8 +196,8 @@ export const planEspFlashLayout = (input: EspFlashPlanInput): EspFlashPlan => {
       length: part.size,
       partition: part,
     });
-    const name = part.label ?? `#${String(part.index)}`;
-    if (part.offset < tableEnd)
+    const name = partitionName(part);
+    if (part.offset < tableEnd && espPrimaryLayoutRole(part) === undefined)
       limitations.push(
         `Partition ${name} at ${offsetText(part.offset)} starts before the end of the partition table at ${offsetText(tableEnd)}; gen_esp32part.py rejects such a table.`,
       );
@@ -165,35 +216,38 @@ export const planEspFlashLayout = (input: EspFlashPlanInput): EspFlashPlan => {
     if (placed.fileOffset >= 0 && placed.available > 0) regions.push(placed);
   }
   limitations.push(...overlaps(regions));
-  const otadataPartition = input.table.partitions.find(isEspOtaData);
-  const otadataStart =
-    otadataPartition === undefined
-      ? undefined
-      : otadataPartition.offset - input.origin.value;
-  const otadata =
-    otadataPartition === undefined || otadataStart === undefined
-      ? undefined
-      : otadataStart >= 0 &&
-          otadataStart + ESP_OTA_DATA_SECTOR_BYTES + 32 <= input.fileSize
-        ? {
-            partition: otadataPartition,
-            records: [
-              otadataStart,
-              otadataStart + ESP_OTA_DATA_SECTOR_BYTES,
-            ] as const,
-          }
-        : undefined;
-  if (otadataPartition !== undefined && otadata === undefined)
-    limitations.push(
-      `The dump does not hold both otadata records of partition ${otadataPartition.label ?? `#${String(otadataPartition.index)}`}; the OTA selection is unknown.`,
-    );
+  const boot = espBootPartitions(input.table.partitions);
+  limitations.push(...boot.limitations);
   return {
     input,
     regions,
     gaps: gapsBetween(regions, input.fileSize),
-    otadata,
+    boot,
+    otadata:
+      boot.otadata === undefined
+        ? undefined
+        : otadataPlan(input, boot.otadata, limitations),
     limitations,
   };
+};
+
+const regionEnd = ({ flashAddress, length }: EspFlashRegion): number =>
+  flashAddress + length;
+
+/** A primary bootloader or table entry declared over exactly its region. */
+const declaresRegion = (
+  first: EspFlashRegion,
+  second: EspFlashRegion,
+): boolean => {
+  const [region, entry] =
+    first.partition === undefined ? [first, second] : [second, first];
+  return (
+    region.partition === undefined &&
+    entry.partition !== undefined &&
+    espPrimaryLayoutRole(entry.partition) === region.role &&
+    region.flashAddress === entry.flashAddress &&
+    region.length === entry.length
+  );
 };
 
 /** Regions that share bytes, which gen_esp32part.py rejects for partitions. */
@@ -202,17 +256,19 @@ const overlaps = (regions: readonly EspFlashRegion[]): string[] => {
     (left, right) => left.flashAddress - right.flashAddress,
   );
   const found: string[] = [];
-  for (let index = 1; index < ordered.length; index += 1) {
-    const previous = ordered[index - 1];
-    const current = ordered[index];
+  // The region reaching furthest so far, so a long one shows every overlap.
+  let furthest: EspFlashRegion | undefined;
+  for (const current of ordered) {
     if (
-      previous !== undefined &&
-      current !== undefined &&
-      current.flashAddress < previous.flashAddress + previous.length
+      furthest !== undefined &&
+      current.flashAddress < regionEnd(furthest) &&
+      !declaresRegion(furthest, current)
     )
       found.push(
-        `${current.path} at ${offsetText(current.flashAddress)} overlaps ${previous.path}, which ends at ${offsetText(previous.flashAddress + previous.length)}.`,
+        `${current.path} at ${offsetText(current.flashAddress)} overlaps ${furthest.path}, which ends at ${offsetText(regionEnd(furthest))}.`,
       );
+    if (furthest === undefined || regionEnd(current) > regionEnd(furthest))
+      furthest = current;
   }
   return found;
 };
@@ -242,16 +298,18 @@ const gapsBetween = (
 
 export interface EspFlashOtaFacts {
   readonly partition_index: number;
+  /** The records the dump holds, each with its index. */
   readonly records: readonly EspOtaRecord[];
-  /** Derived from the records; see its assumptions. */
-  readonly selected: EspOtaSelection;
+  /** Derived from the records; see its assumptions. Null when unknown. */
+  readonly selected: EspOtaSelection | null;
   /** The bootloader's rollback and fallback decide it at boot. */
   readonly running_partition: "unknown";
 }
 
 /** Facts the adapter read for the plan: the otadata records and the gaps. */
 export interface EspFlashReads {
-  readonly otadataRecords: readonly [Uint8Array, Uint8Array] | undefined;
+  /** The bytes of each planned otadata record the file holds, in plan order. */
+  readonly otadataRecords: readonly (Uint8Array | undefined)[];
   /** The first non-erased file offset in each gap, in plan order. */
   readonly gapFirstUnerased: readonly (number | undefined)[];
 }
@@ -281,12 +339,12 @@ export const finishEspFlashLayout = (
   const total = undescribed.reduce((sum, { length }) => sum + length, 0);
   if (undescribed.length > 0)
     limitations.push(
-      `${String(total)} bytes of the dump, in ${String(undescribed.length)} range(s), lie outside the bootloader region, the partition table and every partition and are not erased flash.`,
+      `${String(undescribed.length)} range(s) of the dump, ${String(total)} bytes in all, lie outside the bootloader region, the partition table and every partition and are not described; each runs from a byte that is not erased flash to the end of its gap.`,
     );
   const otadata =
-    plan.otadata === undefined || reads.otadataRecords === undefined
+    plan.otadata === undefined
       ? null
-      : otaFacts(plan, reads.otadataRecords);
+      : otaFacts(plan, plan.otadata, reads.otadataRecords);
   const incomplete = plan.input.table.partitions.some((part) => {
     const region = plan.regions.find((item) => item.partition === part);
     return region === undefined || region.available < part.size;
@@ -306,14 +364,21 @@ export const finishEspFlashLayout = (
 
 const otaFacts = (
   plan: EspFlashPlan,
-  [first, second]: readonly [Uint8Array, Uint8Array],
-): EspFlashOtaFacts | null => {
-  if (plan.otadata === undefined) return null;
-  const records = [decodeEspOtaRecord(first, 0), decodeEspOtaRecord(second, 1)];
+  otadata: NonNullable<EspFlashPlan["otadata"]>,
+  bytes: readonly (Uint8Array | undefined)[],
+): EspFlashOtaFacts => {
+  const records = otadata.records.flatMap(({ index, available }, position) => {
+    const read = bytes[position];
+    return available &&
+      read !== undefined &&
+      read.length >= ESP_OTA_SELECT_ENTRY_BYTES
+      ? [decodeEspOtaRecord(read, index)]
+      : [];
+  });
   return {
-    partition_index: plan.otadata.partition.index,
+    partition_index: otadata.partition.index,
     records,
-    selected: selectEspOtaSlot(records, plan.input.table.partitions),
+    selected: selectEspOtaSlot(records, plan.boot, otadata.partition.size),
     running_partition: "unknown",
   };
 };
@@ -323,6 +388,7 @@ export const espFlashPartitionFacts = (part: EspPartition) => ({
   kind: "esp-flash-partition" as const,
   index: part.index,
   label: part.label,
+  label_hex: part.labelHex,
   type: part.type,
   subtype: part.subtype,
   type_name: espPartitionTypeName(part.type),

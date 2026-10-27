@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   decodeEspPartitionTable,
+  espBootPartitions,
   espPartitionSubtypeName,
   espPartitionTypeName,
   type EspPartition,
@@ -9,6 +10,7 @@ import {
 import { decodeEspOtaRecord, selectEspOtaSlot } from "./espOtaData.js";
 import {
   espBootloaderProbeOffsets,
+  espImageSegmentsEnd,
   locateEspBootloader,
 } from "./espFlashBootloader.js";
 import {
@@ -17,7 +19,11 @@ import {
   partitionEntry,
   partitionTable,
 } from "./espFlash.fixture.js";
-import { ESP32C3_BOOTLOADER_SEGMENTS, espImage } from "./espImage.fixture.js";
+import {
+  ESP32C3_BOOTLOADER_SEGMENTS,
+  esp8266Image,
+  espImage,
+} from "./espImage.fixture.js";
 
 const table = (bytes: Uint8Array) => {
   const decoded = decodeEspPartitionTable(bytes);
@@ -142,9 +148,36 @@ describe("ESP partition tables", () => {
     ).partitions;
     expect(decoded).toMatchObject({
       label: null,
+      // The source bytes stay comparable when the label is not UTF-8.
+      labelHex: "78ff",
       encrypted: true,
       unknownFlags: 0x8000_0000,
     });
+  });
+
+  it("keeps the partitions the bootloader keeps: the last of each role", () => {
+    const [nvs, otadata, , factory, ota0] = TWO_OTA_PARTITIONS;
+    const boot = espBootPartitions(
+      table(
+        partitionTable([
+          ...TWO_OTA_PARTITIONS,
+          { ...factory!, label: "factory2", offset: 0x4_0000 },
+          { ...otadata!, label: "otadata2", offset: 0x5_0000 },
+          { ...ota0!, label: "again", offset: 0x6_0000 },
+          { ...nvs!, label: "nvs2", offset: 0x7_0000 },
+        ]),
+      ).partitions,
+    );
+    expect(boot.factory?.label).toBe("factory2");
+    expect(boot.otadata?.label).toBe("otadata2");
+    // A same-subtype OTA entry replaces the slot but still counts.
+    expect(boot.otaSlots.get(0)?.label).toBe("again");
+    expect(boot.otaAppCount).toBe(3);
+    expect(boot.limitations).toEqual([
+      "The table declares otadata 2 times (partitions #1, #7); ESP-IDF's bootloader uses the last.",
+      "The table declares factory 2 times (partitions #3, #6); ESP-IDF's bootloader uses the last.",
+      "The table declares ota_0 2 times (partitions #4, #8); ESP-IDF's bootloader uses the last.",
+    ]);
   });
 });
 
@@ -167,6 +200,10 @@ describe("ESP otadata selection", () => {
       crc_matches: false,
       valid: false,
     });
+    // The CRC otatool v5.5.2 wrote for ota_seq 1 in the real-tool lane.
+    expect(
+      decodeEspOtaRecord(otaRecord({ seq: 1, crc: 0x4743_989a }), 0),
+    ).toMatchObject({ crc_matches: true, valid: true });
     expect(decodeEspOtaRecord(Buffer.alloc(32, 0xff), 1)).toMatchObject({
       ota_seq: 0xffff_ffff,
       state_name: "undefined",
@@ -174,10 +211,16 @@ describe("ESP otadata selection", () => {
     });
   });
 
-  const select = (first: Buffer, second: Buffer, parts = partitions()) =>
+  const select = (
+    first: Buffer,
+    second: Buffer,
+    parts = partitions(),
+    otadataSize = 0x2000,
+  ) =>
     selectEspOtaSlot(
       [decodeEspOtaRecord(first, 0), decodeEspOtaRecord(second, 1)],
-      parts,
+      espBootPartitions(parts),
+      otadataSize,
     );
   const erased = Buffer.alloc(32, 0xff);
 
@@ -197,6 +240,12 @@ describe("ESP otadata selection", () => {
       slot: 1,
       partition_index: 5,
     });
+    // ota_seq 0 is set; (0 - 1) wraps to 0xFFFFFFFF, and 0xFFFFFFFF % 2 is 1.
+    expect(select(otaRecord({ seq: 0 }), erased)).toMatchObject({
+      active_record: 0,
+      slot: 1,
+      partition_index: 5,
+    });
   });
 
   it("falls back as the bootloader does without usable records", () => {
@@ -211,11 +260,37 @@ describe("ESP otadata selection", () => {
       slot: 0,
       partition_index: 4,
     });
-    // A set sequence with a bad CRC is not unusable, but no record is valid.
+    // Boot index 0 stands without an ota_0 partition.
+    const onlyOta1 = noFactory.filter(({ label }) => label !== "ota_0");
+    expect(select(erased, erased, onlyOta1)).toMatchObject({
+      basis: "ota_0-fallback",
+      slot: 0,
+      partition_index: null,
+    });
+    // A set sequence with a bad CRC is not unusable, but no record is valid:
+    // the factory index, with no factory partition to name.
     expect(
       select(otaRecord({ seq: 2, crc: 1 }), erased, noFactory),
-    ).toMatchObject({ basis: "none", partition_index: null });
-    expect(select(otaRecord({ seq: 2 }), erased).assumptions).toHaveLength(3);
+    ).toMatchObject({ basis: "factory-fallback", partition_index: null });
+    expect(select(otaRecord({ seq: 2 }), erased)?.assumptions).toHaveLength(4);
+  });
+
+  it("selects nothing from a short otadata partition and nothing known from one record", () => {
+    expect(
+      select(
+        otaRecord({ seq: 1 }),
+        otaRecord({ seq: 2 }),
+        partitions(),
+        0x1000,
+      ),
+    ).toMatchObject({ basis: "none", slot: null, partition_index: null });
+    expect(
+      selectEspOtaSlot(
+        [decodeEspOtaRecord(otaRecord({ seq: 1 }), 0)],
+        espBootPartitions(partitions()),
+        0x2000,
+      ),
+    ).toBeNull();
   });
 
   it("indexes OTA slots by subtype, so a missing subtype selects no partition", () => {
@@ -260,9 +335,43 @@ describe("ESP bootloader location", () => {
     expect(locateEspBootloader([probe(0, esp32)])).toEqual({
       location: undefined,
       limitations: [
-        "An esp32 image is at flash 0x0, but its ROM loads the bootloader from 0x1000; the dump may not start at the given flash offset.",
+        "An esp32 image is at flash 0x0, but its ROM loads the bootloader from 0x1000; the dump may not start at flash 0x0.",
       ],
+      misplaced: true,
+      esp8266: false,
     });
+  });
+
+  it("tells an unknown chip and an ESP8266 image from a misplaced origin", () => {
+    const unknown = espImage({
+      segments: ESP32C3_BOOTLOADER_SEGMENTS,
+      chipId: 0x7777,
+    });
+    expect(locateEspBootloader([probe(0, unknown)])).toMatchObject({
+      location: undefined,
+      misplaced: false,
+      esp8266: false,
+    });
+    expect(locateEspBootloader([probe(0, esp8266Image())])).toMatchObject({
+      location: undefined,
+      limitations: [],
+      misplaced: false,
+      esp8266: true,
+    });
+  });
+
+  it("finds where a located image's segments end by their headers", async () => {
+    const read = async (position: number, length: number) =>
+      bootloader.subarray(position, position + length);
+    const declared = ESP32C3_BOOTLOADER_SEGMENTS.reduce(
+      (end, { data }) => end + 8 + data.length,
+      24,
+    );
+    expect(await espImageSegmentsEnd(read, 0, bootloader.length)).toBe(
+      declared,
+    );
+    // Segments that run past the file end at the file.
+    expect(await espImageSegmentsEnd(read, 0, 40)).toBe(40);
   });
 
   it("probes only the ROM offsets the file holds after its flash offset", () => {

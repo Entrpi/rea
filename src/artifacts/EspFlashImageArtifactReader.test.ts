@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { EspFlashImageArtifactReader } from "./EspFlashImageArtifactReader.js";
 import { ArtifactResourceScope } from "./ArtifactResourceScope.js";
+import type { ArtifactEntry } from "./ArtifactReader.js";
 import { extractArtifact } from "./extraction/ArtifactExtraction.js";
 import * as espImageDecoding from "../domain/firmware/espImage.js";
 import {
@@ -50,6 +51,12 @@ const root = (
 ) =>
   snapshot.occurrences.find(({ logical_path }) => logical_path === ".")
     ?.format_metadata;
+
+const list = async (reader: EspFlashImageArtifactReader) => {
+  const entries: ArtifactEntry[] = [];
+  for await (const entry of reader.entries()) entries.push(entry);
+  return entries;
+};
 
 describe("ESP flash layout inventory", () => {
   it("inventories the bootloader, table and partitions with app and otadata facts", async () => {
@@ -216,6 +223,87 @@ describe("ESP flash layout coverage and selection", () => {
           "ESP flash image layout is not recognized",
         ),
       });
+    } finally {
+      await reader.close();
+    }
+    // The caller's selection decides before another container's signature.
+    const zipLike = await writeDump(
+      Buffer.concat([Buffer.from("PK\x03\x04"), pattern(0x1_0000, 3)]),
+      "dump.zip",
+    );
+    await expect(
+      scanCanonicalArtifactInventory(zipLike, { espFlashSelection: {} }),
+    ).rejects.toThrow(/ESP flash image layout is not recognized/u);
+  });
+});
+
+describe("ESP flash layout reader identity", () => {
+  it("rejects a changed carrier during extraction preparation", async () => {
+    const reader = new EspFlashImageArtifactReader(await writeDump(DUMP));
+    try {
+      await expect(
+        reader.prepareContainer("0".repeat(64)),
+      ).rejects.toMatchObject({ reason: "integrity" });
+    } finally {
+      await reader.close();
+    }
+  });
+
+  it("rejects forged entries and changed carrier identity, then closes idempotently", async () => {
+    const path = await writeDump(DUMP);
+    const reader = new EspFlashImageArtifactReader(path);
+    try {
+      const entry = (await list(reader)).find(
+        ({ path: name }) => name === "partitions/nvs.bin",
+      );
+      if (entry === undefined) throw new Error("Missing nvs partition");
+      await expect(
+        reader.open({ ...entry, declaredSize: 1 }),
+      ).rejects.toMatchObject({ reason: "integrity" });
+      await expect(
+        reader.open({ ...entry, byteOffset: 0 }),
+      ).rejects.toMatchObject({ reason: "integrity" });
+      await expect(
+        reader.open({
+          ...entry,
+          adapterKey: "esp-flash-image:partitions/x.bin",
+        }),
+      ).rejects.toMatchObject({ reason: "integrity" });
+      await writeFile(path, DUMP.subarray(0, 0x1_0000));
+      await expect(reader.open(entry)).rejects.toMatchObject({
+        reason: "integrity",
+      });
+    } finally {
+      await reader.close();
+      await reader.close();
+    }
+  });
+
+  it("settles an active entry stream when closed", async () => {
+    const reader = new EspFlashImageArtifactReader(await writeDump(DUMP));
+    try {
+      const [entry] = await list(reader);
+      if (entry === undefined) throw new Error("Missing entry");
+      const stream = await reader.open(entry);
+      await reader.close();
+      expect(stream.destroyed).toBe(true);
+      await expect(
+        reader.entries()[Symbol.asyncIterator]().next(),
+      ).rejects.toMatchObject({ reason: "unavailable" });
+    } finally {
+      await reader.close();
+    }
+  });
+
+  it("honors cancellation before admitting a file with the exact reason", async () => {
+    const reader = new EspFlashImageArtifactReader(await writeDump(DUMP));
+    const controller = new AbortController();
+    const reason = { stage: "before admission" };
+    controller.abort(reason);
+    try {
+      await expect(
+        reader.entries(controller.signal)[Symbol.asyncIterator]().next(),
+      ).rejects.toMatchObject({ reason: "cancelled", cause: reason });
     } finally {
       await reader.close();
     }

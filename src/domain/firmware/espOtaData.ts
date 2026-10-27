@@ -1,11 +1,7 @@
 import { crc32 } from "node:zlib";
 
 import { hex, u32 } from "./espImageStructures.js";
-import {
-  espOtaAppSlot,
-  isEspFactoryApp,
-  type EspPartition,
-} from "./espPartitionTable.js";
+import type { EspBootPartitions } from "./espPartitionTable.js";
 
 /*
  * OTA data, from ESP-IDF v6.1 `esp_flash_partitions.h`
@@ -15,6 +11,8 @@ import {
  */
 /** The otadata partition holds one record at the start of each of two sectors. */
 export const ESP_OTA_DATA_SECTOR_BYTES = 0x1000;
+/** `read_otadata` refuses a smaller otadata partition. */
+export const ESP_OTA_DATA_MIN_BYTES = 2 * ESP_OTA_DATA_SECTOR_BYTES;
 export const ESP_OTA_SELECT_ENTRY_BYTES = 32;
 const UNSET = 0xffff_ffff;
 
@@ -73,7 +71,8 @@ export const decodeEspOtaRecord = (
 export const ESP_OTA_SELECTION_ASSUMPTIONS = [
   "Records are used as written: the bootloader may first mark a pending-verify record aborted when app rollback is enabled.",
   "Anti-rollback, which compares the app's secure_version with eFuse, is not applied.",
-  "The selected app is not checked for a loadable image; the bootloader falls back to other partitions when it fails to load.",
+  "The selected app is not checked for a loadable image; the bootloader falls back to other partitions when it fails to load or is not declared.",
+  "Factory-reset and test-app GPIO holds and a wake from deep sleep, which can override the selection, are not applied.",
 ] as const;
 
 export interface EspOtaSelection {
@@ -81,8 +80,9 @@ export interface EspOtaSelection {
   readonly active_record: 0 | 1 | null;
   /** `(ota_seq - 1) % ota_app_count`, the bootloader's slot arithmetic. */
   readonly slot: number | null;
-  /** The table index of the app partition for that slot or the fallback. */
+  /** The table index of the selected app; null when none is declared. */
   readonly partition_index: number | null;
+  /** The bootloader's branch; `none` is its INVALID_INDEX, which resets. */
   readonly basis: "otadata" | "factory-fallback" | "ota_0-fallback" | "none";
   readonly assumptions: readonly string[];
 }
@@ -92,58 +92,48 @@ const unusable = ({ ota_seq, ota_state }: EspOtaRecord): boolean =>
   ota_seq === UNSET || ota_state === 0x3 || ota_state === 0x4;
 
 /**
- * Derive the app partition the bootloader would select from these records,
- * as `bootloader_utility_get_selected_boot_partition` does without app
+ * Derive the app partition the bootloader would select, as
+ * `bootloader_utility_get_selected_boot_partition` does without app
  * rollback or anti-rollback:
- * - both records unusable, or no OTA app: the factory app, else `ota_0`;
+ * - an otadata partition smaller than two sectors: none, because
+ *   `read_otadata` fails and the bootloader resets;
+ * - both records unusable, or no OTA app: the factory app when one is
+ *   declared, else boot index 0 (`ota_0`);
  * - otherwise the valid record with the higher `ota_seq` (record 0 on a
  *   tie), whose slot is `(ota_seq - 1) % ota_app_count`;
- * - no valid record (a CRC mismatch): the factory app, else none, because
- *   the bootloader then tries every partition.
+ * - no valid record, as after a CRC mismatch: the factory index, whether
+ *   or not a factory app is declared.
+ * Unknown (null) when the dump lacks a record the bootloader would read.
  */
 export const selectEspOtaSlot = (
   records: readonly EspOtaRecord[],
-  partitions: readonly EspPartition[],
-): EspOtaSelection => {
-  // The bootloader counts every OTA app but indexes them by subtype, and a
-  // later entry with the same subtype replaces an earlier one.
-  let appCount = 0;
-  const bySlot = new Map<number, EspPartition>();
-  for (const part of partitions) {
-    const slot = espOtaAppSlot(part);
-    if (slot === null) continue;
-    appCount += 1;
-    bySlot.set(slot, part);
-  }
-  const factory = partitions.find(isEspFactoryApp);
+  boot: EspBootPartitions,
+  otadataSize: number,
+): EspOtaSelection | null => {
   const assumptions = [...ESP_OTA_SELECTION_ASSUMPTIONS];
-  const none = {
+  const selection = (
+    basis: EspOtaSelection["basis"],
+    fields: Partial<Omit<EspOtaSelection, "basis" | "assumptions">> = {},
+  ): EspOtaSelection => ({
     active_record: null,
     slot: null,
     partition_index: null,
-    basis: "none",
+    ...fields,
+    basis,
     assumptions,
-  } as const;
-  const factoryFallback =
-    factory === undefined
-      ? undefined
-      : ({
-          ...none,
-          partition_index: factory.index,
-          basis: "factory-fallback",
-        } as const);
-  if (records.every(unusable) || appCount === 0) {
-    if (factoryFallback !== undefined) return factoryFallback;
-    const first = bySlot.get(0);
-    return first === undefined
-      ? none
-      : {
-          ...none,
+  });
+  const factory = selection("factory-fallback", {
+    partition_index: boot.factory?.index ?? null,
+  });
+  if (otadataSize < ESP_OTA_DATA_MIN_BYTES) return selection("none");
+  if (records.length < 2) return null;
+  if (records.every(unusable) || boot.otaAppCount === 0)
+    return boot.factory !== undefined
+      ? factory
+      : selection("ota_0-fallback", {
           slot: 0,
-          partition_index: first.index,
-          basis: "ota_0-fallback",
-        };
-  }
+          partition_index: boot.otaSlots.get(0)?.index ?? null,
+        });
   const valid = records.filter(({ valid }) => valid);
   const [first, second] = valid;
   const active =
@@ -152,14 +142,12 @@ export const selectEspOtaSlot = (
     second.ota_seq > first.ota_seq
       ? second
       : first;
-  if (active === undefined) return factoryFallback ?? none;
-  const slot = ((active.ota_seq - 1) >>> 0) % appCount;
-  return {
+  if (active === undefined) return factory;
+  const slot = ((active.ota_seq - 1) >>> 0) % boot.otaAppCount;
+  return selection("otadata", {
     active_record: active.index,
     slot,
     // A gap in the OTA subtypes selects a slot with no partition.
-    partition_index: bySlot.get(slot)?.index ?? null,
-    basis: "otadata",
-    assumptions,
-  };
+    partition_index: boot.otaSlots.get(slot)?.index ?? null,
+  });
 };

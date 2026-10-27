@@ -274,6 +274,11 @@ export const espFlashPartitionMetadataSchema = z.strictObject({
   index: uint8,
   /** The label up to its first NUL; null when it is not UTF-8. */
   label: z.string().nullable(),
+  /** The label's bytes up to its first NUL in hex, when it is not UTF-8. */
+  label_hex: z
+    .string()
+    .regex(/^(?:[0-9a-f]{2}){1,16}$/u)
+    .nullable(),
   type: uint8,
   subtype: uint8,
   /** `gen_esp32part.py` names; null for values it does not name. */
@@ -295,6 +300,7 @@ export const espFlashPartitionDeclaration = (
   metadata: EspFlashPartitionMetadata,
 ) => ({
   label: metadata.label,
+  label_hex: metadata.label_hex,
   type: metadata.type,
   subtype: metadata.subtype,
   flash_address: metadata.flash_address,
@@ -374,28 +380,40 @@ export const espFlashImageMetadataSchema = z.strictObject({
   apps: z.array(
     z.strictObject({ partition_index: uint8, facts: espFlashImageFactsSchema }),
   ),
+  /** The otadata partition the bootloader uses: the last one declared. */
   otadata: z
     .strictObject({
       partition_index: uint8,
-      records: z.array(espOtaRecordSchema),
-      /** Derived from the records under the stated assumptions. */
-      selected: z.strictObject({
-        active_record: z.union([z.literal(0), z.literal(1)]).nullable(),
-        slot: uint8.nullable(),
-        partition_index: uint8.nullable(),
-        basis: z.enum([
-          "otadata",
-          "factory-fallback",
-          "ota_0-fallback",
-          "none",
-        ]),
-        assumptions: z.array(z.string()),
-      }),
+      /** The records the dump holds, at most one per sector. */
+      records: z.array(espOtaRecordSchema).max(2),
+      /**
+       * Derived from both records under the stated assumptions; null when
+       * the dump lacks one. `partition_index` is null when the table
+       * declares no partition for the selected slot or fallback, and `none`
+       * is the bootloader's INVALID_INDEX, after which it resets.
+       */
+      selected: z
+        .strictObject({
+          active_record: z.union([z.literal(0), z.literal(1)]).nullable(),
+          slot: uint8.nullable(),
+          partition_index: uint8.nullable(),
+          basis: z.enum([
+            "otadata",
+            "factory-fallback",
+            "ota_0-fallback",
+            "none",
+          ]),
+          assumptions: z.array(z.string()),
+        })
+        .nullable(),
       /** Rollback, anti-rollback and load fallback decide it at boot. */
       running_partition: z.literal("unknown"),
     })
     .nullable(),
-  /** Bytes outside every described region that are not erased flash. */
+  /**
+   * Ranges outside every described region, each from a byte that is not
+   * erased flash to the end of its gap.
+   */
   undescribed: z.array(byteRange),
 });
 export type EspFlashImageMetadata = z.infer<typeof espFlashImageMetadataSchema>;

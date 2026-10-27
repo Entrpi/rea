@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
 
 import { err, ok, type Result } from "../result.js";
-import { hex, offsetText, u16, u32 } from "./espImageStructures.js";
+import {
+  cString,
+  cStringBytes,
+  hex,
+  offsetText,
+  u16,
+  u32,
+} from "./espImageStructures.js";
 
 /*
  * The partition table, from ESP-IDF v6.1 `esp_flash_partitions.h`,
@@ -36,6 +43,8 @@ export interface EspPartition {
   readonly size: number;
   /** The label up to its first NUL, or null when it is not UTF-8. */
   readonly label: string | null;
+  /** The label's bytes up to its first NUL, in hex, when it is not UTF-8. */
+  readonly labelHex: string | null;
   readonly encrypted: boolean;
   readonly readonly: boolean;
   /** Flag bits other than `encrypted` and `readonly`, which ESP-IDF ignores. */
@@ -57,23 +66,14 @@ export interface EspPartitionTable {
   readonly limitations: readonly string[];
 }
 
-const UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
-
-const label = (bytes: Uint8Array): string | null => {
-  const end = bytes.indexOf(0);
-  try {
-    return UTF8.decode(end < 0 ? bytes : bytes.subarray(0, end));
-  } catch {
-    return null;
-  }
-};
-
 const partition = (
   entry: Uint8Array,
   index: number,
   entryOffset: number,
 ): EspPartition => {
   const flags = u32(entry, 28);
+  const labelBytes = entry.subarray(12, 28);
+  const label = cString(labelBytes);
   return {
     index,
     entryOffset,
@@ -81,7 +81,8 @@ const partition = (
     subtype: entry[3] ?? 0,
     offset: u32(entry, 4),
     size: u32(entry, 8),
-    label: label(entry.subarray(12, 28)),
+    label,
+    labelHex: label === null ? hex(cStringBytes(labelBytes)) : null,
     encrypted: (flags & 1) !== 0,
     readonly: (flags & 2) !== 0,
     unknownFlags: (flags & ~KNOWN_FLAGS) >>> 0,
@@ -89,12 +90,14 @@ const partition = (
 };
 
 /**
- * Decode a table as ESP-IDF's bootloader verifies it: 32-byte entries with
- * the `0x50AA` magic, at most one `0xEBEB` MD5 entry over the entries before
- * it, and a terminator whose magic, type and subtype are all `0xFF`, which
- * cannot be the first entry. A structural fault means the bytes are not a
- * table; an MD5 mismatch, which the bootloader also rejects, is reported as
- * an integrity fact so that the declared entries stay visible.
+ * Decode a table in the entry structure ESP-IDF's bootloader verifies:
+ * 32-byte entries with the `0x50AA` magic, at most one `0xEBEB` MD5 entry
+ * over the entries before it, and a terminator whose magic, type and subtype
+ * are all `0xFF`. A structural fault means the bytes are not a table. An MD5
+ * mismatch or a second MD5 entry, which the bootloader rejects, is reported
+ * as an integrity fact so that the declared entries stay visible. ESP-IDF
+ * accepts an empty table, but REA requires one entry before the terminator
+ * so that erased flash is not read as a table.
  */
 export const decodeEspPartitionTable = (
   bytes: Uint8Array,
@@ -214,6 +217,9 @@ export const espPartitionSubtypeName = (
 const APP_TYPE = 0x00;
 const OTA_DATA_SUBTYPE = 0x00;
 const DATA_TYPE = 0x01;
+const BOOTLOADER_TYPE = 0x02;
+const PARTITION_TABLE_TYPE = 0x03;
+const PRIMARY_SUBTYPE = 0x00;
 const OTA_APP_SUBTYPE_FLAG = 0x10;
 const OTA_APP_SUBTYPE_MASK = 0x0f;
 
@@ -224,11 +230,77 @@ export const espOtaAppSlot = (part: EspPartition): number | null =>
     ? part.subtype & OTA_APP_SUBTYPE_MASK
     : null;
 
-export const isEspFactoryApp = (part: EspPartition): boolean =>
+const isEspFactoryApp = (part: EspPartition): boolean =>
   part.type === APP_TYPE && part.subtype === 0x00;
 
-export const isEspOtaData = (part: EspPartition): boolean =>
+const isEspOtaData = (part: EspPartition): boolean =>
   part.type === DATA_TYPE && part.subtype === OTA_DATA_SUBTYPE;
 
 export const isEspAppPartition = (part: EspPartition): boolean =>
   part.type === APP_TYPE;
+
+/**
+ * The region a primary `bootloader` or `partition_table` entry declares.
+ * ESP-IDF 5.3 and later may declare them over the bootloader region and the
+ * table sector, and `gen_esp32part.py` exempts them from its rule that
+ * partitions follow the table.
+ */
+export const espPrimaryLayoutRole = (
+  part: EspPartition,
+): "bootloader" | "partition-table" | undefined => {
+  if (part.subtype !== PRIMARY_SUBTYPE) return undefined;
+  if (part.type === BOOTLOADER_TYPE) return "bootloader";
+  return part.type === PARTITION_TABLE_TYPE ? "partition-table" : undefined;
+};
+
+/** The partitions the bootloader keeps from a table, and the OTA app count. */
+export interface EspBootPartitions {
+  readonly factory: EspPartition | undefined;
+  readonly otadata: EspPartition | undefined;
+  /** Each OTA slot's partition, indexed by subtype. */
+  readonly otaSlots: ReadonlyMap<number, EspPartition>;
+  /** Every OTA app entry, duplicates included, as `bs->app_count` counts. */
+  readonly otaAppCount: number;
+  readonly limitations: readonly string[];
+}
+
+/**
+ * Read the table as `bootloader_utility_load_partition_table` does: a later
+ * factory, otadata or same-subtype OTA entry replaces an earlier one, and
+ * every OTA app entry adds to the app count.
+ */
+export const espBootPartitions = (
+  partitions: readonly EspPartition[],
+): EspBootPartitions => {
+  let factory: EspPartition | undefined;
+  let otadata: EspPartition | undefined;
+  let otaAppCount = 0;
+  const otaSlots = new Map<number, EspPartition>();
+  const roles = new Map<string, EspPartition[]>();
+  for (const part of partitions) {
+    const slot = espOtaAppSlot(part);
+    const role = isEspFactoryApp(part)
+      ? "factory"
+      : isEspOtaData(part)
+        ? "otadata"
+        : slot === null
+          ? undefined
+          : `ota_${String(slot)}`;
+    if (role === undefined) continue;
+    roles.set(role, [...(roles.get(role) ?? []), part]);
+    if (role === "factory") factory = part;
+    else if (role === "otadata") otadata = part;
+    else if (slot !== null) {
+      otaSlots.set(slot, part);
+      otaAppCount += 1;
+    }
+  }
+  const limitations = [...roles].flatMap(([role, parts]) =>
+    parts.length < 2
+      ? []
+      : [
+          `The table declares ${role} ${String(parts.length)} times (partitions ${parts.map(({ index }) => `#${String(index)}`).join(", ")}); ESP-IDF's bootloader uses the last.`,
+        ],
+  );
+  return { factory, otadata, otaSlots, otaAppCount, limitations };
+};

@@ -4,12 +4,18 @@ import {
   locateEspFlashLayout,
   type EspFlashSelection,
 } from "./espFlashLocation.js";
+import { ESP8266_REFUSAL } from "./espImage.js";
 import {
   TWO_OTA_PARTITIONS,
   flashImage,
   partitionTable,
 } from "./espFlash.fixture.js";
-import { ESP32C3_BOOTLOADER_SEGMENTS, espImage } from "./espImage.fixture.js";
+import {
+  ESP32C3_APP_SEGMENTS,
+  ESP32C3_BOOTLOADER_SEGMENTS,
+  esp8266Image,
+  espImage,
+} from "./espImage.fixture.js";
 
 const c3Bootloader = espImage({ segments: ESP32C3_BOOTLOADER_SEGMENTS });
 const esp32Bootloader = espImage({
@@ -21,11 +27,17 @@ const locate = (
   bytes: Uint8Array,
   selection: EspFlashSelection = {},
   explicit = false,
+  reads: [number, number][] = [],
 ) =>
   locateEspFlashLayout(
     bytes.length,
-    async (position, length) =>
-      bytes.subarray(Math.max(0, position), Math.max(0, position) + length),
+    async (position, length) => {
+      reads.push([position, length]);
+      return bytes.subarray(
+        Math.max(0, position),
+        Math.max(0, position) + length,
+      );
+    },
     selection,
     { explicit },
   );
@@ -47,6 +59,15 @@ const dump = (
     { at: tableAt, bytes: partitionTable(TWO_OTA_PARTITIONS, { md5 }) },
   ]);
 
+/** An ESP32 dump read from flash 0x1000: its bootloader is the file's first byte. */
+const fromSecondSector = (tableAt: number) =>
+  dump(tableAt, { bootloader: esp32Bootloader, bootloaderAt: 0x1000 }).subarray(
+    0x1000,
+  );
+
+const UNCONFIRMED =
+  "No bootloader at a ROM offset confirms that the dump starts at flash 0x0; each partition's file offset assumes it. Pass flash_offset if the dump starts elsewhere.";
+
 describe("ESP flash layout location", () => {
   it("finds the bootloader and the table at their default offsets", async () => {
     const located = await locate(dump(0x8000));
@@ -60,6 +81,20 @@ describe("ESP flash layout location", () => {
     });
   });
 
+  it("locates a bootloader at the 0x2000 ROM offset of the chips that use it", async () => {
+    const c5 = espImage({
+      segments: ESP32C3_BOOTLOADER_SEGMENTS,
+      chipId: 0x17,
+    });
+    const located = await locate(
+      dump(0x8000, { bootloader: c5, bootloaderAt: 0x2000 }),
+    );
+    expect(located.ok && located.value).toMatchObject({
+      bootloader: { flashAddress: 0x2000, chip: { target: "esp32c5" } },
+      tableMethod: "default",
+    });
+  });
+
   it("scans for a relocated table only when its MD5 verifies", async () => {
     const located = await locate(dump(0xa000));
     expect(located.ok && located.value).toMatchObject({
@@ -69,8 +104,46 @@ describe("ESP flash layout location", () => {
     expect(await locate(dump(0xa000, { md5: "absent" }))).toEqual({
       ok: false,
       error:
-        "no partition table at 0x8000 or in any 0x1000-aligned flash sector with a verified MD5; flash encryption is one cause",
+        "no partition table at 0x8000 or in any 0x1000-aligned flash sector after the bootloader image with a verified MD5; flash encryption is one cause",
     });
+  });
+
+  it.each([0x1_0000, 0x1_1000])(
+    "scans across read chunks to a table at %s",
+    async (tableAt) => {
+      const located = await locate(dump(tableAt));
+      expect(located.ok && located.value).toMatchObject({
+        tableAddress: tableAt,
+        tableMethod: "scan",
+      });
+    },
+  );
+
+  it("scans the sectors of a dump whose origin is not sector-aligned", async () => {
+    // Flash 0x9000 is file offset 0x8800 when the dump starts at flash 0x800.
+    const bytes = flashImage(0x2_0000, [
+      { at: 0x8800, bytes: partitionTable(TWO_OTA_PARTITIONS) },
+    ]);
+    const located = await locate(bytes, { flashOffset: 0x800 }, true);
+    expect(located.ok && located.value).toMatchObject({
+      origin: { value: 0x800, source: "caller" },
+      tableAddress: 0x9000,
+      tableMethod: "scan",
+      limitations: [],
+    });
+  });
+
+  it("does not look for a table inside a single app image", async () => {
+    const app = espImage({
+      segments: [
+        ...ESP32C3_APP_SEGMENTS,
+        { address: 0x4038_0000, data: Buffer.alloc(0x2_0000, 0x5a) },
+      ],
+    });
+    const reads: [number, number][] = [];
+    expect((await locate(app, {}, false, reads)).ok).toBe(false);
+    // Probes and segment headers only: no table read, no scan chunk.
+    expect(reads.every(([, length]) => length <= 32)).toBe(true);
   });
 
   it("uses the caller's table offset and does not scan", async () => {
@@ -90,13 +163,22 @@ describe("ESP flash layout location", () => {
     });
   });
 
+  it("rejects a table offset outside the dump", async () => {
+    expect(
+      await locate(dump(0x8000), { partitionTableOffset: 0x10_0000 }),
+    ).toEqual({
+      ok: false,
+      error:
+        "the partition table offset 0x100000 is outside the dump, which holds flash 0x0-0x20000",
+    });
+  });
+});
+
+describe("ESP flash layout origins", () => {
   it("reads a dump that starts after flash address 0 at the caller's origin", async () => {
-    // An ESP32 dump read from 0x1000: its bootloader is the file's first byte.
-    const partial = dump(0x8000, {
-      bootloader: esp32Bootloader,
-      bootloaderAt: 0x1000,
-    }).subarray(0x1000);
-    const located = await locate(partial, { flashOffset: 0x1000 });
+    const located = await locate(fromSecondSector(0x8000), {
+      flashOffset: 0x1000,
+    });
     expect(located.ok && located.value).toMatchObject({
       origin: { value: 0x1000, source: "caller" },
       bootloader: {
@@ -106,12 +188,35 @@ describe("ESP flash layout location", () => {
       },
       tableAddress: 0x8000,
       tableMethod: "default",
+      limitations: [],
     });
-    // Without the origin, the bootloader's chip says the dump is misplaced, so
-    // a scan would misplace every partition by 0x1000; none is attempted.
-    const misplaced = await locate(partial);
-    expect(misplaced.ok).toBe(false);
-    expect(!misplaced.ok && misplaced.error).toContain("Pass flash_offset");
+  });
+
+  it.each([
+    ["omitted", {}],
+    ["given as 0x0", { flashOffset: 0 }],
+  ] as const)(
+    "refuses an origin the bootloader contradicts when it is %s",
+    async (_name, selection) => {
+      // The table sits at flash 0x9000, so the default 0x8000 would find it
+      // at file 0x8000 and misplace every partition by 0x1000.
+      const refused = await locate(fromSecondSector(0x9000), selection);
+      expect(refused).toEqual({
+        ok: false,
+        error:
+          "An esp32 image is at flash 0x0, but its ROM loads the bootloader from 0x1000; the dump may not start at flash 0x0. Pass the flash_offset where the dump starts, or partition_table_offset",
+      });
+    },
+  );
+
+  it("finds the table after the bootloader once the origin is right", async () => {
+    const located = await locate(fromSecondSector(0x9000), {
+      flashOffset: 0x1000,
+    });
+    expect(located.ok && located.value).toMatchObject({
+      tableAddress: 0x9000,
+      tableMethod: "scan",
+    });
   });
 
   it("does not scan arbitrary files without a bootloader unless the format was selected", async () => {
@@ -127,16 +232,38 @@ describe("ESP flash layout location", () => {
       bootloader: undefined,
       tableAddress: 0xa000,
       tableMethod: "scan",
+      limitations: [UNCONFIRMED],
     });
   });
 
-  it("rejects a table offset outside the dump", async () => {
-    expect(
-      await locate(dump(0x8000), { partitionTableOffset: 0x10_0000 }),
-    ).toEqual({
+  it("reads an unknown chip's dump at its default table without calling it misplaced", async () => {
+    const unknown = espImage({
+      segments: ESP32C3_BOOTLOADER_SEGMENTS,
+      chipId: 0x7777,
+    });
+    const located = await locate(dump(0x8000, { bootloader: unknown }));
+    expect(located.ok && located.value).toMatchObject({
+      bootloader: undefined,
+      tableMethod: "default",
+      limitations: [
+        "An ESP image at flash 0x0 has chip_id 0x7777, which is not in the chip table; it is not read as the bootloader.",
+        UNCONFIRMED,
+      ],
+    });
+  });
+
+  it("refuses an ESP8266 dump as the ESP image reader does", async () => {
+    const esp8266 = flashImage(0x2_0000, [
+      { at: 0, bytes: esp8266Image() },
+      { at: 0x8000, bytes: partitionTable(TWO_OTA_PARTITIONS) },
+    ]);
+    expect(await locate(esp8266)).toEqual({
       ok: false,
-      error:
-        "the partition table offset 0x100000 is outside the dump, which holds flash 0x0-0x20000",
+      error: ESP8266_REFUSAL,
+    });
+    expect(await locate(esp8266, {}, true)).toEqual({
+      ok: false,
+      error: ESP8266_REFUSAL,
     });
   });
 });

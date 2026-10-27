@@ -679,7 +679,8 @@ cannot be opened as raw-binary. See
 A whole-flash dump opens as `esp-flash-image`. `root_format_metadata` holds
 `partition_table` (its `method`: `default`, `caller` or a derived
 `scan`), `bootloader` and `apps` ESP image facts, `otadata` with a derived
-`selected` slot and its `assumptions`, and `partitions_outside_dump`;
+`selected` slot (null when a record is missing) and its `assumptions`, and
+`partitions_outside_dump`;
 `running_partition` is always `unknown`. Partition rows
 (`partitions/<label>.bin`) carry the declared `type`, `subtype`, names,
 `flash_address`, `size` and flags; `encrypted` is a storage flag, not

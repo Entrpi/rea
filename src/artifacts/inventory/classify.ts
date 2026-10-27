@@ -242,17 +242,6 @@ const classifyRootFormat = async (
   const archiveBytes = (await handle.stat()).size;
   const evidence = probe.finish(archiveBytes);
   abortIfNeeded(signal);
-  const classificationPath = artifactNameForClassification(
-    selectedPath ?? path,
-    path,
-  );
-  const lower = classificationPath.toLowerCase();
-  if (hasZipSignature(evidence.prefix)) return zipRootPackageFormat(lower);
-  if (
-    lower.endsWith(".pkg") &&
-    evidence.prefix.subarray(0, 4).equals(Buffer.from("xar!"))
-  )
-    return "pkg";
   // Fill each range: a short result is end of file, not a partial host read.
   const read = async (position: number, length: number): Promise<Buffer> => {
     const bytes = Buffer.alloc(length);
@@ -271,6 +260,32 @@ const classifyRootFormat = async (
     }
     return bytes.subarray(0, filled);
   };
+  const locateFlash = (selection: EspFlashSelection, explicit: boolean) =>
+    locateEspFlashLayout(archiveBytes, read, selection, {
+      explicit,
+      ...(signal === undefined ? {} : { signal }),
+    });
+  // The caller's format selection decides before any other signature.
+  if (espFlashSelection !== undefined) {
+    const selected = await locateFlash(espFlashSelection, true);
+    if (!selected.ok)
+      throw new ArtifactReaderFailure(
+        "unavailable",
+        `ESP flash image layout is not recognized: ${selected.error}`,
+      );
+    return { kind: "esp-flash-image", source, location: selected.value };
+  }
+  const classificationPath = artifactNameForClassification(
+    selectedPath ?? path,
+    path,
+  );
+  const lower = classificationPath.toLowerCase();
+  if (hasZipSignature(evidence.prefix)) return zipRootPackageFormat(lower);
+  if (
+    lower.endsWith(".pkg") &&
+    evidence.prefix.subarray(0, 4).equals(Buffer.from("xar!"))
+  )
+    return "pkg";
   if (
     lower.endsWith(".dmg") &&
     (await hasDiskImageSignature(archiveBytes, read))
@@ -280,22 +295,9 @@ const classifyRootFormat = async (
   if (pck !== undefined) return { kind: "godot-pck", source, location: pck };
   // A C3 or S3 dump begins with its bootloader, so the layout is located
   // before the bytes are read as one ESP image.
-  const flash = await locateEspFlashLayout(
-    archiveBytes,
-    read,
-    espFlashSelection ?? {},
-    {
-      explicit: espFlashSelection !== undefined,
-      ...(signal === undefined ? {} : { signal }),
-    },
-  );
+  const flash = await locateFlash({}, false);
   if (flash.ok)
     return { kind: "esp-flash-image", source, location: flash.value };
-  if (espFlashSelection !== undefined)
-    throw new ArtifactReaderFailure(
-      "unavailable",
-      `ESP flash image layout is not recognized: ${flash.error}`,
-    );
   const fatEvidence = await readRootFatSliceHeaders(handle, evidence, signal);
   const mzWindowsHeaderSignature = await readRootMzWindowsHeaderSignature(
     handle,

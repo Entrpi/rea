@@ -99,8 +99,9 @@ export const decodeEspFlashImage = async (
     region.start,
     PROBE_BYTES,
   );
+  // A region shorter than a header is erased when all of its bytes are.
   if (
-    prefix.length >= HEADER_BYTES &&
+    prefix.length > 0 &&
     prefix.subarray(0, HEADER_BYTES).every((byte) => byte === 0xff)
   )
     return noImage("erased", []);

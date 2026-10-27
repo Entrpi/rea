@@ -60,7 +60,10 @@ describe("ESP flash layout plans", () => {
       ["partitions/ota_1.bin", 0x3_0000, 0x1_0000, 0x1_0000],
     ]);
     expect(plan.gaps).toEqual([]);
-    expect(plan.otadata?.records).toEqual([0xd000, 0xe000]);
+    expect(plan.otadata?.records).toEqual([
+      { index: 0, fileOffset: 0xd000, available: true },
+      { index: 1, fileOffset: 0xe000, available: true },
+    ]);
     expect(plan.limitations).toEqual([]);
   });
 
@@ -70,6 +73,9 @@ describe("ESP flash layout plans", () => {
       { label: "dup", type: 1, subtype: 2, offset: 0xa000, size: 0x1000 },
       { label: "dup", type: 1, subtype: 2, offset: 0xb000, size: 0x1000 },
       { label: "7", type: 1, subtype: 2, offset: 0xc000, size: 0x1000 },
+      // Case-insensitive file systems would extract these to one file.
+      { label: "Data", type: 1, subtype: 2, offset: 0xd000, size: 0x1000 },
+      { label: "data", type: 1, subtype: 2, offset: 0xe000, size: 0x1000 },
     ];
     expect(
       planEspFlashLayout(input({ table: table(parts) }))
@@ -80,6 +86,39 @@ describe("ESP flash layout plans", () => {
       "partitions/1.bin",
       "partitions/2.bin",
       "partitions/3.bin",
+      "partitions/4.bin",
+      "partitions/5.bin",
+    ]);
+  });
+
+  it("accepts the primary bootloader and table entries ESP-IDF 5.3 declares", () => {
+    const plan = planEspFlashLayout(
+      input({
+        table: table([
+          {
+            label: "PrimaryBTLDR",
+            type: 2,
+            subtype: 0,
+            offset: 0,
+            size: 0x8000,
+          },
+          {
+            label: "PrimaryPrtTable",
+            type: 3,
+            subtype: 0,
+            offset: 0x8000,
+            size: 0x1000,
+          },
+          ...TWO_OTA_PARTITIONS,
+        ]),
+      }),
+    );
+    expect(plan.limitations).toEqual([]);
+    expect(plan.regions.map(({ path }) => path).slice(0, 4)).toEqual([
+      "bootloader.bin",
+      "partition-table.bin",
+      "partitions/PrimaryBTLDR.bin",
+      "partitions/PrimaryPrtTable.bin",
     ]);
   });
 
@@ -133,24 +172,90 @@ describe("ESP flash layout plans", () => {
       "Partition gone at 0x100000-0x101000 lies outside the dump, which ends at flash 0x39000.",
     ]);
     const facts = finishEspFlashLayout(plan, {
-      otadataRecords: undefined,
+      otadataRecords: [],
       gapFirstUnerased: erasedGaps(plan.gaps.length),
     });
     expect(facts.coverage).toBe("unknown");
   });
 
-  it("reports overlapping regions", () => {
+  it("reports every region inside a longer one", () => {
     const plan = planEspFlashLayout(
       input({
         table: table([
-          { label: "a", type: 1, subtype: 2, offset: 0x9000, size: 0x2000 },
+          { label: "a", type: 1, subtype: 2, offset: 0x9000, size: 0x8000 },
           { label: "b", type: 1, subtype: 2, offset: 0xa000, size: 0x1000 },
+          { label: "c", type: 1, subtype: 2, offset: 0xc000, size: 0x1000 },
         ]),
       }),
     );
     expect(plan.limitations).toEqual([
-      "partitions/b.bin at 0xa000 overlaps partitions/a.bin, which ends at 0xb000.",
+      "partitions/b.bin at 0xa000 overlaps partitions/a.bin, which ends at 0x11000.",
+      "partitions/c.bin at 0xc000 overlaps partitions/a.bin, which ends at 0x11000.",
     ]);
+  });
+});
+
+describe("ESP flash layout otadata", () => {
+  const [, otadata] = TWO_OTA_PARTITIONS;
+
+  it("reads the otadata partition the bootloader uses: the last declared", () => {
+    const plan = planEspFlashLayout(
+      input({
+        table: table([
+          ...TWO_OTA_PARTITIONS,
+          { ...otadata!, label: "otadata2", offset: 0x3_0000 + 0x1_0000 },
+        ]),
+        fileSize: 0x5_0000,
+      }),
+    );
+    expect(plan.otadata?.partition.label).toBe("otadata2");
+    expect(plan.otadata?.records.map(({ fileOffset }) => fileOffset)).toEqual([
+      0x4_0000, 0x4_1000,
+    ]);
+    expect(plan.limitations).toContain(
+      "The table declares otadata 2 times (partitions #1, #6); ESP-IDF's bootloader uses the last.",
+    );
+  });
+
+  it("does not read a record past a short otadata partition and selects none", () => {
+    const short = TWO_OTA_PARTITIONS.map((part) =>
+      part.label === "otadata" ? { ...part, size: 0x1000 } : part,
+    );
+    const plan = planEspFlashLayout(input({ table: table(short) }));
+    expect(plan.otadata?.records).toEqual([
+      { index: 0, fileOffset: 0xd000, available: true },
+    ]);
+    expect(plan.limitations).toContain(
+      "The otadata partition otadata is 0x1000 bytes, smaller than the two 4 KiB sectors ESP-IDF's bootloader reads; the bootloader resets without selecting an app.",
+    );
+    const facts = finishEspFlashLayout(plan, {
+      otadataRecords: [otaRecord({ seq: 1 })],
+      gapFirstUnerased: erasedGaps(plan.gaps.length),
+    });
+    expect(facts.otadata).toMatchObject({
+      records: [{ index: 0, ota_seq: 1 }],
+      selected: { basis: "none", partition_index: null },
+    });
+  });
+
+  it("keeps the record a dump holds when it ends between the two", () => {
+    const plan = planEspFlashLayout(input({ fileSize: 0xe000 }));
+    expect(plan.otadata?.records).toEqual([
+      { index: 0, fileOffset: 0xd000, available: true },
+      { index: 1, fileOffset: 0xe000, available: false },
+    ]);
+    expect(plan.limitations).toContain(
+      "otadata record 1 of partition otadata at flash 0xe000 is outside the dump; the OTA selection is unknown.",
+    );
+    const facts = finishEspFlashLayout(plan, {
+      otadataRecords: [otaRecord({ seq: 3 }), undefined],
+      gapFirstUnerased: erasedGaps(plan.gaps.length),
+    });
+    expect(facts.otadata).toMatchObject({
+      records: [{ index: 0, ota_seq: 3, valid: true }],
+      selected: null,
+      running_partition: "unknown",
+    });
   });
 });
 
@@ -164,18 +269,18 @@ describe("ESP flash layout facts", () => {
     );
     expect(plan.gaps).toEqual([{ offset: 0x1_0000, length: 0x1_0000 }]);
     const erased = finishEspFlashLayout(plan, {
-      otadataRecords: undefined,
+      otadataRecords: [],
       gapFirstUnerased: [undefined],
     });
     expect(erased).toMatchObject({ coverage: "complete", undescribed: [] });
     const written = finishEspFlashLayout(plan, {
-      otadataRecords: undefined,
+      otadataRecords: [],
       gapFirstUnerased: [0x1_8000],
     });
     expect(written.undescribed).toEqual([{ offset: 0x1_8000, length: 0x8000 }]);
     expect(written.coverage).toBe("unknown");
     expect(written.limitations.at(-1)).toBe(
-      "32768 bytes of the dump, in 1 range(s), lie outside the bootloader region, the partition table and every partition and are not erased flash.",
+      "1 range(s) of the dump, 32768 bytes in all, lie outside the bootloader region, the partition table and every partition and are not described; each runs from a byte that is not erased flash to the end of its gap.",
     );
   });
 
@@ -205,6 +310,7 @@ describe("ESP flash layout facts", () => {
       kind: "esp-flash-partition",
       index: 0,
       label: "nvs",
+      label_hex: null,
       type: 1,
       subtype: 2,
       type_name: "data",

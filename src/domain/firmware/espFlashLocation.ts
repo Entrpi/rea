@@ -2,6 +2,7 @@ import { err, ok, type Result } from "../result.js";
 import {
   ESP_BOOTLOADER_PROBE_BYTES,
   espBootloaderProbeOffsets,
+  espImageSegmentsEnd,
   locateEspBootloader,
   type EspBootloaderLocation,
 } from "./espFlashBootloader.js";
@@ -9,6 +10,7 @@ import type {
   EspFlashOrigin,
   EspPartitionTableMethod,
 } from "./espFlashLayout.js";
+import { ESP8266_REFUSAL } from "./espImage.js";
 import { offsetText } from "./espImageStructures.js";
 import {
   ESP_PARTITION_TABLE_DEFAULT_OFFSET,
@@ -55,40 +57,40 @@ const tableAt = async (
   );
 
 /**
- * The first sector-aligned table whose MD5 verifies; requiring the MD5
- * keeps arbitrary bytes that begin with the magic from passing.
+ * The first table whose MD5 verifies at a flash sector boundary from the
+ * file offset `start`; requiring the MD5 keeps arbitrary bytes that begin
+ * with the magic from passing. Chunks start at sector boundaries, so each
+ * holds whole sector heads.
  */
 const scanForTable = async (
   read: EspFlashRead,
-  fileSize: number,
-  origin: number,
+  {
+    fileSize,
+    origin,
+    start,
+  }: { fileSize: number; origin: number; start: number },
   signal?: AbortSignal,
 ): Promise<{ address: number; table: EspPartitionTable } | undefined> => {
-  const skew =
-    (ESP_PARTITION_TABLE_SECTOR_BYTES -
-      (origin % ESP_PARTITION_TABLE_SECTOR_BYTES)) %
-    ESP_PARTITION_TABLE_SECTOR_BYTES;
-  for (let chunk = 0; chunk < fileSize; chunk += SCAN_CHUNK_BYTES) {
-    signal?.throwIfAborted();
-    // One extra byte lets a sector head at the chunk's last byte be checked.
-    const bytes = await read(chunk, SCAN_CHUNK_BYTES + 1);
-    const first =
-      chunk +
-      ((skew -
-        (chunk % ESP_PARTITION_TABLE_SECTOR_BYTES) +
-        ESP_PARTITION_TABLE_SECTOR_BYTES) %
-        ESP_PARTITION_TABLE_SECTOR_BYTES);
-    for (
-      let position = first;
-      position < chunk + SCAN_CHUNK_BYTES && position < fileSize;
-      position += ESP_PARTITION_TABLE_SECTOR_BYTES
-    ) {
-      const at = position - chunk;
-      if (bytes[at] !== MAGIC_LOW || bytes[at + 1] !== MAGIC_HIGH) continue;
-      const decoded = await tableAt(read, position);
-      if (decoded.ok && decoded.value.md5.status === "valid")
-        return { address: origin + position, table: decoded.value };
+  const sector = ESP_PARTITION_TABLE_SECTOR_BYTES;
+  // The file offset of the first sector boundary at or after `start`.
+  const boundary = (sector - (origin % sector)) % sector;
+  let position =
+    start <= boundary
+      ? boundary
+      : boundary + Math.ceil((start - boundary) / sector) * sector;
+  let chunkStart = position;
+  let bytes: Uint8Array = new Uint8Array(0);
+  for (; position < fileSize; position += sector) {
+    if (position - chunkStart + 2 > bytes.length) {
+      signal?.throwIfAborted();
+      chunkStart = position;
+      bytes = await read(position, SCAN_CHUNK_BYTES);
     }
+    const at = position - chunkStart;
+    if (bytes[at] !== MAGIC_LOW || bytes[at + 1] !== MAGIC_HIGH) continue;
+    const decoded = await tableAt(read, position);
+    if (decoded.ok && decoded.value.md5.status === "valid")
+      return { address: origin + position, table: decoded.value };
   }
   return undefined;
 };
@@ -96,10 +98,12 @@ const scanForTable = async (
 /**
  * Locate the bootloader and partition table: the caller's table offset
  * when given, else the default `0x8000`, else a scan of 0x1000-aligned
- * flash sectors for an MD5-verified table (a derived location). The scan
- * runs only when a bootloader sits at its chip's ROM offset or the caller
- * selected this format, and never when a bootloader at another chip's ROM
- * offset says the dump's origin is wrong.
+ * flash sectors for an MD5-verified table (a derived location). A table
+ * never lies inside the located bootloader image. The scan runs only when a
+ * bootloader sits at its chip's ROM offset or the caller selected this
+ * format. Without a caller table offset, an ESP8266 image at a ROM offset
+ * refuses the dump, and a known chip's image at another chip's ROM offset
+ * refuses it as read from the wrong flash offset, given or default.
  */
 export const locateEspFlashLayout = async (
   fileSize: number,
@@ -125,6 +129,15 @@ export const locateEspFlashLayout = async (
     ),
   );
   const bootloader = locateEspBootloader(probes);
+  // Without a bootloader, nothing in the dump confirms a default origin.
+  const unconfirmed =
+    bootloader.location === undefined &&
+    !bootloader.misplaced &&
+    origin.source === "default"
+      ? [
+          `No bootloader at a ROM offset confirms that the dump starts at flash ${offsetText(origin.value)}; each partition's file offset assumes it. Pass flash_offset if the dump starts elsewhere.`,
+        ]
+      : [];
   const located = (
     tableAddress: number,
     tableMethod: EspPartitionTableMethod,
@@ -136,7 +149,7 @@ export const locateEspFlashLayout = async (
       tableAddress,
       tableMethod,
       table,
-      limitations: bootloader.limitations,
+      limitations: [...bootloader.limitations, ...unconfirmed],
     });
   const fileOffsetOf = (address: number): number => address - origin.value;
   if (selection.partitionTableOffset !== undefined) {
@@ -152,8 +165,24 @@ export const locateEspFlashLayout = async (
           `no partition table at the given offset ${offsetText(address)}: ${decoded.error}`,
         );
   }
+  if (bootloader.location === undefined && bootloader.esp8266)
+    return err(ESP8266_REFUSAL);
+  // A table found at an origin the bootloader contradicts would place every
+  // partition at the wrong file offset.
+  if (bootloader.location === undefined && bootloader.misplaced)
+    return err(
+      `${bootloader.limitations.join(" ")} Pass the flash_offset where the dump starts, or partition_table_offset`,
+    );
+  const imageEnd =
+    bootloader.location === undefined
+      ? 0
+      : await espImageSegmentsEnd(
+          read,
+          bootloader.location.fileOffset,
+          fileSize,
+        );
   const defaultOffset = fileOffsetOf(ESP_PARTITION_TABLE_DEFAULT_OFFSET);
-  if (defaultOffset >= 0 && defaultOffset < fileSize) {
+  if (defaultOffset >= imageEnd && defaultOffset < fileSize) {
     const decoded = await tableAt(read, defaultOffset);
     if (decoded.ok)
       return located(
@@ -162,20 +191,21 @@ export const locateEspFlashLayout = async (
         decoded.value,
       );
   }
-  const misplaced =
-    bootloader.location === undefined && bootloader.limitations.length > 0;
-  if (misplaced && selection.flashOffset === undefined)
-    return err(
-      `no partition table at ${offsetText(ESP_PARTITION_TABLE_DEFAULT_OFFSET)}, and ${bootloader.limitations.join(" ")} Pass flash_offset to read the dump from another flash address`,
-    );
   if (bootloader.location === undefined && !explicit)
     return err(
-      `no partition table at ${offsetText(ESP_PARTITION_TABLE_DEFAULT_OFFSET)} and no bootloader at a ROM offset`,
+      [
+        `no partition table at ${offsetText(ESP_PARTITION_TABLE_DEFAULT_OFFSET)} and no bootloader at a ROM offset`,
+        ...bootloader.limitations,
+      ].join("; "),
     );
-  const scanned = await scanForTable(read, fileSize, origin.value, signal);
+  const scanned = await scanForTable(
+    read,
+    { fileSize, origin: origin.value, start: imageEnd },
+    signal,
+  );
   return scanned === undefined
     ? err(
-        `no partition table at ${offsetText(ESP_PARTITION_TABLE_DEFAULT_OFFSET)} or in any 0x1000-aligned flash sector with a verified MD5; flash encryption is one cause`,
+        `no partition table at ${offsetText(ESP_PARTITION_TABLE_DEFAULT_OFFSET)} or in any 0x1000-aligned flash sector${bootloader.location === undefined ? "" : " after the bootloader image"} with a verified MD5; flash encryption is one cause`,
       )
     : located(scanned.address, "scan", scanned.table);
 };

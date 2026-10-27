@@ -265,15 +265,17 @@ export class EspFlashImageArtifactReader implements ArtifactReader {
     context: EspFlashReadContext,
     plan: EspFlashPlan,
   ): Promise<EspFlashLayoutFacts> {
-    const record = (position: number) =>
-      readEspFlashRange(context, position, ESP_OTA_SELECT_ENTRY_BYTES);
-    const otadataRecords =
-      plan.otadata === undefined
-        ? undefined
-        : ([
-            await record(plan.otadata.records[0]),
-            await record(plan.otadata.records[1]),
-          ] as const);
+    const otadataRecords: (Uint8Array | undefined)[] = [];
+    for (const { fileOffset, available } of plan.otadata?.records ?? [])
+      otadataRecords.push(
+        available
+          ? await readEspFlashRange(
+              context,
+              fileOffset,
+              ESP_OTA_SELECT_ENTRY_BYTES,
+            )
+          : undefined,
+      );
     const gapFirstUnerased: (number | undefined)[] = [];
     for (const gap of plan.gaps) {
       this.#assertOpen(context.signal);
@@ -426,10 +428,13 @@ const layoutMetadata = (
         : {
             ...facts.otadata,
             records: facts.otadata.records.map((record) => ({ ...record })),
-            selected: {
-              ...facts.otadata.selected,
-              assumptions: [...facts.otadata.selected.assumptions],
-            },
+            selected:
+              facts.otadata.selected === null
+                ? null
+                : {
+                    ...facts.otadata.selected,
+                    assumptions: [...facts.otadata.selected.assumptions],
+                  },
           },
     undescribed: [...facts.undescribed],
   };
