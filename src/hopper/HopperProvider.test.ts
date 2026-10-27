@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../config/parseConfig.js";
 import { silentLogger } from "../logger.js";
 import { ok } from "../domain/result.js";
+import { hopperDeclinedArchitectureReason } from "./HopperAnalysisProfile.js";
 import { HopperClient } from "./HopperClient.js";
 import { HopperProvider } from "./HopperProvider.js";
 
@@ -77,7 +78,7 @@ describe("Hopper provider capabilities", () => {
       reason: expect.stringContaining("Ghidra"),
     });
   });
-  it("declines Hexagon targets with a Ghidra-directed reason", () => {
+  it("declines Hexagon targets toward Ghidra without claiming a verified lane", () => {
     const config = parseConfig({});
     if (!config.ok) throw new Error("expected valid configuration");
     const provider = new HopperProvider(config.value, silentLogger, {});
@@ -89,14 +90,17 @@ describe("Hopper provider capabilities", () => {
       architecture: "hexagon",
       availableArchitectures: ["hexagon"],
     });
-    expect(support).toMatchObject({
-      status: "unsupported",
-      code: "architecture_unsupported",
-      reason: expect.stringContaining("Hexagon"),
-    });
-    if (support.status === "unsupported") {
-      expect(support.reason).toContain("Ghidra");
-    }
+    if (support.status !== "unsupported") throw new Error("Expected a refusal");
+    expect(support.code).toBe("architecture_unsupported");
+    expect(support.reason).toContain("hexagon");
+    expect(support.reason).toContain("Ghidra");
+    expect(support.reason).toContain("not verified");
+  });
+  it("keeps the verified Ghidra pointer for a family whose lane is verified", () => {
+    const reason = hopperDeclinedArchitectureReason("mips");
+    expect(reason).toContain("mips");
+    expect(reason).toContain("Ghidra");
+    expect(reason).not.toContain("not verified");
   });
   it("declines thin arm64_32 Mach-O targets without a verified lane", () => {
     const config = parseConfig({});

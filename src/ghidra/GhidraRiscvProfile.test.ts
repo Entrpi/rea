@@ -257,7 +257,7 @@ const registerRiscvAdmissionAndCapabilityCases = () => {
       expect.objectContaining({
         ok: false,
         error: expect.objectContaining({
-          message: expect.stringContaining("RISC-V"),
+          message: expect.stringContaining("riscv"),
         }),
       }),
     );
