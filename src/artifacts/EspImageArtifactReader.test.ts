@@ -1,13 +1,13 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 
 import { EspImageArtifactReader } from "./EspImageArtifactReader.js";
 import { ArtifactResourceScope } from "./ArtifactResourceScope.js";
 import type { ArtifactEntry } from "./ArtifactReader.js";
 import { extractArtifact } from "./extraction/ArtifactExtraction.js";
-import { ESP8266_REFUSAL } from "../domain/firmware/espImage.js";
+import * as espImageDecoding from "../domain/firmware/espImage.js";
 import {
   ESP32C3_APP_SEGMENTS,
   esp8266Image,
@@ -207,7 +207,7 @@ it("refuses an ESP8266 image with its specific reason", async () => {
   try {
     await expect(list(reader)).rejects.toMatchObject({
       reason: "unavailable",
-      message: ESP8266_REFUSAL,
+      message: espImageDecoding.ESP8266_REFUSAL,
     });
   } finally {
     await reader.close();
@@ -291,22 +291,58 @@ it.each(["cancel", "close"] as const)(
     const controller = new AbortController();
     const reason = { stage: "decoding" };
     let completion: Promise<void> | undefined;
+    // The decoder acknowledges its first chunk, so the request arrives while
+    // decoding is active rather than while the file is still being admitted.
+    let decoded = 0;
+    let acknowledge = (): void => undefined;
+    const decoding = new Promise<void>((resolve) => {
+      acknowledge = resolve;
+    });
+    const create = espImageDecoding.createEspImageDecoder;
+    const observer = vi
+      .spyOn(espImageDecoding, "createEspImageDecoder")
+      .mockImplementation((size) => {
+        const decoder = create(size);
+        return {
+          write: (chunk) => {
+            decoder.write(chunk);
+            decoded += 1;
+            acknowledge();
+          },
+          get satisfied() {
+            return decoder.satisfied;
+          },
+          finish: () => decoder.finish(),
+        };
+      });
     try {
       const pending = reader
         .entries(controller.signal)
         [Symbol.asyncIterator]()
         .next();
-      setImmediate(() => {
-        if (action === "cancel") controller.abort(reason);
-        else completion = reader.close();
-      });
+      await Promise.race([
+        decoding,
+        pending.then(() => {
+          throw new Error("Preparation settled before decoding began");
+        }),
+      ]);
+      const requestedAt = decoded;
+      if (action === "cancel") controller.abort(reason);
+      else completion = reader.close();
       await expect(pending).rejects.toMatchObject(
         action === "cancel"
           ? { reason: "cancelled", cause: reason }
           : { reason: "unavailable" },
       );
       await completion;
+      // The request stops decoding; no later chunk reaches the decoder.
+      expect(decoded).toBe(requestedAt);
+      await reader.close();
+      await expect(
+        reader.entries()[Symbol.asyncIterator]().next(),
+      ).rejects.toMatchObject({ reason: "unavailable" });
     } finally {
+      observer.mockRestore();
       await reader.close();
     }
   },
