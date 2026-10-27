@@ -1,4 +1,5 @@
 import type { ArchitectureVariant } from "./architectureVariant.js";
+import { err, ok, type Result } from "./result.js";
 
 /**
  * Public AEABI build-attribute tags that REA reads from the file scope of an
@@ -20,6 +21,165 @@ export interface ArmBuildAttributes {
   /** Tag_ABI_VFP_args, how floating-point arguments and results are passed. */
   readonly vfpArgs: number | null;
 }
+
+/** Bound the section read before its declared size can drive allocation. */
+export const ARM_BUILD_ATTRIBUTES_MAX_BYTES = 0x10000;
+
+const FORMAT_VERSION = 0x41;
+const TAG_FILE = 1;
+const TAG_SYMBOL = 3;
+const TAG_CPU_RAW_NAME = 4;
+const TAG_CPU_NAME = 5;
+const TAG_COMPATIBILITY = 32;
+const READ_TAGS: ReadonlyMap<number, keyof ArmBuildAttributes> = new Map(
+  Object.entries(ARM_BUILD_ATTRIBUTE_TAGS).map(([field, tag]) => [
+    tag,
+    field as keyof ArmBuildAttributes,
+  ]),
+);
+
+type Declarations = Record<keyof ArmBuildAttributes, number | null>;
+
+/** Bounded readers over one attribute section, in the containing ELF's byte order. */
+const attributeReader = (bytes: Buffer, littleEndian: boolean) => ({
+  bytes,
+  u32: (offset: number): number =>
+    littleEndian ? bytes.readUInt32LE(offset) : bytes.readUInt32BE(offset),
+  uleb: (
+    offset: number,
+    end: number,
+  ): { readonly value: number; readonly next: number } | undefined => {
+    let value = 0;
+    for (let index = 0; index < 5 && offset + index < end; index += 1) {
+      const byte = bytes[offset + index]!;
+      value += (byte & 0x7f) * 2 ** (7 * index);
+      if ((byte & 0x80) === 0)
+        return value <= 0xffffffff
+          ? { value, next: offset + index + 1 }
+          : undefined;
+    }
+    return undefined;
+  },
+  /** The offset after a NUL-terminated string that ends before `end`. */
+  string: (offset: number, end: number): number | undefined => {
+    const terminator = bytes.indexOf(0, offset);
+    return terminator < 0 || terminator >= end ? undefined : terminator + 1;
+  },
+});
+type AttributeReader = ReturnType<typeof attributeReader>;
+
+/**
+ * Read one attribute at `cursor`; returns the next offset or an error. The
+ * parameter types follow the AEABI: Tag_CPU_raw_name and Tag_CPU_name are
+ * strings, Tag_compatibility is a flag and a vendor name, other tags below 32
+ * are ULEB128 values, and from 32 odd tags are strings and even tags values.
+ */
+const readAttribute = (
+  reader: AttributeReader,
+  cursor: number,
+  end: number,
+  declarations: Declarations,
+): number | string => {
+  const tag = reader.uleb(cursor, end);
+  if (tag === undefined) return "an attribute tag is malformed";
+  if (tag.value <= TAG_SYMBOL)
+    return `attribute tag ${tag.value} is not valid in a scope`;
+  if (
+    tag.value === TAG_CPU_RAW_NAME ||
+    tag.value === TAG_CPU_NAME ||
+    (tag.value > TAG_COMPATIBILITY && tag.value % 2 === 1)
+  )
+    return (
+      reader.string(tag.next, end) ??
+      `attribute tag ${tag.value} has no terminated string`
+    );
+  const value = reader.uleb(tag.next, end);
+  if (value === undefined)
+    return `attribute tag ${tag.value} has a malformed value`;
+  if (tag.value === TAG_COMPATIBILITY)
+    return (
+      reader.string(value.next, end) ??
+      "Tag_compatibility has no terminated vendor name"
+    );
+  const field = READ_TAGS.get(tag.value);
+  if (field === undefined) return value.next;
+  if (declarations[field] !== null)
+    return `attribute tag ${tag.value} is declared more than once`;
+  declarations[field] = value.value;
+  return value.next;
+};
+
+/** Read the scopes of the aeabi subsection; returns an error, or undefined. */
+const readAeabiScopes = (
+  reader: AttributeReader,
+  start: number,
+  end: number,
+  declarations: Declarations,
+): string | undefined => {
+  let cursor = start;
+  while (cursor < end) {
+    const scopeStart = cursor;
+    const scope = reader.uleb(cursor, end);
+    if (scope === undefined || end - scope.next < 4)
+      return "an attribute scope is truncated";
+    if (scope.value !== TAG_FILE)
+      return scope.value > TAG_FILE && scope.value <= TAG_SYMBOL
+        ? "section- and symbol-scoped attributes are not read"
+        : `attribute scope tag ${scope.value} is not defined`;
+    const scopeEnd = scopeStart + reader.u32(scope.next);
+    if (scopeEnd < scope.next + 4 || scopeEnd > end)
+      return "an attribute scope length does not fit its subsection";
+    cursor = scope.next + 4;
+    while (cursor < scopeEnd) {
+      const next = readAttribute(reader, cursor, scopeEnd, declarations);
+      if (typeof next === "string") return next;
+      cursor = next;
+    }
+  }
+  return undefined;
+};
+
+/**
+ * Read the public `aeabi` file-scope declarations of a `.ARM.attributes`
+ * section. Other vendors' subsections are skipped, as the AEABI allows.
+ * Section and symbol scopes, repeated declarations and malformed encodings
+ * fail, so a declaration is never attributed to the whole file by guess.
+ */
+export const parseArmBuildAttributes = (
+  bytes: Buffer,
+  littleEndian: boolean,
+): Result<ArmBuildAttributes, string> => {
+  if (bytes.length === 0 || bytes[0] !== FORMAT_VERSION)
+    return err("the attribute section format version is not A");
+  const reader = attributeReader(bytes, littleEndian);
+  const declarations: Declarations = {
+    cpuArch: null,
+    cpuArchProfile: null,
+    vfpArgs: null,
+  };
+  let publicSeen = false;
+  let position = 1;
+  while (position < bytes.length) {
+    if (bytes.length - position < 4)
+      return err("an attribute subsection length is truncated");
+    const length = reader.u32(position);
+    if (length < 5 || length > bytes.length - position)
+      return err("an attribute subsection length does not fit the section");
+    const end = position + length;
+    const vendorEnd = reader.string(position + 4, end);
+    if (vendorEnd === undefined)
+      return err("an attribute vendor name is not terminated");
+    const vendor = bytes.toString("latin1", position + 4, vendorEnd - 1);
+    position = end;
+    if (vendor !== "aeabi") continue;
+    if (publicSeen)
+      return err("the section has more than one aeabi subsection");
+    publicSeen = true;
+    const failure = readAeabiScopes(reader, vendorEnd, end, declarations);
+    if (failure !== undefined) return err(failure);
+  }
+  return ok(declarations);
+};
 
 /** Tag_CPU_arch_profile value of the microcontroller profile, the character M. */
 export const ARM_CPU_ARCH_PROFILE_M = 0x4d;
