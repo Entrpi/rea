@@ -1,5 +1,6 @@
+import type { Stats } from "node:fs";
 import { constants as fsConstants } from "node:fs";
-import { access, stat } from "node:fs/promises";
+import { access, stat as statPath } from "node:fs/promises";
 import { delimiter, isAbsolute, sep } from "node:path";
 
 import {
@@ -17,19 +18,35 @@ export type ExecutableLookup =
       readonly code: "EACCES" | "EPERM";
       readonly cause: unknown;
     }
-  | { readonly status: "missing"; readonly checked: readonly string[] };
+  | { readonly status: "missing"; readonly checked: readonly string[] }
+  /** The caller's signal or deadline ended the lookup before it finished. */
+  | {
+      readonly status: "interrupted";
+      readonly by: "cancellation" | "deadline";
+    };
+
+/** Optional bounds for one lookup. */
+export interface ExecutableLookupBounds {
+  readonly signal?: AbortSignal | undefined;
+  /** Milliseconds for the whole lookup. */
+  readonly timeoutMs?: number | undefined;
+  readonly stat?: (path: string) => Promise<Stats>;
+}
 
 /**
  * Resolve a command the way process spawning searches for it. A command that
  * contains a path separator is the selected path; PATH search continues past
  * denied directories, and an existing file without execute permission is not
- * a match.
+ * a match. A file-system call cannot itself be cancelled, so an interrupted
+ * lookup stops waiting for it and lets it settle unobserved.
  */
 export const lookupExecutable = async (
   command: string,
   workingDirectory: string,
   searchPath: string | undefined,
+  bounds: ExecutableLookupBounds = {},
 ): Promise<ExecutableLookup> => {
+  const { signal, timeoutMs, stat = statPath } = bounds;
   // Match Node's Unix default search path when PATH is absent. An empty
   // PATH is different: its empty component selects the working directory.
   const directories = (searchPath ?? "/usr/bin:/bin")
@@ -46,30 +63,85 @@ export const lookupExecutable = async (
   const candidates = explicit
     ? [absoluteCallerPath(command, { cwd: workingDirectory })]
     : directories.map((directory) => appendCallerPath(directory, command));
-  const checked: string[] = [];
-  for (const candidate of candidates) {
-    let metadata;
-    try {
-      metadata = await stat(candidate);
-    } catch (cause: unknown) {
-      const code = systemErrorCode(cause);
-      if (explicit && (code === "EACCES" || code === "EPERM"))
-        return { status: "denied", path: candidate, code, cause };
-      checked.push(`${candidate}${systemErrorSuffix(code)}`);
-      continue;
+  const interruption = lookupInterruption(signal, timeoutMs);
+  try {
+    const checked: string[] = [];
+    for (const candidate of candidates) {
+      const metadata = await interruption.race(stat(candidate));
+      if (metadata.status === "interrupted") return metadata;
+      if (metadata.status === "rejected") {
+        const code = systemErrorCode(metadata.cause);
+        if (explicit && (code === "EACCES" || code === "EPERM"))
+          return {
+            status: "denied",
+            path: candidate,
+            code,
+            cause: metadata.cause,
+          };
+        checked.push(`${candidate}${systemErrorSuffix(code)}`);
+        continue;
+      }
+      if (!metadata.value.isFile()) {
+        checked.push(`${candidate} (not a regular file)`);
+        continue;
+      }
+      const executable = await interruption.race(
+        access(candidate, fsConstants.X_OK),
+      );
+      if (executable.status === "interrupted") return executable;
+      if (executable.status === "fulfilled")
+        return { status: "found", path: candidate };
+      checked.push(
+        `${candidate}${systemErrorSuffix(systemErrorCode(executable.cause))}`,
+      );
     }
-    if (!metadata.isFile()) {
-      checked.push(`${candidate} (not a regular file)`);
-      continue;
-    }
-    try {
-      await access(candidate, fsConstants.X_OK);
-      return { status: "found", path: candidate };
-    } catch (cause: unknown) {
-      checked.push(`${candidate}${systemErrorSuffix(systemErrorCode(cause))}`);
-    }
+    return { status: "missing", checked };
+  } finally {
+    interruption.release();
   }
-  return { status: "missing", checked };
+};
+
+type Raced<Value> =
+  | { readonly status: "fulfilled"; readonly value: Value }
+  | { readonly status: "rejected"; readonly cause: unknown }
+  | {
+      readonly status: "interrupted";
+      readonly by: "cancellation" | "deadline";
+    };
+
+/** One deadline and abort listener shared by every file-system call of a lookup. */
+const lookupInterruption = (
+  signal: AbortSignal | undefined,
+  timeoutMs: number | undefined,
+): {
+  readonly race: <Value>(operation: Promise<Value>) => Promise<Raced<Value>>;
+  readonly release: () => void;
+} => {
+  let interrupt: ((by: "cancellation" | "deadline") => void) | undefined;
+  const interrupted = new Promise<"cancellation" | "deadline">((resolve) => {
+    interrupt = resolve;
+  });
+  const cancel = (): void => interrupt?.("cancellation");
+  const timer =
+    timeoutMs === undefined
+      ? undefined
+      : setTimeout(() => interrupt?.("deadline"), timeoutMs);
+  if (signal?.aborted === true) cancel();
+  else signal?.addEventListener("abort", cancel, { once: true });
+  return {
+    race: <Value>(operation: Promise<Value>) =>
+      Promise.race([
+        operation.then(
+          (value): Raced<Value> => ({ status: "fulfilled", value }),
+          (cause: unknown): Raced<Value> => ({ status: "rejected", cause }),
+        ),
+        interrupted.then((by): Raced<Value> => ({ status: "interrupted", by })),
+      ]),
+    release: () => {
+      if (timer !== undefined) clearTimeout(timer);
+      signal?.removeEventListener("abort", cancel);
+    },
+  };
 };
 
 const systemErrorCode = (cause: unknown): string | undefined =>

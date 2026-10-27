@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { expect, it, vi } from "vitest";
@@ -7,10 +7,11 @@ import { expect, it, vi } from "vitest";
 import { OwnedCommandFailure } from "../../src/process/OwnedCommand.js";
 import type { ProviderProcessSupervisor } from "../../src/process/ProviderProcess.js";
 import type { execFileOutput } from "../../src/process/ExecFileOutput.js";
+import { awaitAcknowledgement } from "../fixtures/lifecycleAcknowledgement.js";
 import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
 import { providerSnapshot } from "../support/reverseEngineeringCompositionFixtures.js";
 import { TestReverseEngineeringService } from "../support/reverseEngineeringService.js";
-import { digestFile } from "../../src/application/reverse/ReverseEngineeringService.js";
+import { createReverseEngineeringCommandPort } from "../../src/composition/reverseEngineering.js";
 
 type ExecFileOutputOptions = NonNullable<Parameters<typeof execFileOutput>[2]>;
 
@@ -42,6 +43,36 @@ const runner = (banner: () => string) =>
 
 const probes = (run: ReturnType<typeof runner>) =>
   run.mock.calls.filter(([, args]) => args[0] === "-v").length;
+
+/** Wait for launched work, failing instead of hanging past a bounded deadline. */
+const within = async <Value>(
+  operation: Promise<Value>,
+  boundary: string,
+): Promise<Value> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${boundary} did not settle in time`)),
+          2_000,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+};
+
+/** A gate that a test releases, registered before the work that waits on it. */
+const gate = () => {
+  let open: (() => void) | undefined;
+  const opened = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { opened, open: () => open?.() };
+};
 
 // The selected executable is a POSIX mode-0755 file; Windows resolves
 // REA_RIZIN_COMMAND separately and is not covered here.
@@ -128,7 +159,7 @@ posix.each([
 );
 
 posix(
-  "still runs the command when the version probe fails, and reuses that result",
+  "keeps a failed probe's exit and output, runs the command, and reuses that result",
   async () => {
     const { executable, path } = await fixture();
     const run = vi.fn(
@@ -138,7 +169,12 @@ posix(
         _options?: ExecFileOutputOptions,
       ) => {
         if (args[0] === "-v")
-          throw Object.assign(new Error("probe exited"), { code: 2 });
+          throw Object.assign(new Error("probe exited"), {
+            code: 2,
+            signal: null,
+            stdout: "usage: tool [options]\n",
+            stderr: "unknown option -v\n",
+          });
         return { stdout: "command output", stderr: "" };
       },
     );
@@ -154,29 +190,34 @@ posix(
         name: "Rizin",
         version: null,
       });
+      expect(result.value.parameters).toMatchObject({
+        provider_executable_path: executable,
+        provider_version_probe: {
+          exit_code: 2,
+          signal: null,
+          stdout: "usage: tool [options]\n",
+          stderr: "unknown option -v\n",
+          output_truncated: false,
+        },
+      });
       expect(result.value.parameters).not.toHaveProperty(
         "provider_version_banner",
       );
-      expect(result.value.limitations).toEqual(
-        expect.arrayContaining([expect.stringContaining("(-v) failed (2)")]),
-      );
+      expect(result.value.raw_result).toMatchObject({
+        stdout: "command output",
+      });
     }
     expect(probes(run)).toBe(1);
   },
 );
 
 posix(
-  "shares one probe between concurrent calls and keeps it for the caller that still waits",
+  "runs each caller's probe under its own deadline and cancellation",
   async () => {
     const { executable, path } = await fixture();
-    let started: (() => void) | undefined;
-    const running = new Promise<void>((resolveRunning) => {
-      started = resolveRunning;
-    });
-    let releaseProbe: (() => void) | undefined;
-    const release = new Promise<void>((resolveRelease) => {
-      releaseProbe = resolveRelease;
-    });
+    const firstStarted = gate();
+    const secondStarted = gate();
+    const release = gate();
     const run = vi.fn(
       async (
         _command: string,
@@ -184,51 +225,179 @@ posix(
         options?: ExecFileOutputOptions,
       ) => {
         if (args[0] !== "-v") return { stdout: "command output", stderr: "" };
-        started?.();
-        await release;
-        if (options?.signal?.aborted === true)
+        (probes(run) === 1 ? firstStarted : secondStarted).open();
+        const signal = options?.signal;
+        const aborted = new Promise<"aborted">((resolve) => {
+          if (signal?.aborted === true) resolve("aborted");
+          signal?.addEventListener("abort", () => resolve("aborted"), {
+            once: true,
+          });
+        });
+        if ((await Promise.race([release.opened, aborted])) === "aborted")
           throw Object.assign(new Error("aborted"), { code: "ABORT_ERR" });
         return { stdout: "rizin 0.9.1 @ linux-x86-64", stderr: "" };
       },
     );
-    // The second caller joins the shared probe right after it hashes the
-    // executable; a macrotask after that hash proves it is waiting.
-    let executableDigests = 0;
-    let joined: (() => void) | undefined;
-    const waiting = new Promise<void>((resolveWaiting) => {
-      joined = resolveWaiting;
-    });
     const service = new TestReverseEngineeringService({
       run,
       environment: { REA_RIZIN_COMMAND: executable },
-      digest: async (target, ...rest) => {
-        const value = await digestFile(target, ...rest);
-        if (target === executable && ++executableDigests === 2)
-          setImmediate(() => joined?.());
-        return value;
+    });
+    const leaving = new AbortController();
+    const pending: Promise<unknown>[] = [];
+    try {
+      const first = service.executeRizinCommand(
+        { path, command: "iI", command_timeout_ms: 1_234 },
+        { signal: leaving.signal },
+      );
+      pending.push(first);
+      await awaitAcknowledgement(firstStarted.opened, first, "first probe");
+      const second = service.executeRizinCommand({
+        path,
+        command: "iS",
+        command_timeout_ms: 5_678,
+      });
+      pending.push(second);
+      await awaitAcknowledgement(secondStarted.opened, second, "second probe");
+      leaving.abort("first caller left");
+      const left = await within(first, "cancelled first call");
+      if (left.ok) throw new Error("Expected the first caller to be cancelled");
+      expect(left.error._tag).toBe("AnalysisCancelledError");
+      expect(left.error.cause).toBe("first caller left");
+      release.open();
+      const kept = await within(second, "second call");
+      if (!kept.ok) throw kept.error;
+      expect(kept.value.provider.version).toBe("0.9.1");
+      const probeCalls = run.mock.calls.filter(([, args]) => args[0] === "-v");
+      expect(probeCalls.map(([, , options]) => options?.timeout)).toEqual([
+        1_234, 5_678,
+      ]);
+      expect(probeCalls[0]?.[2]?.signal).not.toBe(probeCalls[1]?.[2]?.signal);
+      // The completed probe is reused; the cancelled one was never kept.
+      const reused = await within(
+        service.executeRizinCommand({ path, command: "iz" }),
+        "reusing call",
+      );
+      if (!reused.ok) throw reused.error;
+      expect(probes(run)).toBe(2);
+    } finally {
+      release.open();
+      leaving.abort("test cleanup");
+      await Promise.allSettled(pending);
+      await service.close();
+    }
+  },
+);
+
+posix("keys completed probes by launch path as well as digest", async () => {
+  const { executable, path } = await fixture();
+  const other = join(dirname(executable), "other");
+  await mkdir(other);
+  const twin = join(other, "rizin");
+  await writeFile(twin, await readFile(executable), { mode: 0o755 });
+  const run = vi.fn(
+    async (
+      command: string,
+      args: readonly string[],
+      _options?: ExecFileOutputOptions,
+    ) => ({
+      stdout:
+        args[0] !== "-v"
+          ? "command output"
+          : command === twin
+            ? "rizin 0.8.0 @ linux-x86-64"
+            : "rizin 0.9.1 @ linux-x86-64",
+      stderr: "",
+    }),
+  );
+  // One service, so its cache spans the calls; each call selects a launcher.
+  let selected = executable;
+  const service = new TestReverseEngineeringService({
+    run,
+    commands: {
+      objdump: (input) =>
+        createReverseEngineeringCommandPort({}).objdump(input),
+      rizin: (input) =>
+        createReverseEngineeringCommandPort({
+          REA_RIZIN_COMMAND: selected,
+        }).rizin(input),
+    },
+  });
+  const versions: unknown[] = [];
+  try {
+    for (const launcher of [executable, twin, executable]) {
+      selected = launcher;
+      const result = await service.executeRizinCommand({ path, command: "iI" });
+      if (!result.ok) throw result.error;
+      versions.push(result.value.provider.version);
+    }
+  } finally {
+    await service.close();
+  }
+  expect(versions).toEqual(["0.9.1", "0.8.0", "0.9.1"]);
+  // Byte-identical launchers in different directories are probed apart, and
+  // each launcher's completed probe is reused.
+  expect(
+    run.mock.calls
+      .filter(([, args]) => args[0] === "-v")
+      .map(([command]) => command),
+  ).toEqual([executable, twin]);
+});
+
+posix.each(["cancellation", "deadline"] as const)(
+  "stops a stalled executable lookup on its %s without running anything",
+  async (interruption) => {
+    const { executable, path } = await fixture();
+    const lookupStarted = gate();
+    const release = gate();
+    const run = runner(() => "rizin 0.9.1 @ linux-x86-64");
+    const service = new TestReverseEngineeringService({
+      run,
+      environment: { REA_RIZIN_COMMAND: executable },
+      // Only the executable's lookup stalls, as on an unresponsive PATH mount.
+      stat: async (target) => {
+        if (target === executable) {
+          lookupStarted.open();
+          await release.opened;
+        }
+        return stat(target);
       },
     });
-    const staying = service.executeRizinCommand({ path, command: "iI" });
-    await running;
-    const leaving = new AbortController();
-    const left = service.executeRizinCommand(
-      { path, command: "iS" },
-      { signal: leaving.signal },
-    );
-    await waiting;
-    leaving.abort("second caller left");
-    const leftResult = await left;
-    if (leftResult.ok) throw new Error("Expected the second caller to leave");
-    expect(leftResult.error._tag).toBe("AnalysisCancelledError");
-    expect(leftResult.error.cause).toBe("second caller left");
-    releaseProbe?.();
-    const kept = await staying;
-    if (!kept.ok) throw kept.error;
-    expect(kept.value.provider.version).toBe("0.9.1");
-    expect(probes(run)).toBe(1);
-    expect(run.mock.calls.filter(([, args]) => args[0] !== "-v")).toHaveLength(
-      1,
-    );
+    const caller = new AbortController();
+    const pending: Promise<unknown>[] = [];
+    try {
+      const call = service.executeRizinCommand(
+        {
+          path,
+          command: "iI",
+          ...(interruption === "deadline" ? { command_timeout_ms: 50 } : {}),
+        },
+        { signal: caller.signal },
+      );
+      pending.push(call);
+      await awaitAcknowledgement(
+        lookupStarted.opened,
+        call,
+        "executable lookup",
+      );
+      if (interruption === "cancellation") caller.abort("stop the lookup");
+      const result = await within(call, "interrupted call");
+      if (result.ok) throw new Error("Expected the lookup to be interrupted");
+      expect(result.error._tag).toBe(
+        interruption === "cancellation"
+          ? "AnalysisCancelledError"
+          : "AnalysisTimeoutError",
+      );
+      if (interruption === "cancellation")
+        expect(result.error.cause).toBe("stop the lookup");
+      expect(run).not.toHaveBeenCalled();
+      // Closing does not wait for the abandoned file-system call.
+      await within(service.close(), "service close");
+    } finally {
+      release.open();
+      caller.abort("test cleanup");
+      await Promise.allSettled(pending);
+      await service.close();
+    }
   },
 );
 
@@ -260,6 +429,7 @@ posix(
     if (result.ok) throw new Error("Expected cancellation");
     expect(result.error._tag).toBe("AnalysisCancelledError");
     expect(result.error.cause).toBe(reason);
+    expect(result.error.diagnostics).toMatchObject({ phase: "version_probe" });
     expect(run).toHaveBeenCalledOnce();
   },
 );

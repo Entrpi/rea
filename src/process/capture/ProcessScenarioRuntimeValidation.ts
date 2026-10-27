@@ -88,6 +88,12 @@ export const resolveExecutable = async (
       lookup.code,
       { cause: lookup.cause },
     );
+  // An unbounded lookup cannot be interrupted.
+  if (lookup.status === "interrupted")
+    throw invalidScenarioPath(
+      "executable",
+      `executable lookup was interrupted: ${command}`,
+    );
   throw invalidScenarioPath(
     "executable",
     `executable could not be resolved: ${command}; checked ${lookup.checked.join("; ")}`,

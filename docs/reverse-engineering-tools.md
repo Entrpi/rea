@@ -89,17 +89,19 @@ rea debug-with-rizin --inferior-tty /dev/pts/7 ./program dr
 rea execute-rizin-command ./program iI
 ```
 
-Before the first one-shot command for each executable digest, REA resolves the
-selected executable through `PATH`, hashes it, runs that file with `-v` and
-reads the tool and version from its banner. The command then runs the same
-file. Evidence records the tool and version as the provider name and version,
-and records the executable path, its SHA-256 and the banner line in its
-parameters. A different tool that accepts the same arguments, such as radare2,
-still runs: its Evidence names that tool and adds a limitation. A probe that
-fails, times out or prints an unrecognized banner leaves the version unknown,
-and the command still runs. The probe uses the call's `command_timeout_ms`
-budget, and its result, including a failure, is reused for that digest for the
-life of the server process.
+Before a one-shot command, REA resolves the selected executable through `PATH`,
+hashes it, runs that file with `-v` and reads the tool and version from its
+banner. The command then runs the same file. Evidence records the tool and
+version as the provider name and version, and records the executable path, its
+SHA-256 and the banner line in its parameters. A different tool that accepts
+the same arguments, such as radare2, still runs: its Evidence names that tool
+and adds a limitation. A probe that fails, times out or prints an unrecognized
+banner leaves the version unknown, and the command still runs; a failed probe's
+exit status and bounded output are recorded in `provider_version_probe`. Each
+call's probe uses that call's `command_timeout_ms` budget and cancellation. A
+completed probe (a banner, a non-zero exit or a timeout) is reused for the same
+resolved path and SHA-256 for the life of the server process; a cancelled probe
+is not.
 
 Captured stdout and stderr are retained up to a 16 MiB combined limit; `output_truncated` marks output beyond that limit. One-shot commands use the `command_timeout_ms` budget described above. That 16 MiB cap has no runtime override.
 

@@ -39,6 +39,7 @@ import type {
   ReverseEngineeringProviderCommand,
 } from "./ReverseEngineeringCommandPort.js";
 import {
+  execFileFailureCapturedOutput,
   execFileOutput,
   execFileOutputFailure,
 } from "../../process/ExecFileOutput.js";
@@ -125,10 +126,12 @@ export class ReverseEngineeringService {
     AbortController,
     Promise<Result<Evidence, AnalysisError>>
   >();
-  /** Settled version-probe readings, including failures, by executable digest. */
-  readonly #versionProbes = new Map<string, VersionProbeReading>();
-  /** One shared version probe per executable digest while it runs. */
-  readonly #versionProbeFlights = new Map<string, VersionProbeFlight>();
+  /**
+   * Completed version probes (a banner, a non-zero exit or a timeout), keyed
+   * by the resolved launch path and that file's digest. Cancelled probes and
+   * probes whose cleanup is incomplete are not kept.
+   */
+  readonly #versionProbes = new Map<string, CompletedVersionProbe>();
   #closing = false;
   #closePromise: Promise<void> | undefined;
 
@@ -208,9 +211,6 @@ export class ReverseEngineeringService {
     const active = [...this.#activeOperations.entries()];
     for (const [controller] of active) controller.abort();
     await Promise.allSettled(active.map(([, operation]) => operation));
-    const flights = [...this.#versionProbeFlights.values()];
-    for (const flight of flights) flight.controller.abort();
-    await Promise.allSettled(flights.map((flight) => flight.outcome));
 
     const cleanup = await this.retryCleanup();
     if (!cleanup.ok) throw cleanup.error;
@@ -836,9 +836,11 @@ export class ReverseEngineeringService {
   }
 
   /**
-   * Read the selected executable's version banner once per digest and run that
-   * same file. A tool that cannot be identified still runs; only cancellation
-   * and a probe whose process cleanup remains incomplete stop the command.
+   * Resolve, hash and identify the selected executable, then run that same
+   * file. A completed probe is reused for the same launch path and digest. A
+   * tool that cannot be identified still runs; only cancellation, the call's
+   * deadline and a probe whose process cleanup remains incomplete stop the
+   * command.
    */
   async #identifyProvider(
     operation: ReverseEngineeringOperation,
@@ -866,7 +868,17 @@ export class ReverseEngineeringService {
       profile.executable,
       process.cwd(),
       environment.PATH,
+      { signal, timeoutMs, stat: this.#stat },
     );
+    if (lookup.status === "interrupted")
+      return err(
+        lookup.by === "cancellation"
+          ? new AnalysisCancelledError(operation, { cause: signal?.reason })
+          : new AnalysisTimeoutError(operation, timeoutMs, {
+              diagnostics: { phase: "executable_lookup" },
+              ...reverseCommandTimeoutGuidance(timeoutMs),
+            }),
+      );
     // The command launch reports an executable that cannot be selected.
     if (lookup.status !== "found")
       return ok(unidentified("the executable could not be located"));
@@ -891,50 +903,35 @@ export class ReverseEngineeringService {
       provider_executable_path: lookup.path,
       provider_executable_sha256: sha256,
     };
-    const reading =
-      this.#versionProbes.get(sha256) ??
-      (await this.#awaitVersionProbe(
-        sha256,
-        (probeSignal) =>
-          this.#runVersionProbe(
-            lookup.path,
-            probe,
-            environment,
-            timeoutMs,
-            probeSignal,
-          ),
+    const key = `${lookup.path}\0${sha256}`;
+    let completed = this.#versionProbes.get(key);
+    if (completed === undefined) {
+      const outcome = await this.#runVersionProbe(
+        operation,
+        lookup.path,
+        probe,
+        environment,
         signal,
-      ));
-    if (reading.status === "cancelled")
-      return err(
-        this.#registerCleanupFailure(
-          new AnalysisCancelledError(operation, {
-            cause: signal?.aborted === true ? signal.reason : reading.cause,
-            ...ownedCleanupOptions(reading.failure),
-          }),
-          reading.failure?.cleanupOwner,
-        ),
+        timeoutMs,
       );
-    if (reading.status === "cleanup-incomplete")
-      return err(
-        this.#registerCleanupFailure(
-          new AnalysisOutputError(
-            operation,
-            "The provider version probe's process cleanup remains incomplete.",
-            { cause: reading.failure, ...ownedCleanupOptions(reading.failure) },
-          ),
-          reading.failure.cleanupOwner,
-        ),
-      );
-    if (reading.status === "failed")
+      if (!outcome.ok) return outcome;
+      completed = outcome.value;
+      if (completed.status !== "unfinished")
+        this.#versionProbes.set(key, completed);
+    }
+    if (completed.status !== "read")
       return ok(
         unidentified(
-          `its version probe (${probe.arguments.join(" ")}) failed${reading.code === undefined ? "" : ` (${String(reading.code)})`}`,
+          `its version probe (${probe.arguments.join(" ")}) ${
+            completed.status === "timed-out"
+              ? "reached the command deadline"
+              : "did not complete successfully"
+          }`,
           lookup.path,
-          parameters,
+          { ...parameters, provider_version_probe: completed.diagnostics },
         ),
       );
-    const { identification } = reading;
+    const { identification } = completed;
     const banner = `its ${probe.arguments.join(" ")} banner`;
     return ok({
       executable: lookup.path,
@@ -953,66 +950,18 @@ export class ReverseEngineeringService {
   }
 
   /**
-   * Join the probe already running for this digest, or start it. A caller that
-   * stops waiting cancels the probe only when no other caller still needs it,
-   * and then waits for its process cleanup to settle.
+   * Run one version probe under the call's deadline and cancellation. Its
+   * output stays separate from the command's; a failed probe keeps bounded
+   * diagnostics.
    */
-  async #awaitVersionProbe(
-    sha256: string,
-    start: (signal: AbortSignal) => Promise<VersionProbeReading>,
-    signal: AbortSignal | undefined,
-  ): Promise<VersionProbeReading> {
-    let flight = this.#versionProbeFlights.get(sha256);
-    if (flight === undefined) {
-      const controller = new AbortController();
-      const outcome = start(controller.signal).then((reading) => {
-        this.#versionProbeFlights.delete(sha256);
-        // Readings and failures are reused; cancellation and retained
-        // cleanup leave the next call to probe again.
-        if (reading.status === "read" || reading.status === "failed")
-          this.#versionProbes.set(sha256, reading);
-        return reading;
-      });
-      flight = { controller, outcome, waiters: 0 };
-      this.#versionProbeFlights.set(sha256, flight);
-    }
-    const joined = flight;
-    joined.waiters += 1;
-    let stop: (() => void) | undefined;
-    const stopped = new Promise<"stopped">((resolveStopped) => {
-      if (signal?.aborted === true) resolveStopped("stopped");
-      else {
-        stop = () => resolveStopped("stopped");
-        signal?.addEventListener("abort", stop, { once: true });
-      }
-    });
-    let first: VersionProbeReading | "stopped";
-    try {
-      first = await Promise.race([joined.outcome, stopped]);
-    } finally {
-      if (stop !== undefined) signal?.removeEventListener("abort", stop);
-      joined.waiters -= 1;
-    }
-    if (first !== "stopped") return first;
-    if (joined.waiters > 0)
-      return { status: "cancelled", cause: signal?.reason };
-    joined.controller.abort(signal?.reason);
-    const settled = await joined.outcome;
-    return settled.status === "cleanup-incomplete"
-      ? { status: "cancelled", cause: signal?.reason, failure: settled.failure }
-      : settled.status === "cancelled"
-        ? settled
-        : { status: "cancelled", cause: signal?.reason };
-  }
-
-  /** Run one version probe under its own lifetime and classify the outcome. */
   async #runVersionProbe(
+    operation: ReverseEngineeringOperation,
     executable: string,
     probe: NonNullable<ReverseEngineeringProviderCommand["versionProbe"]>,
     environment: NodeJS.ProcessEnv,
+    signal: AbortSignal | undefined,
     timeoutMs: number,
-    signal: AbortSignal,
-  ): Promise<VersionProbeReading> {
+  ): Promise<Result<VersionProbeOutcome, AnalysisError>> {
     try {
       const output = await this.#run(executable, probe.arguments, {
         env: environment,
@@ -1021,20 +970,56 @@ export class ReverseEngineeringService {
         stopSignal: "SIGTERM",
         maxBuffer: MAX_COMBINED_OUTPUT_BYTES,
       });
-      return { status: "read", identification: probe.identify(output.stdout) };
+      return ok({
+        status: "read",
+        identification: probe.identify(output.stdout),
+      });
     } catch (cause) {
-      const code =
-        execFileOutputFailure(cause)?.code ?? commandFailureCode(cause);
-      const failure = cause instanceof OwnedOutputFailure ? cause : undefined;
+      const capture = execFileOutputFailure(cause);
+      const code = capture?.code ?? commandFailureCode(cause);
+      const cleanupOwner =
+        cause instanceof OwnedOutputFailure ? cause.cleanupOwner : undefined;
+      const probeOutput = {
+        diagnostics: {
+          phase: "version_probe",
+          arguments: [...probe.arguments],
+        },
+        ...(capture === undefined
+          ? {}
+          : { capturedOutput: execFileFailureCapturedOutput(capture) }),
+        ...ownedCleanupOptions(cause),
+      };
       if (commandCancelled(signal, cause, code ?? undefined))
-        return {
-          status: "cancelled",
-          cause: signal.aborted ? signal.reason : cause,
-          ...(failure?.cleanup === undefined ? {} : { failure }),
-        };
-      if (failure?.cleanup !== undefined)
-        return { status: "cleanup-incomplete", failure };
-      return { status: "failed", code: code ?? undefined };
+        return err(
+          this.#registerCleanupFailure(
+            new AnalysisCancelledError(operation, {
+              cause: callerCancellationCause(signal, cause),
+              ...probeOutput,
+            }),
+            cleanupOwner,
+          ),
+        );
+      if (cause instanceof OwnedOutputFailure && cause.cleanup !== undefined)
+        return err(
+          this.#registerCleanupFailure(
+            new AnalysisOutputError(
+              operation,
+              "The provider version probe's process cleanup remains incomplete.",
+              { cause, ...probeOutput },
+            ),
+            cleanupOwner,
+          ),
+        );
+      const diagnostics = versionProbeDiagnostics(code, capture);
+      // Only an exit or the call's deadline completes a probe; a launch or
+      // collection failure is not a reading of this executable.
+      return ok(
+        code === "ETIMEDOUT"
+          ? { status: "timed-out", diagnostics }
+          : typeof code === "number" || capture?.signal != null
+            ? { status: "failed", diagnostics }
+            : { status: "unfinished", diagnostics },
+      );
     }
   }
 
@@ -1056,29 +1041,48 @@ interface ProviderIdentification {
   readonly parameters: Readonly<Record<string, JsonValue>>;
 }
 
-/** What one version probe established about an executable digest. */
-type VersionProbeReading =
+/** One version probe's outcome; only completed ones are reused. */
+type VersionProbeOutcome =
   | {
       readonly status: "read";
       readonly identification: ProviderToolIdentification;
     }
-  | { readonly status: "failed"; readonly code: string | number | undefined }
   | {
-      readonly status: "cleanup-incomplete";
-      readonly failure: OwnedOutputFailure;
-    }
-  | {
-      readonly status: "cancelled";
-      readonly cause: unknown;
-      readonly failure?: OwnedOutputFailure;
+      readonly status: "failed" | "timed-out" | "unfinished";
+      readonly diagnostics: Readonly<Record<string, JsonValue>>;
     };
+type CompletedVersionProbe = Exclude<
+  VersionProbeOutcome,
+  { readonly status: "unfinished" }
+>;
 
-/** A version probe that callers share while it runs. */
-interface VersionProbeFlight {
-  readonly controller: AbortController;
-  readonly outcome: Promise<VersionProbeReading>;
-  waiters: number;
-}
+// A banner is one line; this keeps a failed probe's diagnostics small in
+// Evidence while showing why it failed.
+const VERSION_PROBE_DIAGNOSTIC_CHARS = 2_048;
+
+/** Bounded exit facts and output of a probe that printed no usable banner. */
+const versionProbeDiagnostics = (
+  code: string | number | null | undefined,
+  capture: ReturnType<typeof execFileOutputFailure>,
+): Readonly<Record<string, JsonValue>> => {
+  const bounded = (text: string): string =>
+    text.length <= VERSION_PROBE_DIAGNOSTIC_CHARS
+      ? text
+      : text.slice(0, VERSION_PROBE_DIAGNOSTIC_CHARS);
+  const stdout = capture?.stdout ?? "";
+  const stderr = capture?.stderr ?? "";
+  return {
+    exit_code: typeof code === "number" ? code : null,
+    signal: capture?.signal ?? null,
+    error_code: typeof code === "string" ? code : null,
+    stdout: bounded(stdout),
+    stderr: bounded(stderr),
+    output_truncated:
+      capture?.outputTruncated === true ||
+      stdout.length > VERSION_PROBE_DIAGNOSTIC_CHARS ||
+      stderr.length > VERSION_PROBE_DIAGNOSTIC_CHARS,
+  };
+};
 
 interface OwnedOutputFailureOptions {
   readonly stdout: string;
