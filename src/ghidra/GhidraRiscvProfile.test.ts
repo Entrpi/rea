@@ -155,6 +155,43 @@ const registerRiscvLanguageCommitmentCases = () => {
       ).toBe(true);
     }
   });
+
+  it("names the pinned RISC-V language when the session readback refuses", async () => {
+    const value = target();
+    const resolved = await ghidra().resolveAnalysisProfile(value);
+    if (!resolved.ok || resolved.value.profile === null)
+      throw new Error("expected a RISC-V profile");
+    const profile = resolved.value.profile;
+    const overridden = await ghidra({
+      REA_GHIDRA_LANGUAGE_ID: "RISCV:LE:64:default",
+    })
+      .createClient(value, profile)
+      .execute("health", {});
+    const foreign = await ghidra()
+      .createClient(
+        {
+          path: "/fixture.elf",
+          sha256: "a".repeat(64),
+          kind: "executable",
+          format: "elf",
+          architecture: "x86_64",
+          availableArchitectures: ["x86_64"],
+        },
+        profile,
+      )
+      .execute("health", {});
+    if (overridden.ok || foreign.ok)
+      throw new Error("expected readback refusals");
+    for (const failed of [overridden, foreign]) {
+      expect(failed.error._tag).toBe("ProviderAdapterError");
+      expect(failed.error.diagnostics?.reason).toEqual(
+        expect.stringContaining("RISCV:LE:64:default"),
+      );
+    }
+    expect(overridden.error.diagnostics?.reason).toEqual(
+      expect.stringContaining("REA_GHIDRA_LANGUAGE_ID"),
+    );
+  });
 };
 
 const registerRiscvAdmissionAndCapabilityCases = () => {
