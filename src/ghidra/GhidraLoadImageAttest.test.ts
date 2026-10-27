@@ -101,6 +101,32 @@ it.each(["dos-mz", "dos-com", "raw-binary"] as const)(
   },
 );
 
+it("names every independently verified format when it declines another", async () => {
+  const { observation } = fixtureRawBinaryLoadImage();
+  const result = await attestGhidraNativeLoadImage({
+    operation: "inspect_native_load_image",
+    target: {
+      path: "/controlled/load-image",
+      sha256: "a".repeat(64),
+      kind: "executable",
+      format: "elf",
+      architecture: "x86_64",
+      availableArchitectures: ["x86_64"],
+    },
+    measured: observation,
+    client: {},
+    mapSessionError: (cause) =>
+      new ProviderAdapterError("ghidra", "inspect_native_load_image", {
+        cause,
+      }),
+  });
+  if (!result.ok) throw result.error;
+  if (result.value.status !== "unsupported")
+    throw new Error("Expected an unsupported load image");
+  for (const format of ["DOS MZ", "DOS COM", "raw-binary", "GameCube DOL"])
+    expect(result.value.reason).toContain(format);
+});
+
 it.each([null, "caller stopped", new Error("caller stopped")])(
   "preserves an already-cancelled caller's reason and measured facts (%s)",
   async (reason) => {

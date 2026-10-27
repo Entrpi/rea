@@ -102,7 +102,7 @@ const compareLoadImage = async (
     const represented = nativeLoadImageSchema.safeParse({
       status: "unsupported",
       reason:
-        "Independent load-image verification currently supports DOS MZ, explicit DOS COM, and caller-supplied raw-binary targets only.",
+        "Independent load-image verification currently supports DOS MZ, explicit DOS COM, caller-supplied raw-binary, and caller-selected GameCube DOL targets only.",
       observations:
         target.format !== "pe" || nativeAotResult === undefined
           ? observations
