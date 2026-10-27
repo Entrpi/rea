@@ -1233,17 +1233,18 @@ source paths, which [Godot PCK archives](godot-pck.md) explains.
 Every occurrence records `entry_kind`, `executable` and `encrypted`, and
 `compare_artifacts` compares them even when content is unavailable. A
 different entry kind or `encrypted` value is a `metadata` change, and a
-different `executable` value is an `executable` change. When either side's
-content is unavailable, the change also includes `availability`. For example,
-REA does not read symlink targets, so a non-executable ZIP member that
-becomes a symlink compares `changed` in `metadata` and `availability`, not
-`unknown`. Declared sizes and integrity digests do not count without
-content: REA compares observed sizes and checks a declared digest against
-observed bytes. For a node-less metadata record with a compared declaration,
-only that declaration, these fields and any recorded ASAR storage decide the
-comparison. Such a record adds `availability` only when a declaration is
-unknown. REA does not compare the record's unread payload or its
-limitations, which describe the observation.
+different `executable` value is an `executable` change. A symlink's own
+permission bits never mark it `executable`, because running a symlink runs
+its target. When either side's content is unavailable, the change also
+includes `availability`. For example, REA does not read symlink targets, so
+a non-executable file that becomes a symlink compares `changed` in
+`metadata` and `availability`, not `unknown`. Declared sizes and integrity
+digests do not count without content: REA compares observed sizes and
+checks a declared digest against observed bytes. For a node-less metadata
+record with a compared declaration, only that declaration, these fields and
+any recorded ASAR storage decide the comparison. Such a record adds
+`availability` only when a declaration is unknown. REA does not compare the
+record's unread payload or its limitations, which describe the observation.
 
 POSIX letter-colon names such as `a:b` remain valid logical
 names; Windows extraction refuses names its filesystem cannot materialize.
