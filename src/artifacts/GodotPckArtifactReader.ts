@@ -291,7 +291,10 @@ export class GodotPckArtifactReader implements ArtifactReader {
     let bytes = 0;
     const check = async (): Promise<void> => {
       if (bytes !== entry.declaredSize)
-        throw formatFailure(`member ended early: ${entry.path}`);
+        throw new ArtifactReaderFailure(
+          "integrity",
+          `Godot PCK entry ended early: ${entry.path}`,
+        );
       await this.#source.read(signal);
     };
     return new Transform({
