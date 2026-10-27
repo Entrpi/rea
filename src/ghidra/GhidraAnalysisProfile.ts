@@ -31,7 +31,12 @@ import {
   ghidraPowerPcLanguage,
   ghidraPowerPcProfileParameters,
 } from "./GhidraPowerPcProfile.js";
-import { ghidraRawBinaryLanguage } from "./GhidraRawBinaryLanguage.js";
+import {
+  GHIDRA_RAW_ENTRY_CONTEXT,
+  ghidraRawBinaryLanguage,
+  ghidraRawProcessorLabels,
+} from "./GhidraRawBinaryLanguage.js";
+import { rawLoadIdentity } from "../domain/rawBinary.js";
 import {
   GHIDRA_GAMECUBE_DOL_LANGUAGE,
   ghidraDolLanguage,
@@ -224,17 +229,41 @@ export const resolveGhidraAnalysisProfile = async (
           ),
         ),
       );
-    const language = ghidraRawBinaryLanguage(target.architecture);
+    const { rawLoad } = target;
+    const language = ghidraRawBinaryLanguage(
+      target.architecture,
+      rawLoad.architectureVariant,
+    );
+    // A legacy-equivalent load commits exactly the parameters it always did.
+    const identity = rawLoadIdentity(rawLoad);
+    const processorLabels = ghidraRawProcessorLabels(
+      rawLoad.architectureVariant,
+    );
     return Promise.resolve(
       ok({
         profile: createProfile({
           ...binaryLoaderPolicy(target, installation),
-          load_image_evidence: "independent-raw-mapping-context-v4",
+          load_image_evidence:
+            identity === undefined
+              ? "independent-raw-mapping-context-v4"
+              : "independent-raw-segments-v1",
           loader: "BinaryLoader",
           language_id: language.languageId,
           compiler_spec_id: language.compilerSpecId,
           language_selection: "caller-supplied-v1",
-          entry_point: target.rawLoad.entryPoint,
+          entry_point: rawLoad.entryPoint,
+          ...(identity === undefined
+            ? {}
+            : { base_address: rawLoad.baseAddress, raw_load: identity }),
+          ...(rawLoad.entryIsaMode === undefined
+            ? {}
+            : {
+                entry_context:
+                  GHIDRA_RAW_ENTRY_CONTEXT[rawLoad.entryIsaMode].commitment,
+              }),
+          ...(processorLabels === undefined
+            ? {}
+            : { processor_labels: processorLabels }),
           entry_seed: "external-entry-and-function-before-analysis-v1",
           ...analyzerParameters,
         }),
@@ -454,6 +483,14 @@ const createGhidraProfile = (
             load_segment: parameters.load_segment ?? null,
             address_coordinates: parameters.address_coordinates ?? null,
             entry_point: parameters.entry_point ?? null,
+            // Resolved values only: the base and the entry's decode context
+            // move coordinates; how the entry was chosen does not.
+            ...(parameters.base_address === undefined
+              ? {}
+              : { base_address: parameters.base_address }),
+            ...(parameters.entry_context === undefined
+              ? {}
+              : { entry_context: parameters.entry_context }),
           }),
         }
       : {}),

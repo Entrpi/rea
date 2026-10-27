@@ -25,13 +25,36 @@ export const GHIDRA_RAW_VARIANT_LANGUAGES = {
   "armv8-m.main": "ARM:LE:32:v8-m",
 } as const satisfies Record<RawArchitectureVariant, string>;
 
-/** Ghidra context register and value that select each entry instruction set. */
+/**
+ * Ghidra context register and value that select each entry instruction set,
+ * and the versioned profile commitment that the entry is seeded with them.
+ */
 export const GHIDRA_RAW_ENTRY_CONTEXT = {
-  thumb: { register: "TMode", value: "0x1" },
+  thumb: {
+    register: "TMode",
+    value: "0x1",
+    commitment: "thumb-tmode-1-before-analysis-v1",
+  },
 } as const satisfies Record<
   RawEntryIsaMode,
-  { readonly register: string; readonly value: string }
+  {
+    readonly register: string;
+    readonly value: string;
+    readonly commitment: string;
+  }
 >;
+
+/**
+ * Profile commitment that a variant load is imported without the language's
+ * default labels. `ARMCortex.pspec` names the vector table at `ram:0x0`-`0x40`
+ * and marks every handler slot an entry, reserved slots included; at a base of
+ * 0 those labels would fall inside the image and over the code after the table.
+ * Admission reads the vector table itself. Undefined keeps the language default.
+ */
+export const ghidraRawProcessorLabels = (
+  variant: RawArchitectureVariant | undefined,
+): "not-applied-v1" | undefined =>
+  variant === undefined ? undefined : "not-applied-v1";
 
 /**
  * Map caller-visible CPU families to generic Ghidra languages with a

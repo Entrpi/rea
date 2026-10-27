@@ -10,7 +10,11 @@ import type { ExecutableFormatHint } from "./dosCom.js";
 import type { JsonValue } from "./jsonValue.js";
 import {
   RAW_ARCHITECTURE_VARIANT_NAMES,
+  RAW_ENTRY_BASES,
+  RAW_ENTRY_ISA_MODES,
+  RAW_ENTRY_ROLES,
   rawArchitectureVariantRow,
+  rawArchitectureVariantSchema,
   type RawArchitectureVariant,
 } from "./rawArchitectureVariant.js";
 import { err, ok, type Result } from "./result.js";
@@ -131,6 +135,71 @@ export const isLegacyRawLoad = (load: RawBinaryLoad): boolean =>
   load.architectureVariant === undefined &&
   load.entrySource.kind === "caller" &&
   load.baseAddress === load.entryPoint;
+
+/** The entry's role and the basis on which admission chose it. */
+export const rawEntryRoleAndBasis = (
+  load: RawBinaryLoad,
+): {
+  readonly role: (typeof RAW_ENTRY_ROLES)[number];
+  readonly basis: (typeof RAW_ENTRY_BASES)[number];
+} =>
+  load.entrySource.kind === "vector-table"
+    ? { role: "reset", basis: "vector-table" }
+    : { role: "entry", basis: "caller" };
+
+/**
+ * Session and snapshot identity of a load that is not legacy-equivalent, from
+ * canonical resolved values: the base, the variant, the vector table Reset was
+ * read from, and the entry's address, instruction set, role and basis. Every
+ * load fact that summaries and Evidence report is here, provenance included,
+ * so a reused session never reports what the current request did not choose.
+ * Spellings are excluded; Evidence parameters keep the caller's. Coordinate
+ * identity is narrower and leaves provenance out. Change `version` whenever the
+ * meaning of these values changes.
+ */
+export const rawLoadIdentitySchema = z.strictObject({
+  version: z.literal(1),
+  base_address: rawBinaryBaseAddressSchema,
+  architecture_variant: rawArchitectureVariantSchema.exactOptional(),
+  vector_table_address: rawBinaryVectorTableAddressSchema.exactOptional(),
+  entries: z
+    .array(
+      z.strictObject({
+        address: rawBinaryEntryPointSchema,
+        isa_mode: z.enum(RAW_ENTRY_ISA_MODES).exactOptional(),
+        role: z.enum(RAW_ENTRY_ROLES),
+        basis: z.enum(RAW_ENTRY_BASES),
+      }),
+    )
+    .min(1),
+});
+export type RawLoadIdentity = z.infer<typeof rawLoadIdentitySchema>;
+
+/** The versioned identity, or undefined for a legacy-equivalent load, whose identity is unchanged. */
+export const rawLoadIdentity = (
+  load: RawBinaryLoad,
+): RawLoadIdentity | undefined =>
+  isLegacyRawLoad(load)
+    ? undefined
+    : {
+        version: 1,
+        base_address: load.baseAddress,
+        ...(load.architectureVariant === undefined
+          ? {}
+          : { architecture_variant: load.architectureVariant }),
+        ...(load.entrySource.kind === "vector-table"
+          ? { vector_table_address: load.entrySource.address }
+          : {}),
+        entries: [
+          {
+            address: load.entryPoint,
+            ...(load.entryIsaMode === undefined
+              ? {}
+              : { isa_mode: load.entryIsaMode }),
+            ...rawEntryRoleAndBasis(load),
+          },
+        ],
+      };
 
 const addressWidth = (architecture: BinaryArchitecture): bigint =>
   architecture === "6502"

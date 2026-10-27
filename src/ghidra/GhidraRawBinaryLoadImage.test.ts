@@ -58,7 +58,7 @@ describe("raw-binary variant Ghidra binding", () => {
         defaultAddressSpace: "ram",
       });
       expect(GHIDRA_RAW_VARIANT_LANGUAGES[variant]).toMatch(/^ARM:LE:32:/u);
-      expect(GHIDRA_RAW_ENTRY_CONTEXT[row.isaMode]).toEqual({
+      expect(GHIDRA_RAW_ENTRY_CONTEXT[row.isaMode]).toMatchObject({
         register: "TMode",
         value: "0x1",
       });

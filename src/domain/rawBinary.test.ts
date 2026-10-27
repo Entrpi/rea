@@ -6,6 +6,8 @@ import { executableFormatHintSchema } from "./dosCom.js";
 import {
   admitRawBinary,
   isLegacyRawLoad,
+  rawLoadIdentity,
+  rawLoadIdentitySchema,
   parseRawBinaryEntryPoint,
   rawBinarySelectionError,
   validateRawBinaryLength,
@@ -15,6 +17,7 @@ import {
   RAW_ARCHITECTURE_VARIANTS,
   type RawArchitectureVariant,
 } from "./rawArchitectureVariant.js";
+import { admittedRawLoad, vectorTableWords } from "./rawBinary.fixture.js";
 
 describe("headerless format hints", () => {
   it("admits dos-com and raw-binary names only", () => {
@@ -511,13 +514,7 @@ describe("raw-binary base address admission", () => {
   });
 });
 
-const vectorWords = (stackPointer: number, reset: number) => {
-  const words = new Uint8Array(8);
-  const view = new DataView(words.buffer);
-  view.setUint32(0, stackPointer, true);
-  view.setUint32(4, reset, true);
-  return words;
-};
+const vectorWords = vectorTableWords;
 
 const vectorTableRead = (
   variant: RawArchitectureVariant,
@@ -775,4 +772,103 @@ describe("raw-binary variant pairing at admission", () => {
       });
     },
   );
+});
+
+describe("raw load identity", () => {
+  const thumbReset = vectorTableWords(0x20005000, 0x080001c5);
+  const reset = (vectorTableAddress?: string, baseAddress = "0x08000000") =>
+    rawLoadIdentity(
+      admittedRawLoad(
+        {
+          architecture: "arm",
+          architectureVariant: "armv7-m",
+          entryPoint: undefined,
+          baseAddress,
+          ...(vectorTableAddress === undefined ? {} : { vectorTableAddress }),
+          fileBytes: 0x200,
+        },
+        thumbReset,
+      ),
+    );
+
+  it("leaves a load without a variant with its earlier identity", () => {
+    expect(
+      rawLoadIdentity(
+        admittedRawLoad({
+          architecture: "arm",
+          entryPoint: "0x08000000",
+          fileBytes: 4,
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("identifies a Reset-derived load by resolved values only", () => {
+    expect(reset()).toEqual({
+      version: 1,
+      base_address: "0x8000000",
+      architecture_variant: "armv7-m",
+      vector_table_address: "0x8000000",
+      entries: [
+        {
+          address: "0x80001c4",
+          isa_mode: "thumb",
+          role: "reset",
+          basis: "vector-table",
+        },
+      ],
+    });
+  });
+
+  it("keeps identity across spellings and provenance", () => {
+    // Base spelling, and an explicit vector table at the default location.
+    expect(reset(undefined, "0x8000000")).toEqual(reset());
+    expect(reset("0x08000000")).toEqual(reset());
+  });
+
+  it("separates vector tables with the same Reset word", () => {
+    // Their initial stack pointers can differ, and results report them.
+    expect(reset("0x08000100")).toEqual({
+      ...reset(),
+      vector_table_address: "0x8000100",
+    });
+  });
+
+  it.each(["armv6-m", "armv7-m", "armv7e-m", "armv8-m.base", "armv8-m.main"])(
+    "keeps the persisted variant name %s readable in snapshots",
+    (name) => {
+      expect(
+        rawLoadIdentitySchema.shape.architecture_variant.safeParse(name)
+          .success,
+      ).toBe(true);
+    },
+  );
+
+  // Session identity covers the reported basis; coordinate identity does not
+  // (see GhidraRawProfileDigest.test.ts).
+  it("separates a caller-named entry from Reset at the same address", () => {
+    const selected = rawLoadIdentity(
+      admittedRawLoad({
+        architecture: "arm",
+        architectureVariant: "armv7-m",
+        baseAddress: "0x8000000",
+        entryPoint: "0x80001c4",
+        fileBytes: 0x200,
+      }),
+    );
+    expect(selected).toEqual({
+      version: 1,
+      base_address: "0x8000000",
+      architecture_variant: "armv7-m",
+      entries: [
+        {
+          address: "0x80001c4",
+          isa_mode: "thumb",
+          role: "entry",
+          basis: "caller",
+        },
+      ],
+    });
+    expect(selected).not.toEqual(reset());
+  });
 });
