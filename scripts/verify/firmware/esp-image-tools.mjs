@@ -155,9 +155,20 @@ export const inspect = async (file) => {
   };
 };
 
+const oracleDescriptorKind = (oracle) => {
+  if (oracle.project !== undefined) return "app";
+  if (oracle.bootloaderVersion !== undefined) return "bootloader";
+  return null;
+};
+
 const assertDescriptorAgrees = (name, oracle, descriptor) => {
+  // Both directions, so a descriptor esptool does not print fails the lane.
+  assert.equal(
+    descriptor?.kind ?? null,
+    oracleDescriptorKind(oracle),
+    `${name} descriptor`,
+  );
   if (oracle.project !== undefined) {
-    assert.equal(descriptor.kind, "app", `${name} descriptor`);
     assert.equal(descriptor.project_name, oracle.project, name);
     assert.equal(descriptor.version, oracle.appVersion, name);
     assert.equal(descriptor.app_elf_sha256, oracle.elfSha256, name);
@@ -170,7 +181,6 @@ const assertDescriptorAgrees = (name, oracle, descriptor) => {
     );
   }
   if (oracle.bootloaderVersion !== undefined) {
-    assert.equal(descriptor.kind, "bootloader", `${name} descriptor`);
     assert.equal(String(descriptor.version), oracle.bootloaderVersion, name);
     assert.equal(descriptor.idf_ver, oracle.idfVer, name);
     assert.equal(descriptor.date_time, oracle.compileTime, name);

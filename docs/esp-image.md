@@ -243,10 +243,11 @@ It needs a Clang with the RISC-V target, `ld.lld` and a Python that can run
 `REA_XTENSA_ESP32_GCC` adds an ESP32 (Xtensa) app built with Espressif's
 `xtensa-esp32-elf-gcc`. Without it the report marks that image as skipped.
 
-The lane ran on macOS arm64 with Node 24.22.1, esptool and espsecure 4.12.0,
-Homebrew Clang and LLD 21.1.8, and `xtensa-esp32-elf-gcc` 14.2.0
-(crosstool-NG esp-14.2.0_20251107). All checks passed for all 13 images. The
-complete run, including the builds and every esptool call, took 13.2 s
-elapsed, 11.1 s user CPU and 1.6 s system CPU, with a 257 MiB peak resident
-set, under `/usr/bin/time -l` with warm caches. esptool v5.6.0, the version
-this reader's layout facts cite, has not been run in the lane.
+The lane ran on macOS arm64 with Node 24.22.1, Homebrew Clang and LLD 21.1.8,
+and `xtensa-esp32-elf-gcc` 14.2.0 (crosstool-NG esp-14.2.0_20251107), once
+with esptool and espsecure v5.6.0 and once with 4.12.0. All checks passed for
+all 13 images in both runs. With v5.6.0 the complete run, including the builds
+and every esptool call, took 12.9 s elapsed, 11.2 s user CPU and 1.6 s system
+CPU under `/usr/bin/time -l` with warm caches. The largest single process
+peaked at a 254 MiB resident set; the combined peak of all processes was not
+measured.
