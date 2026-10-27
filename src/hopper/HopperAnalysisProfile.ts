@@ -213,7 +213,7 @@ const HOPPER_DECLINED_GHIDRA_LANES: Record<
   mips: "verified",
   riscv: "verified",
   powerpc: "verified",
-  xtensa: "unverified",
+  xtensa: "verified",
   hexagon: "unverified",
 };
 
