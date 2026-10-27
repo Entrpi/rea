@@ -1,5 +1,3 @@
-import { Readable, Transform, pipeline } from "node:stream";
-
 import type { EspImageMetadata } from "../domain/artifactFormatMetadata.js";
 import {
   createEspImageDecoder,
@@ -7,18 +5,12 @@ import {
 } from "../domain/firmware/espImage.js";
 import type { EspImage } from "../domain/firmware/espImageFacts.js";
 import { ESP_SIGNATURE_BLOCK_BYTES } from "../domain/firmware/espImageStructures.js";
+import { ArtifactReaderFailure } from "./ArtifactReader.js";
 import {
-  ArtifactReaderFailure,
-  copyArtifactEntry,
-  sameArtifactEntry,
-  type ArtifactEntry,
-  type ArtifactReader,
-  type ArtifactReaderTraversal,
-  type ArtifactTraversalOptions,
-} from "./ArtifactReader.js";
-import { ArtifactResourceScope } from "./ArtifactResourceScope.js";
-import { assertArtifactReadActive } from "./ArtifactFileOperation.js";
-import { ArtifactFileSource } from "./ArtifactFileSource.js";
+  PositionalArtifactReader,
+  type PositionalArtifactEntries,
+  type PositionalArtifactEntry,
+} from "./PositionalArtifactReader.js";
 import { readFileHandleChunks } from "../filesystem/readFileHandleChunks.js";
 import type { StableRegularFileDescriptor } from "../filesystem/RegularFile.js";
 
@@ -29,19 +21,12 @@ const LABEL = "ESP image";
  * Secure Boot v2 signature blocks. Decoding reads the file once; each entry
  * is a positional read of the carrier, rechecked against its identity.
  */
-export class EspImageArtifactReader implements ArtifactReader {
-  readonly format = "esp-image" as const;
-  readonly #scope = new ArtifactResourceScope();
-  readonly #entries = new Map<string, ArtifactEntry>();
-  readonly #streams = new Set<Readable>();
-  readonly #source: ArtifactFileSource;
-  #prepared: Promise<void> | undefined;
+export class EspImageArtifactReader extends PositionalArtifactReader {
+  override readonly format = "esp-image" as const;
   #metadata: EspImageMetadata | undefined;
-  #coverage: ArtifactReaderTraversal | undefined;
-  #closing = false;
 
   constructor(path: string, admitted?: StableRegularFileDescriptor) {
-    this.#source = new ArtifactFileSource(path, LABEL, admitted);
+    super(path, LABEL, admitted);
   }
 
   formatMetadata(): EspImageMetadata | undefined {
@@ -50,118 +35,11 @@ export class EspImageArtifactReader implements ArtifactReader {
       : structuredClone(this.#metadata);
   }
 
-  async prepareContainer(
-    expectedSha256: string,
+  protected override async prepareEntries(
     signal?: AbortSignal,
-  ): Promise<void> {
-    await this.#scope.run(async () => {
-      this.#assertOpen(signal);
-      await this.#source.bindSha256(expectedSha256, signal);
-    });
-  }
-
-  async *entries(
-    signal?: AbortSignal,
-    options?: ArtifactTraversalOptions,
-  ): AsyncIterable<ArtifactEntry> {
-    await this.#scope.run(async () => {
-      this.#assertOpen(signal);
-      this.#prepared ??= this.#prepare(signal);
-      await this.#prepared;
-      await this.#source.read(signal);
-    });
-    if (this.#coverage !== undefined)
-      options?.onCoverage?.({
-        ...this.#coverage,
-        limitations: [...this.#coverage.limitations],
-      });
-    for (const entry of this.#entries.values()) {
-      this.#assertOpen(signal);
-      yield copyArtifactEntry(entry);
-    }
-  }
-
-  async open(entry: ArtifactEntry, signal?: AbortSignal): Promise<Readable> {
-    return this.#scope.run(async () => {
-      this.#assertOpen(signal);
-      const stored = this.#entries.get(entry.adapterKey);
-      if (
-        stored === undefined ||
-        !sameArtifactEntry(entry, stored) ||
-        stored.byteOffset === null ||
-        stored.declaredSize === null
-      )
-        throw new ArtifactReaderFailure(
-          "integrity",
-          `${LABEL} entry does not match its owning inventory`,
-        );
-      const { handle } = await this.#source.read(signal);
-      this.#assertOpen(signal);
-      const source =
-        stored.declaredSize === 0
-          ? Readable.from([])
-          : readFileHandleChunks(handle, {
-              start: stored.byteOffset,
-              end: stored.byteOffset + stored.declaredSize - 1,
-              signal,
-              cancellationFailure: (reason) =>
-                new ArtifactReaderFailure(
-                  "cancelled",
-                  `${LABEL} read cancelled`,
-                  { cause: reason },
-                ),
-            });
-      const output = this.#entryStream(stored, signal);
-      // Retirement can destroy the stream before its consumer listens.
-      output.on("error", () => undefined);
-      this.#streams.add(output);
-      output.once("close", () => this.#streams.delete(output));
-      void this.#scope
-        .run(
-          () =>
-            new Promise<void>((resolve) => {
-              pipeline(source, output, () => {
-                resolve();
-              });
-            }),
-        )
-        .catch((cause: unknown) =>
-          output.destroy(
-            cause instanceof Error
-              ? cause
-              : new Error(`${LABEL} stream ownership failed`, { cause }),
-          ),
-        );
-      return output;
-    });
-  }
-
-  async close(): Promise<void> {
-    this.#closing = true;
-    for (const stream of this.#streams)
-      stream.destroy(
-        new ArtifactReaderFailure("unavailable", `${LABEL} reader closed`),
-      );
-    await this.#scope.close();
-    await this.#source.close();
-    this.#entries.clear();
-  }
-
-  provenance(): readonly [] {
-    return [];
-  }
-
-  #assertOpen(signal?: AbortSignal): void {
-    assertArtifactReadActive(signal);
-    if (this.#closing)
-      throw new ArtifactReaderFailure(
-        "unavailable",
-        `${LABEL} reader is closed`,
-      );
-  }
-
-  async #prepare(signal?: AbortSignal): Promise<void> {
+  ): Promise<PositionalArtifactEntries> {
     const image = await this.#decode(signal);
+    const entries: PositionalArtifactEntry[] = [];
     for (const segment of image.segments) {
       const { index, data_len } = segment.metadata;
       const entry = {
@@ -182,8 +60,8 @@ export class EspImageArtifactReader implements ArtifactReader {
             : [],
         adapterKey: `esp-image:segment:${String(index)}`,
         formatMetadata: { ...segment.metadata },
-      } satisfies ArtifactEntry;
-      this.#entries.set(entry.adapterKey, entry);
+      } satisfies PositionalArtifactEntry;
+      entries.push(entry);
     }
     for (const block of image.signatureBlocks) {
       const entry = {
@@ -199,20 +77,22 @@ export class EspImageArtifactReader implements ArtifactReader {
         limitations: [],
         adapterKey: `esp-image:signature-block:${String(block.metadata.index)}`,
         formatMetadata: { ...block.metadata },
-      } satisfies ArtifactEntry;
-      this.#entries.set(entry.adapterKey, entry);
+      } satisfies PositionalArtifactEntry;
+      entries.push(entry);
     }
     this.#metadata = image.metadata;
-    if (image.coverage === "unknown" || image.limitations.length > 0)
-      this.#coverage = {
-        status: image.coverage,
-        limitations: [...image.limitations],
-      };
+    return {
+      entries,
+      coverage:
+        image.coverage === "unknown" || image.limitations.length > 0
+          ? { status: image.coverage, limitations: [...image.limitations] }
+          : undefined,
+    };
   }
 
   /** Stream the carrier once, stopping when later bytes cannot matter. */
   async #decode(signal?: AbortSignal): Promise<EspImage> {
-    const { handle, initial } = await this.#source.read(signal);
+    const { handle, initial } = await this.verifyCarrier(signal);
     const decoder = createEspImageDecoder(initial.size);
     if (initial.size > 0)
       for await (const chunk of readFileHandleChunks(handle, {
@@ -223,44 +103,15 @@ export class EspImageArtifactReader implements ArtifactReader {
             cause: reason,
           }),
       }) as AsyncIterable<Buffer>) {
-        this.#assertOpen(signal);
+        this.assertOpen(signal);
         decoder.write(chunk);
         if (decoder.satisfied) break;
       }
     // A changed carrier is an identity failure, not a malformed image.
-    await this.#source.read(signal);
+    await this.verifyCarrier(signal);
     const image = decoder.finish();
     if (!image.ok) throw decodeFailure(image.error);
     return image.value;
-  }
-
-  #entryStream(entry: ArtifactEntry, signal?: AbortSignal): Transform {
-    let bytes = 0;
-    const check = async (): Promise<void> => {
-      if (bytes !== entry.declaredSize)
-        throw new ArtifactReaderFailure(
-          "integrity",
-          `${LABEL} entry ended early: ${entry.path}`,
-        );
-      await this.#source.read(signal);
-    };
-    return new Transform({
-      transform(chunk: Buffer, _encoding, callback) {
-        bytes += chunk.length;
-        callback(null, chunk);
-      },
-      flush(callback) {
-        void check().then(
-          () => callback(),
-          (cause: unknown) =>
-            callback(
-              cause instanceof Error
-                ? cause
-                : new Error(`${LABEL} read failed`, { cause }),
-            ),
-        );
-      },
-    });
   }
 }
 
