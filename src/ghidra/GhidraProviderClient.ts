@@ -23,6 +23,7 @@ import {
   ghidraSeedLimitations,
 } from "./GhidraAnalysisSeeds.js";
 import {
+  ghidraEffectiveLanguageOverride,
   ghidraPinnedLanguage,
   ghidraProfileDisabledAnalyzers,
   ghidraProfileLanguageOverride,
@@ -88,6 +89,7 @@ import {
 } from "./GhidraPspProfile.js";
 import { ghidraPspExtensionSchema } from "./GhidraPspExtension.js";
 import { ghidraRiscvLimitations } from "./GhidraRiscvProfile.js";
+import { ghidraXtensaLimitations } from "./GhidraXtensaProfile.js";
 import { ghidraPePdbLimitations } from "./GhidraPeProfile.js";
 import { unverifiedGhidraBuildLimitation } from "./GhidraReleasePolicy.js";
 import { GhidraHeadlessLauncher } from "./GhidraLauncher.js";
@@ -282,7 +284,8 @@ export const createGhidraProviderClient = (input: {
   if (
     !sameGhidraLanguageOverride(
       parameterLanguage,
-      config.ghidraLanguageOverride ?? targetLanguage,
+      ghidraEffectiveLanguageOverride(target, config.ghidraLanguageOverride) ??
+        targetLanguage,
     )
   )
     return err(
@@ -387,6 +390,7 @@ export const createGhidraProviderClient = (input: {
     ...ghidraMipsRelocatableLimitations(target),
     ...ghidraMipsSharedLimitations(target),
     ...ghidraRiscvLimitations(target),
+    ...ghidraXtensaLimitations(target),
   ];
   const providerLimitations =
     installation.platform === "win32"
