@@ -3,12 +3,16 @@
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Instruction;
+import java.util.HashSet;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * Decodes source-owned bytes in the imported language's default context; no
  * context register is set. Arguments are the expected language ID, then one
  * mnemonic/length[/operand] expectation per instruction from the first byte.
+ * An operand expectation must equal one complete operand, so "msp" does not
+ * accept "msplim".
  */
 public class ReaDecodeProbe extends GhidraScript {
     @Override
@@ -27,9 +31,13 @@ public class ReaDecodeProbe extends GhidraScript {
             String text = instruction.toString().toLowerCase(Locale.ROOT);
             String decoded = instruction.getMnemonicString().toLowerCase(Locale.ROOT)
                 + "/" + instruction.getLength();
-            println("REA_DECODE " + address + " " + text);
+            Set<String> operands = new HashSet<>();
+            for (int operand = 0; operand < instruction.getNumOperands(); operand++)
+                operands.add(instruction.getDefaultOperandRepresentation(operand)
+                    .toLowerCase(Locale.ROOT));
+            println("REA_DECODE " + address + " " + text + " operands=" + operands);
             require(decoded.equals(expected[0] + "/" + expected[1])
-                && (expected.length == 2 || text.contains(expected[2])),
+                && (expected.length == 2 || operands.contains(expected[2])),
                 "Expected " + args[index] + " at " + address + ", decoded " + text);
             address = address.add(instruction.getLength());
         }
