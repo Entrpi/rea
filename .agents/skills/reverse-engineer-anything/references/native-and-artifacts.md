@@ -300,8 +300,9 @@ unknown rather than false.
 
 ESP32, ESP32-S2 and ESP32-S3 ELF builds (`EM_XTENSA`) open only with Ghidra:
 little-endian ELF32 `ET_EXEC` whose `.xtensa.info` declares the windowed ABI.
-call0 builds such as ESP8266 are refused. The lane is unverified, so carry its
-limitation into any claim. See the [Xtensa guide](https://github.com/morluto/rea/blob/main/docs/ghidra-xtensa.md).
+call0 builds such as ESP8266 are refused. On ESP32-S3, Ghidra does not decode
+SALT/SALTU, so calls after them in a function are missing; check the assembly
+when a function looks truncated. See the [Xtensa guide](https://github.com/morluto/rea/blob/main/docs/ghidra-xtensa.md).
 
 For a completed `analyze_function` dossier, use `inspect_analysis_view` with
 `view: {kind: "native", facet: "value_flow_operations", offset: 0, limit: 32}`
