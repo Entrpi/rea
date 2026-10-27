@@ -31,6 +31,10 @@ import {
   ghidraPowerPcLanguage,
   ghidraPowerPcProfileParameters,
 } from "./GhidraPowerPcProfile.js";
+import {
+  ghidraXtensaLanguage,
+  ghidraXtensaProfileParameters,
+} from "./GhidraXtensaProfile.js";
 import { ghidraRawBinaryLanguage } from "./GhidraRawBinaryLanguage.js";
 import {
   GHIDRA_GAMECUBE_DOL_LANGUAGE,
@@ -79,7 +83,8 @@ export const ghidraPinnedLanguage = (
 ): GhidraLanguageOverride | undefined =>
   ghidraMipsLanguageOverride(target) ??
   ghidraRiscvLanguageOverride(target) ??
-  ghidraPowerPcLanguage(target);
+  ghidraPowerPcLanguage(target) ??
+  ghidraXtensaLanguage(target);
 
 /** Policy conflicts belong to the selected settings, not to the target's support. */
 const languageOverrideConflict = (
@@ -259,10 +264,12 @@ export const resolveGhidraAnalysisProfile = async (
     return err(
       languageOverrideConflict(
         languageOverride,
-        `The caller-selected processor or compiler specification is outside the verified ${
+        `The caller-selected processor or compiler specification is outside the ${
           target.architecture === "riscv"
-            ? "generic little-endian RISC-V"
-            : "endian-matched MIPS32"
+            ? "verified generic little-endian RISC-V"
+            : target.architecture === "xtensa"
+              ? "pinned, unverified little-endian Xtensa"
+              : "verified endian-matched MIPS32"
         } profile. The requested override has not been changed.`,
         pinnedLanguage,
       ),
@@ -373,6 +380,7 @@ export const resolveGhidraAnalysisProfile = async (
         ...ghidraMipsProfileParameters(target, languageOverride),
         ...ghidraRiscvProfileParameters(target),
         ...ghidraPowerPcProfileParameters(target),
+        ...ghidraXtensaProfileParameters(target),
         ...(pspExtension?.ok === true
           ? {
               mips_support_lane: "psp-elf32-exec-eabi32-allegrex-v2",

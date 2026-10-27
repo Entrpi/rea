@@ -14,6 +14,7 @@ export const BINARY_ARCHITECTURES = [
   "powerpc",
   "m68k",
   "hexagon",
+  "xtensa",
 ] as const;
 export type BinaryArchitecture = (typeof BINARY_ARCHITECTURES)[number];
 
@@ -52,6 +53,7 @@ export const ELF_METADATA_ARCHITECTURES = [
   "mips",
   "riscv",
   "powerpc",
+  "xtensa",
 ] as const satisfies readonly BinaryArchitecture[];
 export type ElfMetadataArchitecture =
   (typeof ELF_METADATA_ARCHITECTURES)[number];
@@ -109,6 +111,24 @@ export interface MipsGnuAttributes {
   /** Tag_GNU_MIPS_ABI_MSA vector-argument ABI; null means undeclared. */
   readonly msa: number | null;
 }
+
+/** Raw ELF facts; Xtensa `e_flags` carry no ABI, which `.xtensa.info` declares. */
+export interface XtensaElfMetadata extends ElfFamilyMetadata {
+  /** Undefined until `.xtensa.info` is inspected. */
+  readonly abi?: XtensaAbiDeclaration;
+}
+
+/**
+ * The `ABI=` declaration in the `.xtensa.info` note that GNU as and ld write.
+ * Values outside binutils' windowed (0) and call0 (1) are kept as written.
+ */
+export type XtensaAbiDeclaration =
+  | { readonly status: "declared"; readonly abi: "windowed" | "call0" }
+  | { readonly status: "unrecognized"; readonly value: string }
+  /** Examined: no `.xtensa.info` section, or a note without an `ABI=` key. */
+  | { readonly status: "absent" }
+  /** The declaration is unreadable or malformed; the ABI remains unknown. */
+  | { readonly status: "unavailable"; readonly reason: string };
 
 /** Byte range of the selected slice inside its universal Mach-O container. */
 export interface UniversalMachOSlice {
@@ -170,6 +190,16 @@ export type BinaryTarget =
       readonly availableArchitectures: readonly "powerpc"[];
       /** Family identity does not select a processor variant. */
       readonly powerpc: ElfFamilyMetadata;
+      readonly executableRole?: never;
+      readonly managed?: never;
+    })
+  | (BinaryTargetIdentity & {
+      readonly kind: "executable";
+      readonly format: "elf";
+      readonly architecture: "xtensa";
+      readonly availableArchitectures: readonly "xtensa"[];
+      /** The header does not identify the core configuration. */
+      readonly xtensa: XtensaElfMetadata;
       readonly executableRole?: never;
       readonly managed?: never;
     })
