@@ -53,17 +53,19 @@ const configFor = (environment: NodeJS.ProcessEnv) => {
 const raw = (
   architecture: Extract<BinaryTarget, { format: "raw-binary" }>["architecture"],
   entryPoint: string,
-): BinaryTarget =>
-  ({
-    path: "/tmp/raw.bin",
-    sha256: "a".repeat(64),
-    kind: "executable",
-    format: "raw-binary",
-    architecture,
-    availableArchitectures: [architecture],
+): BinaryTarget => ({
+  path: "/tmp/raw.bin",
+  sha256: "a".repeat(64),
+  kind: "executable",
+  format: "raw-binary",
+  architecture,
+  availableArchitectures: [architecture],
+  rawLoad: {
+    baseAddress: entryPoint,
     entryPoint,
     entryPointSource: entryPoint,
-  }) as unknown as BinaryTarget;
+  },
+});
 
 describe("raw-binary analysis profile digest", () => {
   it("keeps the 6502 raw profile digest from before the shared policy refactor", async () => {

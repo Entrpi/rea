@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { attestGhidraRawBinaryLoadImage } from "./GhidraLoadImageValues.js";
 import { fixtureRawBinaryLoadImage } from "./GhidraRawBinaryLoadImage.fixture.js";
 import { ghidraRawBinaryLanguage } from "./GhidraRawBinaryLanguage.js";
+import { rawLoadAtEntry } from "../domain/rawBinary.fixture.js";
 
 describe("raw-binary Ghidra language binding", () => {
   it("maps the big-endian m68k family to the default 68000 language", () => {
@@ -47,16 +48,15 @@ describe("raw-binary mapped-block state", () => {
         ...f.target,
         architecture: "6502" as const,
         availableArchitectures: ["6502" as const],
-        entryPoint: "0x8001",
-        entryPointSource: "0x8001",
+        rawLoad: rawLoadAtEntry("0x8001"),
       };
       f.observation.language_id = "6502:LE:16:default";
       f.observation.default_address_space = space;
-      f.observation.entry_points = [target.entryPoint];
+      f.observation.entry_points = [target.rawLoad.entryPoint];
       const mapping = f.observation.mappings[0];
       if (mapping === undefined)
         throw new Error("Missing source mapping fixture");
-      mapping.start = target.entryPoint;
+      mapping.start = target.rawLoad.baseAddress;
       mapping.end = "0x8004";
       mapping.address_space = space;
       expect(
@@ -85,16 +85,15 @@ describe("raw-binary mapped-block state", () => {
         ...f.target,
         architecture: "m68k" as const,
         availableArchitectures: ["m68k" as const],
-        entryPoint: "0x1000",
-        entryPointSource: "0x1000",
+        rawLoad: rawLoadAtEntry("0x1000"),
       };
       f.observation.language_id = "68000:BE:32:default";
       f.observation.default_address_space = space;
-      f.observation.entry_points = [target.entryPoint];
+      f.observation.entry_points = [target.rawLoad.entryPoint];
       const mapping = f.observation.mappings[0];
       if (mapping === undefined)
         throw new Error("Missing source mapping fixture");
-      mapping.start = target.entryPoint;
+      mapping.start = target.rawLoad.baseAddress;
       mapping.end = "0x1003";
       mapping.address_space = space;
       expect(
@@ -263,7 +262,11 @@ describe("raw-binary independent load-image checks", () => {
   });
   it("preserves additional language entries while requiring the caller entry", () => {
     const f = fixtureRawBinaryLoadImage();
-    f.observation.entry_points = ["0x0", f.target.entryPoint, "0xffff0000"];
+    f.observation.entry_points = [
+      "0x0",
+      f.target.rawLoad.entryPoint,
+      "0xffff0000",
+    ];
     expect(
       attestGhidraRawBinaryLoadImage(f.snapshot, f.target, f.observation),
     ).toMatchObject({

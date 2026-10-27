@@ -39,7 +39,6 @@ import {
 import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
 import type {
   BinaryTarget,
-  BinaryArchitecture,
   PeCodeViewRecord,
   UniversalMachOSlice,
 } from "../domain/binaryTargetTypes.js";
@@ -50,13 +49,11 @@ import {
   resolveAppBundleExecutable,
   type ResolvedAppBundle,
 } from "./AppBundleExecutable.js";
-import {
-  validateDosComLength,
-  type ExecutableFormatHint,
-} from "../domain/dosCom.js";
+import { validateDosComLength } from "../domain/dosCom.js";
 import {
   admitRawBinary,
   rawBinarySelectionError,
+  type NativeLoadSelection,
 } from "../domain/rawBinary.js";
 import { admitGamecubeDol } from "../domain/gamecubeDolAdmission.js";
 import { DOL_HEADER_SIZE } from "../domain/gamecubeDol.js";
@@ -120,9 +117,7 @@ export interface BinaryTargetResolverOptions {
   readonly cwd?: string;
   readonly hostArchitecture?: NodeJS.Architecture;
   readonly targetKind?: BinaryTarget["kind"];
-  readonly formatHint?: ExecutableFormatHint;
-  readonly architecture?: BinaryArchitecture;
-  readonly entryPoint?: string;
+  readonly loadSelection?: NativeLoadSelection;
   readonly signal?: AbortSignal;
   readonly resources?: ArtifactResourceScope;
 }
@@ -258,7 +253,8 @@ const readOpenedBinaryTarget = async (
   const { path, sourcePath, selectedPath, bundleInfoPlist } = selected;
   const bundle = bundleInfoPlist === undefined ? {} : { bundleInfoPlist };
   const hostArchitecture = options.hostArchitecture ?? process.arch;
-  const { targetKind, formatHint, signal, architecture, entryPoint } = options;
+  const { targetKind, signal, loadSelection = {} } = options;
+  const formatHint = loadSelection.format;
   throwIfTargetResolutionCancelled(signal);
   if (formatHint === "raw-binary") {
     if (targetKind !== undefined && targetKind !== "executable")
@@ -270,8 +266,8 @@ const readOpenedBinaryTarget = async (
         ),
       );
     const admitted = admitRawBinary({
-      architecture,
-      entryPoint,
+      architecture: loadSelection.architecture,
+      entryPoint: loadSelection.entryPoint,
       fileBytes: metadata.size,
     });
     if (!admitted.ok)
@@ -289,15 +285,10 @@ const readOpenedBinaryTarget = async (
       format: "raw-binary",
       architecture: admitted.value.architecture,
       availableArchitectures: [admitted.value.architecture],
-      entryPoint: admitted.value.entryPoint,
-      entryPointSource: admitted.value.entryPointSource,
+      rawLoad: admitted.value.load,
     });
   }
-  const pairing = rawBinarySelectionError({
-    ...(formatHint === undefined ? {} : { format: formatHint }),
-    architecture,
-    entryPoint,
-  });
+  const pairing = rawBinarySelectionError(loadSelection);
   if (pairing !== undefined)
     return err(
       new BinaryTargetError(path, pairing, {
@@ -323,7 +314,7 @@ const readOpenedBinaryTarget = async (
     const admitted = admitGamecubeDol({
       bytes: headerBytes,
       fileSize: metadata.size,
-      entryPoint,
+      entryPoint: loadSelection.entryPoint,
     });
     if (!admitted.ok)
       return err(

@@ -58,8 +58,11 @@ describe("raw-binary admission", () => {
       if (!result.ok) throw new Error(result.error.reason);
       expect(result.value).toEqual({
         architecture: "6502",
-        entryPoint,
-        entryPointSource: entryPoint,
+        load: {
+          baseAddress: entryPoint,
+          entryPoint,
+          entryPointSource: entryPoint,
+        },
       });
     }
   });
@@ -93,8 +96,11 @@ describe("raw-binary admission", () => {
       ok: true,
       value: {
         architecture: "arm",
-        entryPoint: "0x8000000",
-        entryPointSource: "0x8000000",
+        load: {
+          baseAddress: "0x8000000",
+          entryPoint: "0x8000000",
+          entryPointSource: "0x8000000",
+        },
       },
     });
   });
@@ -172,7 +178,7 @@ describe("raw-binary admission", () => {
         fileBytes: 1,
       });
       if (!admitted.ok) throw new Error(admitted.error.reason);
-      expect(admitted.value.entryPoint).toBe("0x1001");
+      expect(admitted.value.load.entryPoint).toBe("0x1001");
     },
   );
 });
@@ -192,8 +198,11 @@ describe("m68k raw-binary admission", () => {
       if (!result.ok) throw new Error(result.error.reason);
       expect(result.value).toEqual({
         architecture: "m68k",
-        entryPoint,
-        entryPointSource: entryPoint,
+        load: {
+          baseAddress: entryPoint,
+          entryPoint,
+          entryPointSource: entryPoint,
+        },
       });
     }
   });
@@ -314,9 +323,9 @@ describe("raw-binary admission results", () => {
     result.ok
       ? {
           architecture: result.value.architecture,
-          base: result.value.entryPoint,
-          entry: result.value.entryPoint,
-          entry_source: result.value.entryPointSource,
+          base: result.value.load.baseAddress,
+          entry: result.value.load.entryPoint,
+          entry_source: result.value.load.entryPointSource,
         }
       : { reason: result.error.reason, constraint: result.error.constraint };
 

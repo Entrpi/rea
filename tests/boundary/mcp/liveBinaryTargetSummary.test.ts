@@ -7,6 +7,7 @@ import { binaryTargetSummary } from "../../../src/application/binary/BinaryTarge
 import { toolContract } from "../../../src/contracts/toolContracts.js";
 import { toolOutputSchemaWithMetadata } from "../../../src/contracts/toolSchemaMetadata.js";
 import { sessionOutputSchemas } from "../../../src/contracts/toolOutputSchemaGroups.js";
+import { rawLoadAtEntry } from "../../../src/domain/rawBinary.fixture.js";
 
 const identity = { path: "/fixture/target", sha256: "a".repeat(64) };
 const executable = { ...identity, kind: "executable" as const };
@@ -77,8 +78,7 @@ const targets: readonly BinaryTarget[] = [
       format: "raw-binary" as const,
       architecture,
       availableArchitectures: [architecture],
-      entryPoint: "0x1000",
-      entryPointSource: "0x00001000",
+      rawLoad: rawLoadAtEntry("0x00001000"),
     }),
   ),
   {
@@ -146,9 +146,11 @@ it.each(["draft-2020-12", "draft-07"] as const)(
         kind: target.kind,
         format: target.format,
         architecture: target.architecture ?? null,
-        ...(target.format === "raw-binary" || target.format === "gamecube-dol"
-          ? { entry_point: target.entryPoint }
-          : {}),
+        ...(target.format === "raw-binary"
+          ? { entry_point: target.rawLoad.entryPoint }
+          : target.format === "gamecube-dol"
+            ? { entry_point: target.entryPoint }
+            : {}),
       });
       expect(
         sessionOutputSchemas.open_binary.safeParse({ result: summary }).success,

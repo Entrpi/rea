@@ -381,7 +381,8 @@ export const attestGhidraRawBinaryLoadImage = (
       "Ghidra raw-binary snapshot digest does not match the admitted target",
     );
   const language = ghidraRawBinaryLanguage(target.architecture);
-  const base = BigInt(target.entryPoint);
+  const { baseAddress, entryPoint } = target.rawLoad;
+  const base = BigInt(baseAddress);
   const last = hexAddress(base + BigInt(snapshot.bytes) - 1n);
   const { checks, check } = createLoadImageChecks();
   const source = observations.source_files[0];
@@ -435,7 +436,7 @@ export const attestGhidraRawBinaryLoadImage = (
   );
   check(
     "mapping.start",
-    target.entryPoint,
+    baseAddress,
     mapping?.start ?? null,
     0,
     mapping?.start ?? null,
@@ -457,9 +458,8 @@ export const attestGhidraRawBinaryLoadImage = (
   );
   check(
     "entry_point",
-    target.entryPoint,
-    observations.entry_points.find((entry) => entry === target.entryPoint) ??
-      null,
+    entryPoint,
+    observations.entry_points.find((entry) => entry === entryPoint) ?? null,
   );
   check("relocation_records", [], observations.relocations);
   return ok(
@@ -470,9 +470,10 @@ export const attestGhidraRawBinaryLoadImage = (
       architecture: target.architecture,
       language_id: language.languageId,
       compiler_spec_id: language.compilerSpecId,
-      base_address: target.entryPoint,
+      base_address: baseAddress,
       file_bytes: snapshot.bytes,
-      entry: { address: target.entryPoint, file_offset: 0 },
+      // Admission maps file offset 0 at the entry for this Evidence shape.
+      entry: { address: entryPoint, file_offset: 0 },
       observations,
       checks,
       limitations: [

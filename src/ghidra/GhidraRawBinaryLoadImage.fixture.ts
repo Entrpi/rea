@@ -22,8 +22,11 @@ export const fixtureRawBinaryLoadImage = (): {
       format: "raw-binary",
       architecture: "arm",
       availableArchitectures: ["arm"],
-      entryPoint: "0x8000000",
-      entryPointSource: "0x08000000",
+      rawLoad: {
+        baseAddress: "0x8000000",
+        entryPoint: "0x8000000",
+        entryPointSource: "0x08000000",
+      },
     },
     observation: {
       executable_format: "Raw Binary",

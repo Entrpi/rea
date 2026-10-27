@@ -234,7 +234,7 @@ export const resolveGhidraAnalysisProfile = async (
           language_id: language.languageId,
           compiler_spec_id: language.compilerSpecId,
           language_selection: "caller-supplied-v1",
-          entry_point: target.entryPoint,
+          entry_point: target.rawLoad.entryPoint,
           entry_seed: "external-entry-and-function-before-analysis-v1",
           ...analyzerParameters,
         }),

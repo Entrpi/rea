@@ -1,9 +1,13 @@
-import { executableFormatHintSchema } from "../domain/dosCom.js";
+import {
+  executableFormatHintSchema,
+  type ExecutableFormatHint,
+} from "../domain/dosCom.js";
 import { absoluteLocalPathStringSchema } from "../domain/localPath.js";
 import {
   binaryArchitectureSchema,
   rawBinaryEntryPointSchema,
   rawBinarySelectionError,
+  type NativeLoadSelection,
 } from "../domain/rawBinary.js";
 import { z } from "zod";
 import { analysisProviderSelectorSchema } from "../domain/providerSelection.js";
@@ -17,6 +21,19 @@ const snapshotPathSchema = absoluteLocalPathStringSchema.describe(
 const binaryTargetPathSchema = absoluteLocalPathStringSchema.describe(
   "Absolute local filesystem path for the analysis target; relative paths are rejected.",
 );
+
+/** Collect the open_binary load fields into the selection that target admission owns. */
+export const openBinaryLoadSelection = (input: {
+  readonly format?: ExecutableFormatHint | undefined;
+  readonly architecture?: NativeLoadSelection["architecture"] | undefined;
+  readonly entry_point?: string | undefined;
+}): NativeLoadSelection => ({
+  ...(input.format === undefined ? {} : { format: input.format }),
+  ...(input.architecture === undefined
+    ? {}
+    : { architecture: input.architecture }),
+  ...(input.entry_point === undefined ? {} : { entryPoint: input.entry_point }),
+});
 
 /** Input contract for opening a target with an optional staged snapshot. */
 export const openBinaryInputSchema = z
@@ -41,15 +58,7 @@ export const openBinaryInputSchema = z
     snapshot_path: snapshotPathSchema.optional(),
   })
   .superRefine((value, context) => {
-    const pairing = rawBinarySelectionError({
-      ...(value.format === undefined ? {} : { format: value.format }),
-      ...(value.architecture === undefined
-        ? {}
-        : { architecture: value.architecture }),
-      ...(value.entry_point === undefined
-        ? {}
-        : { entryPoint: value.entry_point }),
-    });
+    const pairing = rawBinarySelectionError(openBinaryLoadSelection(value));
     if (pairing === undefined) return;
     context.addIssue({
       code: "custom",

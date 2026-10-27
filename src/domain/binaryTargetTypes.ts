@@ -39,6 +39,20 @@ export interface ElfFamilyMetadata {
   readonly flags: number;
 }
 
+/**
+ * Admitted headerless load. File offset 0 maps at `baseAddress` and analysis
+ * starts at `entryPoint`; consumers read each role here instead of deriving
+ * one from the other.
+ */
+export interface RawBinaryLoad {
+  /** Canonical address of file offset 0. */
+  readonly baseAddress: string;
+  /** Canonical code entry. */
+  readonly entryPoint: string;
+  /** The caller's spelling of the entry, before canonicalization. */
+  readonly entryPointSource: string;
+}
+
 /** Referenced CodeView debug symbols from a PE debug directory. */
 export interface PeCodeViewRecord {
   readonly pdbPath: string;
@@ -211,8 +225,7 @@ export type BinaryTarget =
         | HeaderArchitecture
         | RawOnlyArchitecture
       )[];
-      readonly entryPoint: string;
-      readonly entryPointSource: string;
+      readonly rawLoad: RawBinaryLoad;
       readonly executableRole?: never;
       readonly managed?: never;
     })

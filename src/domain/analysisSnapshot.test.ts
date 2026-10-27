@@ -143,15 +143,18 @@ describe("analysis snapshot target identity", () => {
   );
 
   it("partitions raw snapshots and query identities by the canonical entry", () => {
-    const target: BinaryTarget = {
+    const target: Extract<BinaryTarget, { format: "raw-binary" }> = {
       path: "/fixture/image.bin",
       sha256: ANALYSIS_SNAPSHOT_TARGET.sha256,
       kind: "executable",
       format: "raw-binary",
       architecture: "arm",
       availableArchitectures: ["arm"],
-      entryPoint: "0x8000000",
-      entryPointSource: "0x08000000",
+      rawLoad: {
+        baseAddress: "0x8000000",
+        entryPoint: "0x8000000",
+        entryPointSource: "0x08000000",
+      },
     };
     const snapshot = snapshotTarget(target);
     const binding = snapshotBinding(ANALYSIS_SNAPSHOT_PROFILE);
@@ -169,13 +172,16 @@ describe("analysis snapshot target identity", () => {
     );
     const changed = {
       ...target,
-      entryPoint: "0x9000000",
-      entryPointSource: "0x09000000",
+      rawLoad: {
+        baseAddress: "0x9000000",
+        entryPoint: "0x9000000",
+        entryPointSource: "0x09000000",
+      },
     };
     expect(
       snapshotMatchesTarget(snapshot, {
         ...target,
-        entryPointSource: "0x8000000",
+        rawLoad: { ...target.rawLoad, entryPointSource: "0x8000000" },
       }),
     ).toBe(true);
     expect(snapshotMatchesTarget(snapshot, changed)).toBe(false);
@@ -189,10 +195,13 @@ describe("analysis snapshot target identity", () => {
       workflow_entries: [],
       evidence_bundle: createEvidenceBundle([]),
     });
-    expect(parsed.target).toHaveProperty("entry_point", target.entryPoint);
+    expect(parsed.target).toHaveProperty(
+      "entry_point",
+      target.rawLoad.entryPoint,
+    );
     const { entry_point: _entry, ...legacy } = {
       ...snapshot,
-      entry_point: target.entryPoint,
+      entry_point: target.rawLoad.entryPoint,
     };
     expect(
       analysisSnapshotSchema.safeParse({ ...parsed, target: legacy }).success,

@@ -3,6 +3,7 @@ import { z } from "zod";
 import type {
   BinaryArchitecture,
   HeaderArchitecture,
+  RawBinaryLoad,
   RawOnlyArchitecture,
 } from "./binaryTargetTypes.js";
 import type { ExecutableFormatHint } from "./dosCom.js";
@@ -59,11 +60,20 @@ export const validateRawBinaryLength = (
     ? ok(null)
     : err("raw-binary requires at least one file byte");
 
+/**
+ * Caller-selected interpretation that target headers do not establish. The
+ * CLI and MCP boundaries build it once; it reaches target admission unchanged.
+ */
+export interface NativeLoadSelection {
+  readonly format?: ExecutableFormatHint;
+  readonly architecture?: BinaryArchitecture;
+  readonly entryPoint?: string;
+}
+
 /** Admitted headerless load identity used by target resolution and profiles. */
 export interface RawBinaryAdmission {
   readonly architecture: HeaderArchitecture | RawOnlyArchitecture;
-  readonly entryPoint: string;
-  readonly entryPointSource: string;
+  readonly load: RawBinaryLoad;
 }
 
 /** Why a headerless load was refused, with its owning classification. */
@@ -139,8 +149,12 @@ export const admitRawBinary = (input: {
     });
   return ok({
     architecture: architecture.data,
-    entryPoint: entry.value.canonical,
-    entryPointSource: entry.value.source,
+    // File offset 0 maps at the entry; no other base can be selected.
+    load: {
+      baseAddress: entry.value.canonical,
+      entryPoint: entry.value.canonical,
+      entryPointSource: entry.value.source,
+    },
   });
 };
 

@@ -8,6 +8,7 @@ import type { BinaryArchitecture } from "../domain/binaryTargetTypes.js";
 import {
   binaryArchitectureSchema,
   rawBinaryEntryPointSchema,
+  type NativeLoadSelection,
 } from "../domain/rawBinary.js";
 import { analysisProviderSelectorSchema } from "../domain/providerSelection.js";
 import type { AnalysisProviderSelector } from "../domain/providerSelection.js";
@@ -69,6 +70,21 @@ export interface NativeOpenCliFlags {
   readonly "entry-point"?: string | undefined;
 }
 
+/** Collect the native load flags into the selection that target admission owns. */
+const nativeLoadSelectionFromCli = (
+  options: NativeOpenCliFlags,
+): NativeLoadSelection => ({
+  ...(options["target-format"] === undefined
+    ? {}
+    : { format: options["target-format"] }),
+  ...(options.architecture === undefined
+    ? {}
+    : { architecture: options.architecture }),
+  ...(options["entry-point"] === undefined
+    ? {}
+    : { entryPoint: options["entry-point"] }),
+});
+
 /** Map native CLI flags onto the shared one-shot analysis options. */
 export const directAnalysisOptionsFromCli = (
   logger: Logger,
@@ -76,14 +92,6 @@ export const directAnalysisOptionsFromCli = (
 ) => ({
   logger,
   snapshotPath: options.snapshot,
-  ...(options["target-format"] === undefined
-    ? {}
-    : { formatHint: options["target-format"] }),
-  ...(options.architecture === undefined
-    ? {}
-    : { architecture: options.architecture }),
-  ...(options["entry-point"] === undefined
-    ? {}
-    : { entryPoint: options["entry-point"] }),
+  loadSelection: nativeLoadSelectionFromCli(options),
   ...(options.provider === undefined ? {} : { providerId: options.provider }),
 });

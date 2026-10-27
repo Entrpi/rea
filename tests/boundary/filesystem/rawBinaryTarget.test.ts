@@ -29,9 +29,11 @@ describe("raw-binary admission", () => {
     const canonical = await realpath(requested);
     const target = await parseBinaryTarget("linked/fixture.bin", {
       cwd: directory,
-      formatHint: "raw-binary",
-      architecture: "6502",
-      entryPoint: "0x8000",
+      loadSelection: {
+        format: "raw-binary",
+        architecture: "6502",
+        entryPoint: "0x8000",
+      },
     });
     expect(target).toMatchObject({
       ok: true,
@@ -52,9 +54,11 @@ describe("raw-binary admission", () => {
     const target = await parseBinaryTarget(path, {
       cwd: directory,
       hostArchitecture: "arm64",
-      formatHint: "raw-binary",
-      architecture: "arm",
-      entryPoint: "0x08000000",
+      loadSelection: {
+        format: "raw-binary",
+        architecture: "arm",
+        entryPoint: "0x08000000",
+      },
     });
     expect(target).toMatchObject({
       ok: true,
@@ -64,8 +68,11 @@ describe("raw-binary admission", () => {
         kind: "executable",
         architecture: "arm",
         availableArchitectures: ["arm"],
-        entryPoint: "0x8000000",
-        entryPointSource: "0x08000000",
+        rawLoad: {
+          baseAddress: "0x8000000",
+          entryPoint: "0x8000000",
+          entryPointSource: "0x08000000",
+        },
         sha256: createHash("sha256").update(bytes).digest("hex"),
       },
     });
@@ -81,7 +88,7 @@ describe("raw-binary admission", () => {
       await parseBinaryTarget(path, {
         cwd: directory,
         hostArchitecture: "x64",
-        formatHint: "raw-binary",
+        loadSelection: { format: "raw-binary" },
       }),
     ).toMatchObject({
       ok: false,
@@ -99,8 +106,7 @@ describe("raw-binary admission", () => {
       await parseBinaryTarget(path, {
         cwd: directory,
         hostArchitecture: "x64",
-        architecture: "arm",
-        entryPoint: "0x8000000",
+        loadSelection: { architecture: "arm", entryPoint: "0x8000000" },
       }),
     ).toMatchObject({
       ok: false,
@@ -118,9 +124,11 @@ describe("raw-binary admission", () => {
       await parseBinaryTarget(path, {
         cwd: directory,
         hostArchitecture: "x64",
-        formatHint: "raw-binary",
-        architecture: "x86",
-        entryPoint: "0x1000",
+        loadSelection: {
+          format: "raw-binary",
+          architecture: "x86",
+          entryPoint: "0x1000",
+        },
       }),
     ).toMatchObject({ ok: false, error: { _tag: "BinaryTargetError" } });
   });
@@ -133,9 +141,11 @@ describe("raw-binary admission", () => {
         cwd: directory,
         hostArchitecture: "x64",
         targetKind: "database",
-        formatHint: "raw-binary",
-        architecture: "x86",
-        entryPoint: "0x1000",
+        loadSelection: {
+          format: "raw-binary",
+          architecture: "x86",
+          entryPoint: "0x1000",
+        },
       }),
     ).toMatchObject({ ok: false, error: { _tag: "BinaryTargetError" } });
   });

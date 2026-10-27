@@ -372,7 +372,7 @@ export const snapshotTarget = (target: BinaryTarget): AnalysisSnapshotTarget =>
         kind: target.kind,
         architecture: target.architecture,
         format: target.format,
-        entry_point: target.entryPoint,
+        entry_point: target.rawLoad.entryPoint,
       }
     : target.format === "gamecube-dol"
       ? {
@@ -409,7 +409,7 @@ export const snapshotMatchesTarget = (
   snapshot.architecture === (target.architecture ?? null) &&
   (snapshot.format !== "raw-binary" ||
     (target.format === "raw-binary" &&
-      snapshot.entry_point === target.entryPoint)) &&
+      snapshot.entry_point === target.rawLoad.entryPoint)) &&
   (snapshot.format !== "gamecube-dol" ||
     (target.format === "gamecube-dol" &&
       snapshot.entry_point === target.entryPoint));
