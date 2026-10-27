@@ -237,16 +237,25 @@ REA_ESPTOOL_PYTHON=/path/to/python-with-esptool \
 ```
 
 It needs a Clang with the RISC-V target, `ld.lld` and a Python that can run
-`esptool` and `espsecure`. It builds an ESP32-C3 app, the same app with
+`esptool` and `espsecure`. It checks each tool before building anything and
+names the variable to set when one is missing, and it warns when esptool is
+not v5.6.0, the version whose sources the layout facts cite. It builds an
+ESP32-C3 app, the same app with
 `--dont-append-digest`, `--secure-pad-v2`, `--ram-only-header` and
 `--pad-to-size`, a bootloader, and ESP8266 v1 and v3 images. It then checks:
 
 - entry point, chip ID, each segment's length, address and header offset,
   checksum, digest and descriptor fields against `image-info`;
-- the padding segment that `--secure-pad-v2` adds is `not-loaded`;
+- each segment's classification in the app, its variants and the
+  bootloader, whose linker scripts fix every section's region, including the
+  `not-loaded` padding that `--secure-pad-v2` adds;
 - after signing with RSA-3072 and appending ECDSA P-256 and P-384 blocks,
   each block's `public_key_sha256` against espsecure `signature-info-v2`,
   and that its recorded digest matches;
+- extraction of the app and the signed image: each segment file equals the
+  bytes after esptool's segment header offset, each signature block equals
+  its slot in the sector espsecure appended, and the source's SHA-256 is
+  unchanged and equals the reported `root_sha256`;
 - the `--pad-to-size` erased tail is described; the `--ram-only-header`
   flash segments are undescribed;
 - a flipped checksum, a flipped digest byte, a truncated segment (where
@@ -260,7 +269,7 @@ The lane ran on macOS arm64 with Node 24.22.1, Homebrew Clang and LLD 21.1.8,
 and `xtensa-esp32-elf-gcc` 14.2.0 (crosstool-NG esp-14.2.0_20251107), once
 with esptool and espsecure v5.6.0 and once with 4.12.0. All checks passed for
 all 13 images in both runs. With v5.6.0 the complete run, including the builds
-and every esptool call, took 12.9 s elapsed, 11.2 s user CPU and 1.6 s system
+and every esptool call, took 10.1 s elapsed, 11.5 s user CPU and 1.3 s system
 CPU under `/usr/bin/time -l` with warm caches. The largest single process
-peaked at a 254 MiB resident set; the combined peak of all processes was not
+peaked at a 258 MiB resident set; the combined peak of all processes was not
 measured.

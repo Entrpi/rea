@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +11,7 @@ import {
   elf2image,
   esptoolVersion,
   execute,
+  extract,
   imageInfo,
   inspect,
   options,
@@ -17,6 +19,7 @@ import {
   spell,
   tool,
   xtensa,
+  xtensaVersion,
 } from "./esp-image-tools.mjs";
 
 const workspace = await mkdtemp(join(tmpdir(), "rea-esp-image-proof-"));
@@ -26,6 +29,7 @@ const report = {
   esptool: esptoolVersion,
   compiler: compilerVersion,
   images: [],
+  extractions: [],
 };
 try {
   const app = await buildElf("app.c", "app.ld", path("app.elf"));
@@ -67,12 +71,15 @@ try {
     esp8266,
   ]);
 
-  // Producer goldens: REA and esptool image-info agree field by field.
-  for (const name of [
-    "app.bin",
-    "app-nodigest.bin",
-    "app-pad.bin",
-    "boot.bin",
+  // Producer goldens: REA and esptool image-info agree field by field. Each
+  // class follows from the region app.ld or bootloader.ld places a section in;
+  // esptool adds the address-0 padding that aligns the flash text.
+  const appClasses = ["mapped", "loaded", "loaded", "not-loaded", "mapped"];
+  for (const [name, classes] of [
+    ["app.bin", appClasses],
+    ["app-nodigest.bin", appClasses],
+    ["app-pad.bin", [...appClasses, "not-loaded"]],
+    ["boot.bin", ["loaded", "loaded"]],
   ]) {
     const [oracle, rea] = await Promise.all([
       imageInfo(path(name)),
@@ -80,6 +87,13 @@ try {
     ]);
     assertAgrees(name, oracle, rea);
     assert.equal(rea.inventory.coverage.status, "complete", name);
+    assert.deepEqual(
+      rea.segments.map(
+        ({ format_metadata: segment }) => segment.classification,
+      ),
+      classes,
+      `${name} classes`,
+    );
     report.images.push({
       name,
       role: rea.root.descriptor?.kind ?? "unknown",
@@ -96,10 +110,6 @@ try {
   // padding segment, which ESP-IDF neither maps nor loads.
   assert.equal(padded.root.image_end % 0x1_0000, 0);
   assert.equal(padded.segments.at(-1).format_metadata.load_addr, 0);
-  assert.equal(
-    padded.segments.at(-1).format_metadata.classification,
-    "not-loaded",
-  );
 
   // Signed: blocks are observed; espsecure is the oracle for their key digests.
   const generate = spell("generate_signing_key", "generate-signing-key");
@@ -183,6 +193,52 @@ try {
         `${block.scheme}:${block.public_key_sha256}`,
     ),
   });
+
+  // Extraction writes the producer's bytes and leaves the source unchanged.
+  const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+  // espsecure appends the signature sector to the --secure-pad-v2 image.
+  const sectorOffset = (await readFile(path("app-pad.bin"))).length;
+  for (const name of ["app.bin", "signed.bin"]) {
+    const bytes = await readFile(path(name));
+    const digest = sha256(bytes);
+    const expected = new Map(
+      (await imageInfo(path(name))).segments.map(
+        ({ index, headerOffset, length }) => [
+          `segment-${String(index).padStart(2, "0")}.bin`,
+          bytes.subarray(headerOffset + 8, headerOffset + 8 + length),
+        ],
+      ),
+    );
+    if (name === "signed.bin") {
+      assert.equal(bytes.length, sectorOffset + 0x1000, "signature sector");
+      for (const slot of [0, 1, 2])
+        expected.set(
+          `signature-block-${String(slot)}.bin`,
+          bytes.subarray(
+            sectorOffset + slot * 1216,
+            sectorOffset + (slot + 1) * 1216,
+          ),
+        );
+    }
+    const extraction = await extract(path(name), workspace);
+    assert.equal(extraction.containment_verified, true, name);
+    assert.equal(extraction.manifest.root_sha256, digest, `${name} source`);
+    assert.deepEqual(
+      extraction.artifacts.map(({ relative_path }) => relative_path).sort(),
+      [...expected.keys()].sort(),
+      `${name} entries`,
+    );
+    for (const {
+      relative_path: entry,
+      sha256: written,
+    } of extraction.artifacts) {
+      const content = await readFile(join(extraction.output_root, entry));
+      assert.ok(content.equals(expected.get(entry)), `${name} ${entry}`);
+      assert.equal(written, sha256(content), `${name} ${entry} digest`);
+    }
+    assert.equal(sha256(await readFile(path(name))), digest, `${name} source`);
+    report.extractions.push({ name, entries: extraction.artifacts.length });
+  }
 
   // --ram-only-header counts only RAM segments; the rest is coverage.
   const ram = await inspect(path("app-ram.bin"));
@@ -299,9 +355,7 @@ try {
     );
     report.images.push({
       name: "app-esp32.bin",
-      compiler: (await execute(xtensa, ["--version"], options)).stdout.split(
-        "\n",
-      )[0],
+      compiler: xtensaVersion,
       segments: rea.segments.map(
         ({ format_metadata: segment }) =>
           `${segment.index}:0x${segment.load_addr.toString(16)}:${segment.classification}`,

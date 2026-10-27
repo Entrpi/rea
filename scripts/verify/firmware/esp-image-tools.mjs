@@ -17,6 +17,9 @@ export const source = (name) =>
   );
 const entrypoint = fileURLToPath(new URL("../../rea.mjs", import.meta.url));
 
+/** The esptool release whose sources the reader's layout facts cite. */
+const PINNED_ESPTOOL = "v5.6.0";
+
 /** Run esptool or espsecure through the caller-supplied Python. */
 export const tool = async (module, args) => {
   const { stdout, stderr } = await execute(
@@ -27,16 +30,67 @@ export const tool = async (module, args) => {
   return `${stdout}${stderr}`;
 };
 
-const versionText = await tool("esptool", ["version"]);
+/** Check one tool before any work; a failure names the variable to set. */
+const prerequisite = async (needed, variable, check) => {
+  try {
+    return await check();
+  } catch (failure) {
+    throw new Error(
+      `verify:esp-images needs ${needed}; set ${variable}. ${failure.message}`,
+      { cause: failure },
+    );
+  }
+};
+
+const firstLine = ({ stdout }) => stdout.split("\n")[0];
+
+export const compilerVersion = await prerequisite(
+  `a Clang with the RISC-V target (tried ${compiler})`,
+  "REA_RISCV_CLANG",
+  async () => {
+    const targets = await execute(compiler, ["--print-targets"], options);
+    assert.match(targets.stdout, /^\s*riscv32\b/mu, "No riscv32 target.");
+    return firstLine(await execute(compiler, ["--version"], options));
+  },
+);
+await prerequisite(`ld.lld (tried ${linker})`, "REA_RISCV_LLD", () =>
+  execute(linker, ["--version"], options),
+);
+const versionText = await prerequisite(
+  `a Python that runs esptool (tried ${python} -m esptool)`,
+  "REA_ESPTOOL_PYTHON",
+  () => tool("esptool", ["version"]),
+);
 const version = /\bv(\d+)\.(\d+)\.(\d+)\b/u.exec(versionText);
 assert.ok(version, `Unrecognized esptool version: ${versionText}`);
 export const esptoolVersion = version[0];
 const v5 = Number(version[1]) >= 5;
 /** esptool v5 spells commands and options with hyphens. */
 export const spell = (v4, later) => (v5 ? later : v4);
-export const compilerVersion = (
-  await execute(compiler, ["--version"], options)
-).stdout.split("\n")[0];
+await prerequisite(
+  `espsecure in the same Python (tried ${python} -m espsecure)`,
+  "REA_ESPTOOL_PYTHON",
+  async () => {
+    const help = await tool("espsecure", ["--help"]);
+    for (const command of [
+      spell("sign_data", "sign-data"),
+      spell("signature_info_v2", "signature-info-v2"),
+    ])
+      assert.ok(help.includes(command), `espsecure has no ${command}.`);
+  },
+);
+if (esptoolVersion !== PINNED_ESPTOOL)
+  console.warn(
+    `verify:esp-images: esptool ${esptoolVersion} is not the pinned ${PINNED_ESPTOOL}, whose sources the reader's layout facts cite.`,
+  );
+export const xtensaVersion =
+  xtensa === undefined
+    ? undefined
+    : await prerequisite(
+        `xtensa-esp32-elf-gcc (tried ${xtensa})`,
+        "REA_XTENSA_ESP32_GCC to Espressif's compiler, or unset it to skip that image",
+        async () => firstLine(await execute(xtensa, ["--version"], options)),
+      );
 
 /** Build a RISC-V ELF from a conformance source; it is never run. */
 export const buildElf = async (program, script, output) => {
@@ -159,6 +213,25 @@ const oracleDescriptorKind = (oracle) => {
   if (oracle.project !== undefined) return "app";
   if (oracle.bootloaderVersion !== undefined) return "bootloader";
   return null;
+};
+
+/** Extract every entry through the built CLI into a new directory in `root`. */
+export const extract = async (file, root) => {
+  const { stdout } = await execute(
+    process.execPath,
+    [entrypoint, "extract-artifact", file, "--json"],
+    {
+      ...options,
+      env: {
+        ...process.env,
+        REA_LOG_LEVEL: "silent",
+        TMPDIR: root,
+        TMP: root,
+        TEMP: root,
+      },
+    },
+  );
+  return JSON.parse(stdout).normalized_result;
 };
 
 const assertDescriptorAgrees = (name, oracle, descriptor) => {
