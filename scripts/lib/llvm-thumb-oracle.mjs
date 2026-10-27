@@ -1,0 +1,83 @@
+// Independent oracle for annotated Thumb fixtures: LLVM assembles each source
+// for its triple, the .text bytes must equal the fixture bytes, and
+// llvm-objdump gives the mnemonic at each instruction offset. Data the source
+// declares (an ARM `$d` mapping symbol) is not an instruction.
+import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+
+const run = promisify(execFile);
+
+/** Bytes of the `.text` section of a little-endian ELF32 relocatable object. */
+const elf32Text = (object) => {
+  assert.equal(
+    object.readUInt32BE(0),
+    0x7f454c46,
+    "assembler output is not ELF",
+  );
+  assert.equal(object[4], 1, "assembler output is not ELF32");
+  assert.equal(object[5], 1, "assembler output is not little-endian");
+  const sectionHeaders = object.readUInt32LE(0x20);
+  const entrySize = object.readUInt16LE(0x2e);
+  const count = object.readUInt16LE(0x30);
+  const names = sectionHeaders + object.readUInt16LE(0x32) * entrySize;
+  const namesOffset = object.readUInt32LE(names + 0x10);
+  for (let index = 0; index < count; index += 1) {
+    const header = sectionHeaders + index * entrySize;
+    const nameStart = namesOffset + object.readUInt32LE(header);
+    const name = object.subarray(nameStart, object.indexOf(0, nameStart));
+    if (name.toString("latin1") !== ".text") continue;
+    const offset = object.readUInt32LE(header + 0x10);
+    return object.subarray(offset, offset + object.readUInt32LE(header + 0x14));
+  }
+  throw new Error("assembler output has no .text section");
+};
+
+/**
+ * Assemble `fixture.source` and require its bytes to equal `fixture.code`.
+ * Returns LLVM's mnemonic for each instruction, keyed by image offset.
+ */
+export const llvmThumbMnemonics = async (fixture, tools) => {
+  const workspace = await mkdtemp(join(tmpdir(), "rea-thumb-oracle-"));
+  try {
+    const source = join(workspace, "fixture.s");
+    const object = join(workspace, "fixture.o");
+    await writeFile(source, fixture.source);
+    await run(tools.clang, [
+      `--target=${fixture.triple}`,
+      "-c",
+      source,
+      "-o",
+      object,
+    ]);
+    assert.equal(
+      elf32Text(await readFile(object)).toString("hex"),
+      fixture.code,
+      `LLVM assembles ${fixture.triple} source to different bytes`,
+    );
+    const { stdout } = await run(tools.objdump, [
+      "-d",
+      "--no-show-raw-insn",
+      `--triple=${fixture.triple}`,
+      object,
+    ]);
+    const mnemonics = new Map();
+    for (const line of stdout.split("\n")) {
+      // `offset:` then data bytes, if any, then a tab and the mnemonic or,
+      // for data, a directive such as `.short`.
+      const match = /^\s*([0-9a-f]+):[^\t]*\t(\.?[a-z][a-z0-9.]*)/u.exec(line);
+      if (match !== null && !match[2].startsWith("."))
+        mnemonics.set(
+          fixture.codeOffset + Number.parseInt(match[1], 16),
+          match[2],
+        );
+    }
+    assert.ok(mnemonics.size > 0, "llvm-objdump reported no instructions");
+    return mnemonics;
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+};

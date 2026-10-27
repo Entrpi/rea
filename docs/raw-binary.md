@@ -144,8 +144,17 @@ decoded with the ARMv7-M instruction set.
   of clearing bit 0; `details.diagnostics` in the error give the even
   `code_address` and suggest omitting `entry_point`.
 
-Ghidra seeds the entry in Thumb state (`TMode=1`) before auto-analysis, and
-`inspect_native_load_image` attests that context independently.
+Before auto-analysis, REA's preparation script requires Ghidra's Thumb context
+(`TMode=1`) at the entry and seeds the entry there; `inspect_native_load_image`
+attests that context independently. Ghidra imports the file without its
+processor-defined labels. `ARMCortex.pspec` names the vector table at
+`0x0`-`0x40` and marks every handler slot an entry, reserved slots included, so
+at base `0x0` its names would cover the table and the code after it. The load
+image attests that the seeded entry is the only one.
+
+`npm run verify:ghidra:cortex-m` checks this lane against real Ghidra 12.1.4
+with source-owned fixtures and LLVM as the decoding oracle; see
+[testing](testing.md).
 
 ### Identity and Evidence
 
