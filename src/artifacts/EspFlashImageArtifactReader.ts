@@ -228,7 +228,7 @@ export class EspFlashImageArtifactReader implements ArtifactReader {
     // A changed carrier is an identity failure, not a different layout.
     await this.#source.read(signal);
     for (const region of plan.regions) {
-      const entry = regionEntry(region, written.get(region));
+      const entry = regionEntry(region, written.get(region), fileSize);
       this.#entries.set(entry.adapterKey, entry);
     }
     this.#metadata = layoutMetadata(location, plan, facts, images);
@@ -298,7 +298,8 @@ export class EspFlashImageArtifactReader implements ArtifactReader {
   ): Promise<ReadonlyMap<EspFlashRegion, EspFlashWrittenExtent>> {
     const written = new Map<EspFlashRegion, EspFlashWrittenExtent>();
     for (const region of plan.regions) {
-      if (region.partition === undefined) continue;
+      // A partition the dump holds none of has nothing to observe.
+      if (region.partition === undefined || region.available === 0) continue;
       this.#assertOpen(context.signal);
       written.set(
         region,
@@ -322,7 +323,7 @@ export class EspFlashImageArtifactReader implements ArtifactReader {
       const image =
         region.role === "bootloader" ||
         (region.partition !== undefined && isEspAppPartition(region.partition));
-      if (!image) continue;
+      if (!image || region.available === 0) continue;
       this.#assertOpen(context.signal);
       images.set(
         region,
@@ -386,6 +387,7 @@ const erasedSlotLimitations = (
 const regionEntry = (
   region: EspFlashRegion,
   written: EspFlashWrittenExtent | undefined,
+  fileSize: number,
 ): ArtifactEntry => ({
   path: region.path,
   ...(region.partition?.label === null || region.partition === undefined
@@ -398,15 +400,20 @@ const regionEntry = (
   // The table's encrypted flag says how a device stores the partition, not
   // that these bytes are ciphertext.
   encrypted: false,
-  byteOffset: region.fileOffset,
+  // A partition past the end holds no bytes; its entry sits at the end.
+  byteOffset: Math.min(region.fileOffset, fileSize),
   declaredIntegrity: null,
   unpacked: false,
   limitations:
-    region.available < region.length
+    region.available === 0
       ? [
-          `${region.path} is truncated: the dump holds ${String(region.available)} of its ${String(region.length)} bytes.`,
+          `${region.path} lies outside the dump: the file holds none of its ${String(region.length)} bytes.`,
         ]
-      : [],
+      : region.available < region.length
+        ? [
+            `${region.path} is truncated: the dump holds ${String(region.available)} of its ${String(region.length)} bytes.`,
+          ]
+        : [],
   adapterKey: `esp-flash-image:${region.path}`,
   ...(region.partition === undefined
     ? {}

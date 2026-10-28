@@ -374,12 +374,13 @@ const damaged = async (report) => {
   assert.equal(appFacts(rea, "ota_0").image.checksum.status, "valid");
   await writeFile(path("truncated.bin"), bytes.subarray(0, 0x4_0000));
   const cut = await inspect(path("truncated.bin"));
-  // Partitions cut short or left out by the end of the file hide no entry.
+  // Partitions past the end of the file are entries holding no bytes.
   assert.equal(cut.inventory.coverage.status, "complete");
-  assert.deepEqual(
-    cut.root.partitions_outside_dump.map(({ label }) => label),
-    ["ota_1", "keys"],
-  );
+  assert.deepEqual(cut.root.partitions_outside_dump, []);
+  const empty = cut.inventory.occurrences
+    .filter(({ declared_size: size }) => size === 0)
+    .map(({ format_metadata: m }) => m?.label);
+  assert.deepEqual(empty, ["keys", "ota_1"]);
   assert.ok(
     cut.inventory.occurrences.some(
       ({ logical_path }) => logical_path === "partitions/factory.bin",
@@ -387,7 +388,7 @@ const damaged = async (report) => {
   );
   report.cases.push(
     { name: "corrupt.bin", factory: "invalid" },
-    { name: "truncated.bin", outside: ["ota_1", "keys"] },
+    { name: "truncated.bin", without_bytes: empty },
   );
 };
 

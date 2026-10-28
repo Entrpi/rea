@@ -167,11 +167,37 @@ it("classifies every partition of two dumps that end inside their last partition
   const result = await compare(left, right);
   expect(result.status).toBe("changed");
   expect(changedPaths(result)).toEqual(["partitions/factory.bin"]);
-  // The bootloader, the table, nvs, otadata, phy_init and the truncated
-  // ota_0 hold the same bytes on both sides.
+  // The bootloader, the table, nvs, otadata, phy_init, the truncated ota_0
+  // and ota_1, which neither file holds, are the same on both sides.
   expect(result.summary).toMatchObject({
-    unchanged: 6,
+    unchanged: 7,
     changed: 2,
     unknown: 0,
   });
+
+  // A full dump of the same parts holds ota_0 whole and ota_1 erased: those
+  // entries change, and no partition is added or removed.
+  const full = await inspect(
+    "full.bin",
+    flashImage(0x4_0000, [
+      BOOTLOADER,
+      { at: 0x8000, bytes: partitionTable(TWO_OTA_PARTITIONS) },
+      { at: 0x1_0000, bytes: app },
+      { at: 0x2_0000, bytes: app },
+    ]),
+  );
+  const longer = await compare(left, full);
+  expect(longer.status).toBe("changed");
+  expect(
+    longer.changes
+      .filter(({ logical_path }) => logical_path !== ".")
+      .map(({ logical_path, classification }) => [logical_path, classification])
+      .sort(),
+  ).toEqual([
+    ["partitions/ota_0.bin", "changed"],
+    ["partitions/ota_1.bin", "changed"],
+  ]);
+  expect(occurrence(left, "partitions/ota_1.bin").limitations).toEqual([
+    "partitions/ota_1.bin lies outside the dump: the file holds none of its 65536 bytes.",
+  ]);
 });

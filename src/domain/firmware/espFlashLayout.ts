@@ -213,7 +213,10 @@ export const planEspFlashLayout = (input: EspFlashPlanInput): EspFlashPlan => {
       limitations.push(
         `Partition ${name} at ${rangeText(part.offset, part.size)} is truncated: the dump holds ${String(placed.available)} of its ${String(part.size)} bytes.`,
       );
-    if (placed.fileOffset >= 0 && placed.available > 0) regions.push(placed);
+    // Every partition from the dump's first byte on is an entry holding the
+    // bytes the file has, none when it lies past the end, so comparison sees
+    // what the file lacks instead of a missing path.
+    if (placed.fileOffset >= 0) regions.push(placed);
   }
   limitations.push(...overlaps(regions));
   const boot = espBootPartitions(input.table.partitions);
@@ -343,8 +346,11 @@ export const finishEspFlashLayout = (
     plan.otadata === undefined
       ? null
       : otaFacts(plan.otadata, reads.otadataRecords);
-  // The table names every partition, so one cut short or left out by the end
-  // of the file hides no entry: its entry says what the file lacks.
+  // Every partition from the dump's first byte on has an entry holding the
+  // bytes the file has; only one that begins before it has none.
+  const unplaced = plan.input.table.partitions.some(
+    (part) => !plan.regions.some(({ partition }) => partition === part),
+  );
   return {
     otadata,
     boot_selection: selectEspBootPartition(
@@ -355,7 +361,7 @@ export const finishEspFlashLayout = (
     ),
     undescribed,
     coverage:
-      undescribed.length > 0 || plan.input.bootloader === undefined
+      undescribed.length > 0 || plan.input.bootloader === undefined || unplaced
         ? "unknown"
         : "complete",
     limitations,

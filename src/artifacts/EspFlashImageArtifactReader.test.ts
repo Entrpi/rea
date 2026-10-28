@@ -175,9 +175,29 @@ describe("ESP flash layout coverage and selection", () => {
         "partitions/ota_0.bin is truncated: the dump holds 32768 of its 65536 bytes.",
       ],
     });
-    expect(root(snapshot)).toMatchObject({
-      partitions_outside_dump: [{ index: 5, label: "ota_1" }],
+    // ota_1 lies past the end: an entry holding none of its bytes.
+    expect(root(snapshot)).toMatchObject({ partitions_outside_dump: [] });
+    expect(
+      snapshot.occurrences.find(
+        ({ logical_path }) => logical_path === "partitions/ota_1.bin",
+      ),
+    ).toMatchObject({
+      declared_size: 0,
+      limitations: [
+        "partitions/ota_1.bin lies outside the dump: the file holds none of its 65536 bytes.",
+      ],
+      format_metadata: {
+        index: 5,
+        written_offset: null,
+        written_end: null,
+        written_bytes: null,
+      },
     });
+    const { apps } = root(snapshot) as {
+      apps: { partition_index: number }[];
+    };
+    // An app partition the file holds none of has no image facts.
+    expect(apps.map(({ partition_index: index }) => index)).toEqual([3, 4]);
     expect(
       snapshot.occurrences.some(
         ({ logical_path }) => logical_path === "partitions/factory.bin",

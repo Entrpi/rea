@@ -92,7 +92,8 @@ The root `format_metadata` (`esp-flash-image`) records:
 - `apps`: ESP image facts for each app partition the dump holds;
 - `otadata`: the otadata partition's records, or null without one;
 - `boot_selection`: the app the bootloader would select, for every table;
-- `partitions_outside_dump`: declared partitions with no bytes in the file;
+- `partitions_outside_dump`: declared partitions that begin before the
+  dump's first byte, which have no entry;
 - `undescribed`: ranges outside every region, each from a byte that is not
   erased flash to the end of its gap.
 
@@ -121,8 +122,8 @@ Each partition entry also records where the bytes the dump holds are
 written, relative to the partition's start: `written_offset`, the first
 byte that is not erased flash (`0xFF`), `written_end`, just past the last
 such byte, and `written_bytes`, how many bytes are not `0xFF`. A partition
-erased throughout has null offsets and `written_bytes` `0`; a partition in
-`partitions_outside_dump` has all three null. The range bounds the written
+erased throughout has null offsets and `written_bytes` `0`; a partition the
+file holds none of has all three null. The range bounds the written
 bytes and does not say whether erased flash lies between them; extract the
 partition to read them.
 
@@ -132,12 +133,15 @@ partitions like any other, whose bytes are also `bootloader.bin` and
 `partition-table.bin`, and they are exempt from the rule that partitions
 follow the table, as in `gen_esp32part.py`.
 
-A partition that the file holds only in part, as when an `esptool merge-bin`
-dump ends inside its last partition, is the bytes the file holds, with an
-entry limitation that gives the size the table declares. One unreadable
-partition does not hide the others: partitions outside the dump, before its
-first byte or overlapping another are each reported while the rest stay
-readable.
+Every partition from the dump's first byte on is an entry holding the bytes
+the file has. One that the file holds only in part, as when an `esptool
+merge-bin` dump ends inside its last partition, has an entry limitation that
+gives the size the table declares; one that lies past the end of the file is
+an entry with no bytes and a limitation, and has no image facts. A partition
+that begins before the dump's first byte has no entry and is listed in
+`partitions_outside_dump`. One unreadable partition does not hide the
+others: partitions outside the dump or overlapping another are each reported
+while the rest stay readable.
 
 ### App partitions and the bootloader
 
@@ -211,11 +215,18 @@ another partition when an app fails to load.
 Erased flash (`0xFF`) between regions is described. In a gap between
 regions, the first byte that is not erased starts an `undescribed` range to
 the end of the gap, and makes coverage `unknown`; the rest of that range is
-not examined. Coverage is also `unknown` when no bootloader is located. A
-partition cut short or left out by the end of the file does not make it
-`unknown`: the table names every partition, so no entry is hidden, and the
-entry or `partitions_outside_dump` says what the file lacks. Artifact
-comparison of two such dumps therefore classifies every partition.
+not examined. Coverage is also `unknown` when no bootloader is located, or
+when a declared partition begins before the dump's first byte, since it has
+no entry. A partition cut short or left out by the end of the file does not
+make it `unknown`: its entry holds the bytes the file has, none for one past
+the end, and its limitation says what the file lacks. Coverage describes the
+inventory of the file, not the observation of every declared flash byte.
+
+So artifact comparison classifies every partition entry of two dumps. Where
+both lack the same bytes, as two `merge-bin` dumps of the same layout do,
+the entries are equal; a dump against a longer one reports each partition
+it cuts short or lacks as `changed`, and that entry's limitation says the
+file did not hold the bytes.
 
 `extract_artifact` writes every entry as an ordinary file, `nvs_keys`
 partitions included. On a device without flash encryption an `nvs_keys`
@@ -258,8 +269,8 @@ truncation and partitions outside the dump, index names for unsafe labels,
 repeated declarations, the otadata states and records, and each branch of
 the bootloader's selection. CLI and stdio MCP tests exercise the inputs and
 their identity and extraction. MCP `compare_artifacts` tests compare
-partition declarations, labels that are not UTF-8 included, and two dumps
-that end inside their last partition, whose partitions are each classified.
+partition declarations, labels that are not UTF-8 included, two dumps that
+end inside their last partition, and such a dump against a full one.
 
 The optional real lane builds its dumps with esptool and ESP-IDF's own tools:
 
@@ -295,7 +306,8 @@ otatool's own OTA logic runs unchanged. The lane then checks:
   `flash_offset` and, without it, left an ESP image whose `flash_dump`
   names `flash_offset` `0x1000`;
 - an app with a flipped byte beside valid partitions, and a truncated dump,
-  read with complete coverage and its missing partitions outside the dump.
+  read with complete coverage and its missing partitions as entries with no
+  bytes.
 
 The lane ran on macOS arm64 with Node 24.22.1, Homebrew Clang and LLD 21.1.8
 and ESP-IDF v5.5.2's `gen_esp32part.py`, `otatool.py` and `parttool.py`,

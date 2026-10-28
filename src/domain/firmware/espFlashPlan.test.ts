@@ -164,6 +164,8 @@ describe("ESP flash layout plans", () => {
       ["partition-table.bin", 0x7000, 0x1000],
       ["partitions/app.bin", 0xf000, 0x1_0000],
       ["partitions/cut.bin", 0x2_f000, 0x9000],
+      // Past the end of the file: an entry holding none of its bytes.
+      ["partitions/gone.bin", 0xf_f000, 0],
     ]);
     expect(plan.limitations).toEqual([
       "Partition early at 0x0 starts before the end of the partition table at 0x9000; gen_esp32part.py rejects such a table.",
@@ -171,11 +173,6 @@ describe("ESP flash layout plans", () => {
       "Partition cut at 0x30000-0x40000 is truncated: the dump holds 36864 of its 65536 bytes.",
       "Partition gone at 0x100000-0x101000 lies outside the dump, which ends at flash 0x39000.",
     ]);
-    const facts = finishEspFlashLayout(plan, {
-      otadataRecords: [],
-      gapFirstUnerased: erasedGaps(plan.gaps.length),
-    });
-    expect(facts.coverage).toBe("unknown");
   });
 
   it("reports every region inside a longer one", () => {
@@ -192,6 +189,42 @@ describe("ESP flash layout plans", () => {
       "partitions/b.bin at 0xa000 overlaps partitions/a.bin, which ends at 0x11000.",
       "partitions/c.bin at 0xc000 overlaps partitions/a.bin, which ends at 0x11000.",
     ]);
+  });
+});
+
+describe("ESP flash layout coverage", () => {
+  it("keeps coverage complete for partitions the end of the file cuts short or leaves out", () => {
+    const cut = planEspFlashLayout(input({ fileSize: 0x2_8000 }));
+    const reads = (plan: typeof cut) => ({
+      otadataRecords: [],
+      gapFirstUnerased: erasedGaps(plan.gaps.length),
+    });
+    // ota_0 is cut short and ota_1 lies past the end; both are entries.
+    expect(
+      cut.regions.slice(-2).map(({ path, available }) => [path, available]),
+    ).toEqual([
+      ["partitions/ota_0.bin", 0x8000],
+      ["partitions/ota_1.bin", 0],
+    ]);
+    expect(finishEspFlashLayout(cut, reads(cut)).coverage).toBe("complete");
+    // A partition before the dump's first byte has no entry, so coverage is
+    // unknown even with the bootloader located.
+    const later = planEspFlashLayout(
+      input({
+        fileSize: 0x3_f000,
+        origin: { value: 0x1000, source: "caller" },
+        bootloader: {
+          flashAddress: 0x1000,
+          fileOffset: 0,
+          chip: espChipForId(0x0000)!,
+        },
+        table: table([
+          { label: "early", type: 1, subtype: 2, offset: 0x0, size: 0x1000 },
+          ...TWO_OTA_PARTITIONS,
+        ]),
+      }),
+    );
+    expect(finishEspFlashLayout(later, reads(later)).coverage).toBe("unknown");
   });
 });
 

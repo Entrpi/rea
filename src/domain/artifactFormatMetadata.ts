@@ -397,7 +397,10 @@ export const espFlashImageMetadataSchema = z.strictObject({
         .nullable(),
     }),
   }),
-  /** Declared partitions with no bytes in the dump, which have no entry. */
+  /**
+   * Declared partitions that begin before the dump's first byte, which have
+   * no entry. A partition past the dump's end is an entry with no bytes.
+   */
   partitions_outside_dump: z.array(espFlashPartitionMetadataSchema),
   /** ESP image facts for each app partition the dump holds. */
   apps: z.array(
