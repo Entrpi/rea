@@ -63,11 +63,35 @@ const MAX_CONCURRENT_REVERSE_ENGINEERING_OPERATIONS = 8;
 export interface ReverseEngineeringServiceOptions {
   readonly environment?: Readonly<NodeJS.ProcessEnv>;
   readonly commands: ReverseEngineeringCommandPort;
-  readonly run?: ReverseEngineeringCommandRunner;
-  readonly runOwned?: typeof runOwnedCommand;
+  /** Defaults to the host's PATH lookup and owned process execution. */
+  readonly processes?: ReverseEngineeringProcesses;
   readonly digest?: typeof digestFile;
   readonly stat?: (path: string) => Promise<Stats>;
 }
+
+/**
+ * The process boundary: where a provider command resolves and how it runs.
+ * Lookup and execution are replaced together, so a fake runner never consults
+ * the host PATH.
+ */
+export type ReverseEngineeringProcesses =
+  | {
+      readonly lookup: typeof lookupExecutable;
+      /** Replaces execution and output capture. */
+      readonly run: ReverseEngineeringCommandRunner;
+      readonly runOwned?: undefined;
+    }
+  | {
+      readonly lookup: typeof lookupExecutable;
+      /** Replaces the owned process primitive under the service's capture. */
+      readonly runOwned: typeof runOwnedCommand;
+      readonly run?: undefined;
+    };
+
+const HOST_PROCESSES: ReverseEngineeringProcesses = {
+  lookup: lookupExecutable,
+  runOwned: runOwnedCommand,
+};
 
 interface ReverseEngineeringCommandRunner {
   (
@@ -111,6 +135,7 @@ export const resolveRizinCommandRequest = (
 export class ReverseEngineeringService {
   readonly #environment: Readonly<NodeJS.ProcessEnv>;
   readonly #commands: ReverseEngineeringCommandPort;
+  readonly #lookup: typeof lookupExecutable;
   readonly #run: ReverseEngineeringCommandRunner;
   readonly #digest: typeof digestFile;
   readonly #stat: (path: string) => Promise<Stats>;
@@ -138,16 +163,17 @@ export class ReverseEngineeringService {
   constructor(options: ReverseEngineeringServiceOptions) {
     this.#environment = { ...(options.environment ?? process.env) };
     this.#commands = options.commands;
+    const processes = options.processes ?? HOST_PROCESSES;
+    this.#lookup = processes.lookup;
     this.#run =
-      options.run ??
-      runOwnedCommandOutput(
-        options.runOwned ?? runOwnedCommand,
-        (owner, cleanup) =>
-          this.#pendingCleanup.set(owner, {
-            observation: cleanup,
-            failures: this.#pendingCleanup.get(owner)?.failures ?? new Set(),
-          }),
-      );
+      processes.run === undefined
+        ? runOwnedCommandOutput(processes.runOwned, (owner, cleanup) =>
+            this.#pendingCleanup.set(owner, {
+              observation: cleanup,
+              failures: this.#pendingCleanup.get(owner)?.failures ?? new Set(),
+            }),
+          )
+        : processes.run;
     this.#digest = options.digest ?? digestFile;
     this.#stat = options.stat ?? statPath;
   }
@@ -837,7 +863,7 @@ export class ReverseEngineeringService {
 
   /**
    * Resolve, hash and identify the selected executable, then run that same
-   * file. A completed probe is reused for the same launch path and digest. A
+   * path. A completed probe is reused for the same launch path and digest. A
    * tool that cannot be identified still runs; only cancellation, the call's
    * deadline and a probe whose process cleanup remains incomplete stop the
    * command.
@@ -864,11 +890,11 @@ export class ReverseEngineeringService {
     });
     if (probe === undefined)
       return ok(unidentified("no reliable version probe was performed"));
-    const lookup = await lookupExecutable(
+    const lookup = await this.#lookup(
       profile.executable,
       process.cwd(),
       environment.PATH,
-      { signal, timeoutMs, stat: this.#stat },
+      { signal, timeoutMs },
     );
     if (lookup.status === "interrupted")
       return err(
