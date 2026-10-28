@@ -193,9 +193,11 @@ or `vector-table`.
 Identity has two levels:
 
 - Coordinate identity (`function_coordinate_context`) covers only resolved
-  values that move coordinates: the decoder, the base, and the entry's address
-  and decode context. A caller-named entry and a Reset-derived entry at the
-  same address get the same coordinate context, so their functions compare.
+  values that move coordinates: the decoder, the base, and the entry's decode
+  context. Every entry of one image at one base gets the same coordinate
+  context, so functions found from a caller-named entry and from Reset compare.
+  A legacy load maps file offset 0 at its entry, so there the entry address is
+  the base.
 - Session and snapshot identity also cover the provenance that results report:
   `raw_load` adds the variant, the vector-table address, and the entry's role
   and basis. A reused session never reports a basis or vector words that the
@@ -233,8 +235,9 @@ This is decision D1 of the embedded-target work, raised in
   A `role` that records how the entry was chosen mixes provenance with what the
   entry is. Leaving the basis and the vector-table address out of session
   identity would let a reused session report provenance or vector words that
-  the current request did not produce. Putting them in coordinate identity would
-  make a caller-named entry and Reset at one address incomparable. Ghidra's
+  the current request did not produce. Putting them or the entry address in
+  coordinate identity would make functions found from two entries of one image
+  incomparable. Ghidra's
   default Cortex labels name every slot, reserved ones included, and at base
   `0x0` the code after the table; the vector table is admission's to read. A
   separate base for every raw family is a later, additive widening; it needs
