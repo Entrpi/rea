@@ -550,30 +550,67 @@ posix(
   },
 );
 
-posix(
-  "keeps at most 2,048 characters of a banner and marks it truncated",
-  async () => {
+posix.each([
+  ["ASCII", "x", 2_021],
+  ["astral", "\u{1F600}", 505],
+] as const)(
+  "keeps at most 2,048 UTF-8 bytes of a banner of %s characters, cut between code points",
+  async (_kind, filler, kept) => {
     const { executable, path } = await fixture();
-    const banner = `rizin 0.9.1 @ linux-x86-64 ${"x".repeat(5_000)}`;
-    const run = runner(() => banner);
+    // 27 bytes; with it, 2,021 ASCII characters or 505 four-byte ones fit.
+    const prefix = "rizin 0.9.1 @ linux-x86-64 ";
+    const run = runner(() => prefix + filler.repeat(5_000));
     const service = new TestReverseEngineeringService({
       run,
       lookup: lookupExecutable,
       environment: { REA_RIZIN_COMMAND: executable },
     });
-    for (const command of ["iI", "iS"]) {
-      const result = await service.executeRizinCommand({ path, command });
-      if (!result.ok) throw result.error;
-      expect(result.value.provider.version).toBe("0.9.1");
-      expect(result.value.parameters).toMatchObject({
-        provider_version_banner: banner.slice(0, 2_048),
-        provider_version_banner_truncated: true,
-      });
-    }
-    expect(probes(run)).toBe(2);
+    const result = await service.executeRizinCommand({ path, command: "iI" });
+    if (!result.ok) throw result.error;
+    expect(result.value.provider.version).toBe("0.9.1");
+    expect(result.value.parameters).toMatchObject({
+      provider_version_banner: prefix + filler.repeat(kept),
+      provider_version_banner_truncated: true,
+    });
   },
 );
 
+posix(
+  "cuts a failed probe's diagnostic streams within 2,048 UTF-8 bytes, between code points",
+  async () => {
+    const { executable, path } = await fixture();
+    const astral = "\u{1F600}";
+    const run = vi.fn(
+      async (
+        _command: string,
+        args: readonly string[],
+        _options?: ExecFileOutputOptions,
+      ) => {
+        if (args[0] === "-v")
+          throw Object.assign(new Error("probe exited"), {
+            code: 2,
+            signal: null,
+            stdout: astral.repeat(1_000),
+            stderr: `a${astral.repeat(1_000)}`,
+          });
+        return { stdout: "command output", stderr: "" };
+      },
+    );
+    const service = new TestReverseEngineeringService({
+      run,
+      lookup: lookupExecutable,
+      environment: { REA_RIZIN_COMMAND: executable },
+    });
+    const result = await service.executeRizinCommand({ path, command: "iI" });
+    if (!result.ok) throw result.error;
+    // 512 four-byte characters fill the budget; after "a", only 511 fit.
+    expect(result.value.parameters.provider_version_probe).toMatchObject({
+      stdout: astral.repeat(512),
+      stderr: `a${astral.repeat(511)}`,
+      output_truncated: true,
+    });
+  },
+);
 posix(
   "leaves the version unknown when the banner is not valid UTF-8",
   async () => {

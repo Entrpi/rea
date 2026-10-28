@@ -49,6 +49,7 @@ import {
   runOwnedCommand,
 } from "../../process/OwnedCommand.js";
 import type { ProviderProcessSupervisor } from "../../process/ProviderProcess.js";
+import { boundedUtf8Text } from "../../process/boundedUtf8Text.js";
 import { lookupExecutable } from "../../process/ExecutableLookup.js";
 import { absoluteCallerPath } from "../../filesystem/callerPath.js";
 import { parseAnalysisInput } from "../AnalysisInput.js";
@@ -1018,12 +1019,12 @@ export class ReverseEngineeringService {
           diagnostics: versionProbeDiagnostics(0, output),
         });
       const line = output.stdout.split(/\r?\n/u, 1)[0]?.trim() ?? "";
-      const banner = line.slice(0, VERSION_PROBE_TEXT_CHARS);
+      const banner = boundedUtf8Text(line, VERSION_PROBE_TEXT_BYTES);
       return ok({
         status: "read",
-        identification: probe.identify(banner),
-        banner,
-        bannerTruncated: line.length > VERSION_PROBE_TEXT_CHARS,
+        identification: probe.identify(banner.text),
+        banner: banner.text,
+        bannerTruncated: banner.truncated,
       });
     } catch (cause) {
       const capture = execFileOutputFailure(cause);
@@ -1113,9 +1114,9 @@ export const VERSION_PROBE_FAILURE_REASONS = {
   string
 >;
 
-// A banner is one line; this bounds the banner a probe keeps and a failed
-// probe's diagnostics, so both stay small in Evidence.
-const VERSION_PROBE_TEXT_CHARS = 2_048;
+// A banner is one line. This UTF-8 byte budget bounds the recorded banner and
+// each stream of a failed probe's diagnostics, cutting only between code points.
+const VERSION_PROBE_TEXT_BYTES = 2_048;
 
 /** Bounded exit facts and output of a probe that printed no usable banner. */
 const versionProbeDiagnostics = (
@@ -1132,12 +1133,14 @@ const versionProbeDiagnostics = (
       }
     | undefined,
 ): Readonly<Record<string, JsonValue>> => {
-  const bounded = (text: string): string =>
-    text.length <= VERSION_PROBE_TEXT_CHARS
-      ? text
-      : text.slice(0, VERSION_PROBE_TEXT_CHARS);
-  const stdout = output?.stdout ?? "";
-  const stderr = output?.stderr ?? "";
+  const stdout = boundedUtf8Text(
+    output?.stdout ?? "",
+    VERSION_PROBE_TEXT_BYTES,
+  );
+  const stderr = boundedUtf8Text(
+    output?.stderr ?? "",
+    VERSION_PROBE_TEXT_BYTES,
+  );
   return {
     // An exit status of output that was not fully collected is not reported.
     exit_code:
@@ -1146,12 +1149,10 @@ const versionProbeDiagnostics = (
         : null,
     signal: output?.signal ?? null,
     error_code: typeof code === "string" ? code : null,
-    stdout: bounded(stdout),
-    stderr: bounded(stderr),
+    stdout: stdout.text,
+    stderr: stderr.text,
     output_truncated:
-      output?.outputTruncated === true ||
-      stdout.length > VERSION_PROBE_TEXT_CHARS ||
-      stderr.length > VERSION_PROBE_TEXT_CHARS,
+      output?.outputTruncated === true || stdout.truncated || stderr.truncated,
     // Invalid UTF-8 is decoded as replacement characters; these mark it.
     stdout_invalid_utf8: output?.stdoutInvalidUtf8 === true,
     stderr_invalid_utf8: output?.stderrInvalidUtf8 === true,
