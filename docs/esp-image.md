@@ -100,8 +100,10 @@ Strings stop at the first NUL and are omitted, with a limitation, when they
 are not valid UTF-8. The bootloader descriptor's magic is a single byte
 (`0x50`), so its reserved bytes, which ESP-IDF zero-fills, must also be zero.
 A `--ram-only-header` image puts RAM segments first, so its app descriptor is
-not in segment 0 and its role is unknown. `mmu_page_size` is `0` in images
-built before ESP-IDF v5.4.
+not in segment 0 and its role is unknown. `mmu_page_size` keeps ESP-IDF's
+name and value: the MMU page size as a base-2 logarithm, as
+`esp_app_desc_t` declares it, so `16` means 64 KiB. It is `0` in images built
+before ESP-IDF v5.4.
 
 ## Segments
 
