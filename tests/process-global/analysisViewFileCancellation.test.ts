@@ -6,11 +6,11 @@ import {
   environmentManifestCaptureFixture,
 } from "../fixtures/analysisView.js";
 import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
-import { readEvidenceFileSource } from "../../src/application/EvidenceFileSource.js";
+import { readEvidenceFileSource } from "../../src/application/analysisView/evidenceFileSource.js";
 import { inspectAnalysisView } from "../../src/application/analysisView/AnalysisViewService.js";
 
 // This module mock needs an isolated graph even if another service imports the workflow first.
-vi.mock("../../src/application/EvidenceFileSource.js", {
+vi.mock("../../src/application/analysisView/evidenceFileSource.js", {
   spy: true,
 });
 
@@ -26,8 +26,8 @@ it("prefers cancellation observed after failed Evidence-file authentication", as
     JSON.stringify({ ...parent, evidence_id: `ev_${"0".repeat(64)}` }),
   );
   const { readEvidenceFileSource: read } = await vi.importActual<
-    typeof import("../../src/application/EvidenceFileSource.js")
-  >("../../src/application/EvidenceFileSource.js");
+    typeof import("../../src/application/analysisView/evidenceFileSource.js")
+  >("../../src/application/analysisView/evidenceFileSource.js");
   // Abort at the completed read boundary, before its authentication failure is delivered.
   vi.mocked(readEvidenceFileSource).mockImplementationOnce(async (...args) => {
     const loaded = await read(...args);

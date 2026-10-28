@@ -12,6 +12,8 @@ import { ok } from "../domain/result.js";
 import { registerEvidenceSourceCommand } from "./evidenceSourceCommand.js";
 import type { CliInstance } from "./types.js";
 
+const OPERATION = "compare_artifacts";
+
 /** Compare artifact inventories through the same source owners and workflow as MCP. */
 export const registerArtifactComparisonCommand = (
   cli: CliInstance,
@@ -19,7 +21,8 @@ export const registerArtifactComparisonCommand = (
 ): void =>
   registerEvidenceSourceCommand(cli, logger, {
     name: CLI_COMMANDS.compareArtifacts,
-    operation: "compare_artifacts",
+    operation: OPERATION,
+    inputOperation: OPERATION,
     providerId: ARTIFACT_COMPARISON_PROVIDER.id,
     description:
       'Compare two artifact inventories named as {left, right}: complete Evidence or {kind:"evidence-file",path,evidence_id?}. A one-shot command retains no session Evidence for retained-evidence references.',

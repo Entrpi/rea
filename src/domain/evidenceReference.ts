@@ -21,9 +21,6 @@ export const evidenceFileReferenceSchema = z.strictObject({
       "The record to select when the file is an Evidence bundle, such as a summary's normalized_result.parent_evidence_id. A bundle holding exactly one record needs no selection.",
     ),
 });
-export type EvidenceFileReference = z.output<
-  typeof evidenceFileReferenceSchema
->;
 
 /** A key that Evidence does not have; the compiler rejects one Evidence gains. */
 type NotEvidenceKey<Key extends string> = Key extends keyof Evidence

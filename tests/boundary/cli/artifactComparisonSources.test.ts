@@ -27,13 +27,22 @@ const retained = (evidenceId: string) => ({
 });
 
 /** Two archives inspected in one stdio MCP session. */
-const inspectedPair = async (prefix: string) => {
+const inspectedPair = async (
+  prefix: string,
+  profile: "full" | "compact" = "compact",
+) => {
   const root = await createTestTempDirectory(prefix);
   const one = join(root, "one.zip");
   const two = join(root, "two.zip");
   await writeZip(one, { "a.txt": "same" });
   await writeZip(two, { "a.txt": "same", "b.txt": "new" });
-  const { call } = await connectLocalToolsMcp();
+  const { call, client } = await connectLocalToolsMcp({
+    REA_MCP_TOOL_FAMILIES: "session,artifact",
+    REA_MCP_INPUT_SCHEMA_PROFILE: profile,
+    REA_MCP_OUTPUT_SCHEMA_PROFILE: profile,
+    NODE_OPTIONS: "--max-old-space-size=2048",
+    RAYON_NUM_THREADS: "2",
+  });
   const inspect = async (
     path: string,
     detail: "complete" | "summary",
@@ -46,15 +55,15 @@ const inspectedPair = async (prefix: string) => {
   };
   const left = await inspect(one, "complete");
   const right = await inspect(two, "complete");
-  return { root, one, call, inspect, left, right };
+  return { root, one, call, client, inspect, left, right };
 };
 
-cliTest(
-  "gives one comparison for retained, inline, file and mixed sources through MCP and the CLI",
-  async ({ cli }) => {
-    const { root, one, call, inspect, left, right } = await inspectedPair(
-      "rea-artifact-sources-",
-    );
+cliTest.for(["full", "compact"] as const)(
+  "gives one comparison for retained, inline, file and mixed sources through MCP and the CLI (%s)",
+  { timeout: 60_000 },
+  async (profile, { cli }) => {
+    const { root, one, call, client, inspect, left, right } =
+      await inspectedPair("rea-artifact-sources-", profile);
     const compare = async (input: Record<string, unknown>) => {
       const compared = await call("compare_artifacts", input);
       expect(compared.isError, JSON.stringify(compared)).not.toBe(true);
@@ -115,15 +124,32 @@ cliTest(
         .evidence_id,
     ).toBe(viaSummary.evidence_id);
 
+    const summaryBundle = join(root, "with-summary.json");
+    expect(
+      (await call("export_evidence_bundle", { path: summaryBundle })).isError,
+    ).not.toBe(true);
+    const fileSummary = {
+      left: {
+        kind: "evidence-file",
+        path: summaryBundle,
+        evidence_id: summary.evidence_id,
+      },
+      right: rightInBundle,
+    };
+
     // The CLI resolves relative file paths from its working directory and
     // reaches the same comparison through the shared workflow.
-    for (const input of [
-      {
-        left: { kind: "evidence-file", path: "left.json" },
-        right: rightInBundle,
-      },
-      { left, right: rightInBundle },
-    ]) {
+    for (const [input, expectedId] of [
+      [
+        {
+          left: { kind: "evidence-file", path: "left.json" },
+          right: rightInBundle,
+        },
+        inline.evidence_id,
+      ],
+      [{ left, right: rightInBundle }, inline.evidence_id],
+      [fileSummary, viaSummary.evidence_id],
+    ] as const) {
       const request = join(root, "request.json");
       await writeFile(request, JSON.stringify(input));
       const compared = await cli.run({
@@ -131,8 +157,32 @@ cliTest(
         cwd: root,
       });
       expect(compared.exitCode, compared.stderr).toBe(0);
-      expect(parseEvidence(compared.json).evidence_id).toBe(inline.evidence_id);
+      expect(parseEvidence(compared.json).evidence_id).toBe(expectedId);
     }
+
+    // A new server must resolve the summary's parent from its own source file.
+    await client.close();
+    const summaryOnly = join(root, "summary-only.json");
+    await writeFile(summaryOnly, JSON.stringify(summary));
+    const { call: freshCall } = await connectLocalToolsMcp({
+      REA_MCP_TOOL_FAMILIES: "session,artifact",
+      REA_MCP_INPUT_SCHEMA_PROFILE: profile,
+      REA_MCP_OUTPUT_SCHEMA_PROFILE: profile,
+      NODE_OPTIONS: "--max-old-space-size=2048",
+    });
+    const missingParent = await freshCall("compare_artifacts", {
+      ...fileSummary,
+      left: { kind: "evidence-file", path: summaryOnly },
+    });
+    expect(parseMcpToolError(missingParent).error).toMatchObject({
+      code: "evidence_integrity_mismatch",
+      details: { evidence_id: parentId, reason: "missing", actual: null },
+    });
+    const fresh = await freshCall("compare_artifacts", fileSummary);
+    expect(fresh.isError, JSON.stringify(fresh)).not.toBe(true);
+    expect(parseEvidence(fresh.structuredContent).evidence_id).toBe(
+      viaSummary.evidence_id,
+    );
   },
 );
 

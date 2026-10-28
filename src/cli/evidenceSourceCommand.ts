@@ -17,6 +17,8 @@ import type { CliInstance } from "./types.js";
 export interface EvidenceSourceCommand<Schema extends z.ZodType> {
   readonly name: string;
   readonly operation: string;
+  /** The operation a JSON input failure names; the command name when omitted. */
+  readonly inputOperation?: string;
   readonly providerId: string;
   readonly description: string;
   /** The request schema checked here; z.unknown() leaves the request to the workflow. */
@@ -47,7 +49,11 @@ export const registerEvidenceSourceCommand = <Schema extends z.ZodType>(
     run: ({ args }) =>
       withCommandCancellation((signal) =>
         logCliCommand(logger, name, async () => {
-          const input = await parseCliJsonInput(args.inputJson, name, signal);
+          const input = await parseCliJsonInput(
+            args.inputJson,
+            command.inputOperation ?? name,
+            signal,
+          );
           if (!input.ok) return input.error;
           const value = resolveCliJsonPaths(
             input.value,

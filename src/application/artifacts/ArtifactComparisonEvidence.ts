@@ -6,7 +6,7 @@ import {
 import { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { AnalysisInputError } from "../../domain/analysisErrorCore.js";
 import { inspectAnalysisViewValidated } from "../analysisView/AnalysisViewService.js";
-import type { EvidenceFileReadOptions } from "../EvidenceFileSource.js";
+import type { EvidenceFileReadOptions } from "../analysisView/evidenceFileSource.js";
 import type { ArtifactComparisonInput } from "../../contracts/sessionToolSchemas.js";
 import { PAIRED_EVIDENCE_SOURCES } from "../../domain/evidenceReference.js";
 import { artifactInventorySummaryViewResultSchema } from "../../domain/analysisView/analysisView.js";
@@ -43,38 +43,27 @@ export interface ArtifactComparisonOutcome {
 }
 
 /**
- * Select both sides through the shared Evidence source owner, authenticate them,
- * then resolve a summary to its exact retained parent inventory.
+ * Select both sides through the shared Evidence source owner, authenticate
+ * them, then resolve a summary to its exact complete parent inventory: from
+ * the authenticated bundle that held the summary, else the retained session.
  */
 export const resolveArtifactComparisonSources = async (
   input: ArtifactComparisonInput,
   evidenceById: EvidenceLookup | undefined,
   options: EvidenceFileReadOptions = {},
 ): Promise<Result<ArtifactComparisonSources, AnalysisError>> => {
-  const selected = await resolveEvidenceSources(
-    input,
-    PAIRED_EVIDENCE_SOURCES,
-    evidenceById,
-    { ...options, operation: OPERATION },
-  );
-  if (!selected.ok) return selected;
-  const suppliedLeft = readEvidence(selected.value.left);
-  if (!suppliedLeft.ok) return suppliedLeft;
-  const suppliedRight = readEvidence(selected.value.right);
-  if (!suppliedRight.ok) return suppliedRight;
-  const left = resolveArtifactComparisonEvidence(
-    suppliedLeft.value,
-    evidenceById,
-    ["left"],
-  );
-  if (!left.ok) return left;
-  const right = resolveArtifactComparisonEvidence(
-    suppliedRight.value,
-    evidenceById,
-    ["right"],
-  );
-  if (!right.ok) return right;
-  return ok({ left: left.value, right: right.value });
+  return resolveEvidenceSources(input, PAIRED_EVIDENCE_SOURCES, evidenceById, {
+    ...options,
+    operation: OPERATION,
+    resolveEvidence: (candidate, related, side) => {
+      const authenticated = readEvidence(candidate);
+      return authenticated.ok
+        ? resolveArtifactComparisonEvidence(authenticated.value, related, [
+            side,
+          ])
+        : authenticated;
+    },
+  });
 };
 
 /** Compare resolved inventories and derive Evidence citing both complete owners. */
