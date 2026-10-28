@@ -270,7 +270,15 @@ rea extract-artifact firmware.bin --json
 
 The inventory lists each segment with its ESP-IDF load classification, the
 checksum and SHA-256 results, the descriptor and any Secure Boot v2 signature
-blocks. See [ESP images](esp-image.md) for recognition, coverage and refusals.
+blocks. An ESP8266 image shares the ESP32 magic and is never detected; name
+the chip to read its header, segments and checksum:
+
+```sh
+rea inspect-artifact 0x00000.bin --target-format esp8266-image --json
+rea extract-artifact 0x00000.bin --target-format esp8266-image --json
+```
+
+See [ESP images](esp-image.md) for recognition, coverage and refusals.
 
 Inspect a Node.js SEA carrier without running it:
 

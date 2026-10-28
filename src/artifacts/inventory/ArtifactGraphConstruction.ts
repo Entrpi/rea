@@ -291,6 +291,7 @@ export const rootOccurrenceFor = (
       "intel-hex",
       "srec",
       "esp-image",
+      "esp8266-image",
     ].includes(metadata.format)
       ? "container"
       : artifactRoleForFormat(metadata.path, metadata.format).kind,
@@ -588,7 +589,8 @@ const artifactRoleForFormat = (
     format === "uimage" ||
     format === "intel-hex" ||
     format === "srec" ||
-    format === "esp-image"
+    format === "esp-image" ||
+    format === "esp8266-image"
   )
     return { kind: "container", format };
   return {

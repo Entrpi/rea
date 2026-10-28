@@ -1,12 +1,15 @@
 import { Readable, Transform, pipeline } from "node:stream";
 
 import type {
+  Esp8266ImageMetadata,
   EspImageMetadata,
   EspImageSegmentMetadata,
   EspImageSignatureBlockMetadata,
 } from "../domain/artifactFormatMetadata.js";
 import {
+  createEsp8266ImageDecoder,
   createEspImageDecoder,
+  type EspImageDecoder,
   type EspImageFailure,
 } from "../domain/firmware/espImage.js";
 import {
@@ -29,6 +32,10 @@ import { ArtifactFileSource } from "./ArtifactFileSource.js";
 import { readFileHandleChunks } from "../filesystem/readFileHandleChunks.js";
 import type { StableRegularFileDescriptor } from "../filesystem/RegularFile.js";
 
+/** ESP32-family images, or images whose caller named the ESP8266 chip. */
+type EspImageReaderFormat = "esp-image" | "esp8266-image";
+type EspImageReaderMetadata = EspImageMetadata | Esp8266ImageMetadata;
+
 const LABEL = "ESP image";
 type EspImageEntry = ArtifactEntry & {
   readonly byteOffset: number;
@@ -39,26 +46,32 @@ type EspImageEntry = ArtifactEntry & {
 };
 
 /**
- * Inventory one ESP32-family image as its header-declared segments and
- * Secure Boot v2 signature blocks. Decoding reads the file once; each entry
- * is a positional read of the carrier, rechecked against its identity.
+ * Inventory one ESP image as its header-declared segments and, for an
+ * ESP32-family image, its Secure Boot v2 signature blocks. Decoding reads the
+ * file once; each entry is a positional read of the carrier, rechecked
+ * against its identity.
  */
 export class EspImageArtifactReader implements ArtifactReader {
-  readonly format = "esp-image" as const;
+  readonly format: EspImageReaderFormat;
   readonly #scope = new ArtifactResourceScope();
   readonly #entries = new Map<string, EspImageEntry>();
   readonly #streams = new Set<Readable>();
   readonly #source: ArtifactFileSource;
   #prepared: Promise<void> | undefined;
-  #metadata: EspImageMetadata | undefined;
+  #metadata: EspImageReaderMetadata | undefined;
   #coverage: ArtifactReaderTraversal | undefined;
   #closing = false;
 
-  constructor(path: string, admitted?: StableRegularFileDescriptor) {
+  constructor(
+    path: string,
+    admitted?: StableRegularFileDescriptor,
+    format: EspImageReaderFormat = "esp-image",
+  ) {
+    this.format = format;
     this.#source = new ArtifactFileSource(path, LABEL, admitted);
   }
 
-  formatMetadata(): EspImageMetadata | undefined {
+  formatMetadata(): EspImageReaderMetadata | undefined {
     return this.#metadata === undefined
       ? undefined
       : structuredClone(this.#metadata);
@@ -249,9 +262,14 @@ export class EspImageArtifactReader implements ArtifactReader {
   }
 
   /** Stream the carrier once, stopping when later bytes cannot matter. */
-  async #decode(signal?: AbortSignal): Promise<EspImage> {
+  async #decode(
+    signal?: AbortSignal,
+  ): Promise<EspImage<EspImageReaderMetadata>> {
     const { handle, initial } = await this.#source.read(signal);
-    const decoder = createEspImageDecoder(initial.size);
+    const decoder: EspImageDecoder<EspImageReaderMetadata> =
+      this.format === "esp8266-image"
+        ? createEsp8266ImageDecoder(initial.size)
+        : createEspImageDecoder(initial.size);
     if (initial.size > 0)
       for await (const chunk of readFileHandleChunks(handle, {
         end: initial.size - 1,

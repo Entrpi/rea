@@ -686,7 +686,10 @@ matches eFuse key digests.
 Unknown `source_coverage` means truncation or undescribed trailing bytes, such
 as the flash segments of a `--ram-only-header` image; do not infer absence
 from it. Erased flash is described. Integrity mismatches are facts, not
-refusals. ESP8266 images are refused, and flash-encrypted images are not
-recognized. Segments are not disassembled, and RISC-V or Xtensa segments
+refusals. ESP8266 images are never detected: when the user says the file is
+one, pass `format: "esp8266-image"` to `open_binary`; root
+`format_metadata` (`esp8266-image`) holds the 8-byte `header`, `checksum` and
+`undescribed_trailing`, and its segments are always `unknown`. Flash-encrypted
+images are not recognized. Segments are not disassembled, and RISC-V or Xtensa segments
 cannot be opened as raw-binary. See
 [ESP images](https://github.com/morluto/rea/blob/main/docs/esp-image.md).

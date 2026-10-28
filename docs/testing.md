@@ -1958,8 +1958,11 @@ elf2image`, including `--secure-pad-v2`, `--ram-only-header` and
 `--pad-to-size`, signs one with RSA, ECDSA P-256 and P-384 keys, and compares
 REA's facts with `esptool image-info` and `espsecure signature-info-v2`. It
 compares extracted segments and signature blocks with the producer's bytes,
-and derives malformed images and ESP8266 v1 and v3 images. It checks each
-tool before building and warns when esptool is not the pinned v5.6.0.
+and derives malformed images. It builds ESP8266 v1 and v3 images, checks that
+REA refuses them without the chip, and compares their
+`--target-format esp8266-image` reads with `esptool image-info --chip
+esp8266`. It checks each tool before building and warns when esptool is not
+the pinned v5.6.0.
 `REA_XTENSA_ESP32_GCC` adds an ESP32 Xtensa build. See
 [ESP images](esp-image.md).
 

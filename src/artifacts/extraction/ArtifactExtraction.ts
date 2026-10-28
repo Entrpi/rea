@@ -64,6 +64,8 @@ export interface ArtifactExtractionInput {
   /** Selected artifact spelling; packed I/O remains on inputPath. */
   readonly selectedPath?: string | undefined;
   readonly inputFormat: BinaryTarget["format"];
+  /** A root format the caller named because its bytes do not identify it. */
+  readonly selectedRootFormat?: "esp8266-image" | undefined;
   readonly outputRoot: string;
   readonly environment: Readonly<NodeJS.ProcessEnv>;
   readonly integrityPolicy: ArtifactIntegrityPolicyName;
@@ -99,6 +101,7 @@ const extractArtifactInScope = async (
         asarHeaderAdmission:
           input.asarHeaderAdmission ??
           resolveAsarHeaderAdmission(input.environment),
+        selectedRootFormat: input.selectedRootFormat,
         integrity: input.integrityPolicy,
       },
       probeFacts,
@@ -591,6 +594,7 @@ const requireExtractableFormat = async (
     format !== "intel-hex" &&
     format !== "srec" &&
     format !== "esp-image" &&
+    format !== "esp8266-image" &&
     format !== "mach-o-universal" &&
     !isZipPackageFormat(format)
   ) {

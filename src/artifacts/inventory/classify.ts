@@ -28,6 +28,7 @@ import {
   zipRootPackageFormat,
 } from "../../domain/zipPackageFormat.js";
 import { ArtifactReaderFailure } from "../ArtifactReader.js";
+import { admitEsp8266ImageHeader } from "../../domain/firmware/espImage.js";
 import type { HashResult } from "../ArtifactHash.js";
 import {
   hashStableRootArtifactHandle,
@@ -75,6 +76,7 @@ export const classifyAndHashRootForInventory = async (
     | "asarHeaderAdmission"
     | "selectedPath"
     | "expectedRootSha256"
+    | "selectedRootFormat"
   >,
   probeFacts?: ArtifactEmbeddedFormatProbeFacts,
 ): Promise<RootInventoryClassification> => {
@@ -150,6 +152,7 @@ export const classifyAndHashRootForInventory = async (
       options.signal,
       options.asarHeaderAdmission,
       options.selectedPath,
+      options.selectedRootFormat,
     );
     const format =
       typeof classified === "string" ? classified : classified.kind;
@@ -171,7 +174,8 @@ export const classifyAndHashRootForInventory = async (
       format === "node-sea" ||
       format === "intel-hex" ||
       format === "srec" ||
-      format === "esp-image";
+      format === "esp-image" ||
+      format === "esp8266-image";
     outcome = {
       kind: "completed",
       value: {
@@ -211,6 +215,7 @@ const classifyRootFormat = async (
   signal?: AbortSignal,
   asarHeaderAdmission?: AsarHeaderAdmission,
   selectedPath?: string,
+  selectedRootFormat?: ArtifactInventoryOptions["selectedRootFormat"],
 ): Promise<
   | ArtifactOccurrence["artifact_format"]
   | NodeSeaAdmission
@@ -235,6 +240,16 @@ const classifyRootFormat = async (
   const archiveBytes = (await handle.stat()).size;
   const evidence = probe.finish(archiveBytes);
   abortIfNeeded(signal);
+  // The caller's format selection decides before any other signature.
+  if (selectedRootFormat === "esp8266-image") {
+    const admitted = admitEsp8266ImageHeader(evidence.prefix, archiveBytes);
+    if (!admitted.ok)
+      throw new ArtifactReaderFailure(
+        admitted.error.kind === "unsupported" ? "unavailable" : "format",
+        admitted.error.message,
+      );
+    return "esp8266-image";
+  }
   const classificationPath = artifactNameForClassification(
     selectedPath ?? path,
     path,

@@ -208,7 +208,11 @@ export const nodeSeaEntryDeclaration = (
 const uint8 = z.number().int().min(0).max(0xff);
 const uint16 = z.number().int().min(0).max(0xffff);
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/u);
-const byteRange = z.strictObject({ offset, length: offset });
+/**
+ * A file byte range. Like the checksum, each image kind takes its own
+ * instance, so the advertised JSON Schema keeps it inline.
+ */
+const byteRange = () => z.strictObject({ offset, length: offset });
 
 /**
  * `esp_app_desc_t` fields, as ESP-IDF names them; strings stop at NUL. A field
@@ -251,6 +255,19 @@ const espBootloaderDescriptorSchema = z.strictObject({
 });
 
 /**
+ * XOR of the segment data seeded with 0xEF, in the last byte of a 16-byte
+ * block. Each image kind takes its own instance, so the advertised JSON
+ * Schema keeps it inline rather than as a shared reference.
+ */
+const espImageChecksumSchema = () =>
+  z.strictObject({
+    offset: offset.nullable(),
+    stored: uint8.nullable(),
+    computed: uint8.nullable(),
+    status: z.enum(["valid", "invalid", "unavailable"]),
+  });
+
+/**
  * ESP32-family image facts. `header` and the descriptor fields are observed;
  * the descriptor kind, `chip`, the integrity statuses and the trailing-byte
  * ranges are derived.
@@ -281,12 +298,7 @@ export const espImageMetadataSchema = z.strictObject({
       source: z.string(),
     })
     .nullable(),
-  checksum: z.strictObject({
-    offset: offset.nullable(),
-    stored: uint8.nullable(),
-    computed: uint8.nullable(),
-    status: z.enum(["valid", "invalid", "unavailable"]),
-  }),
+  checksum: espImageChecksumSchema(),
   /** The SHA-256 the header's `hash_appended` adds after the checksum. */
   appended_sha256: z.strictObject({
     offset: offset.nullable(),
@@ -298,7 +310,7 @@ export const espImageMetadataSchema = z.strictObject({
   image_end: offset.nullable(),
   signature_sector_offset: offset.nullable(),
   /** Bytes after the image that no padding, signature or erased flash describes. */
-  undescribed_trailing: z.array(byteRange),
+  undescribed_trailing: z.array(byteRange()),
   /** Its kind classifies the image as an app or a bootloader. */
   descriptor: z
     .discriminatedUnion("kind", [
@@ -309,6 +321,33 @@ export const espImageMetadataSchema = z.strictObject({
 });
 export type EspImageMetadata = z.infer<typeof espImageMetadataSchema>;
 
+/**
+ * Facts of an image the caller named an ESP8266 image, read in esptool's v1
+ * layout: no extended header, digest, descriptor or signature follows the
+ * 8-byte header. `header` is observed; the checksum status and the
+ * trailing-byte ranges are derived.
+ */
+export const esp8266ImageMetadataSchema = z.strictObject({
+  kind: z.literal("esp8266-image"),
+  /**
+   * The common header with `esp_image_header_t` field names. ESP8266 codes
+   * `spi_size` differently from ESP32-family chips (esptool `FLASH_SIZES`).
+   */
+  header: z.strictObject({
+    segment_count: uint8,
+    spi_mode: uint8,
+    spi_speed: uint8,
+    spi_size: uint8,
+    entry_addr: uint32,
+  }),
+  checksum: espImageChecksumSchema(),
+  /** End of the checksum block; null when truncated before it. */
+  image_end: offset.nullable(),
+  /** Bytes after the image that no padding or erased flash describes. */
+  undescribed_trailing: z.array(byteRange()),
+});
+export type Esp8266ImageMetadata = z.infer<typeof esp8266ImageMetadataSchema>;
+
 /** One header-declared segment; `data_len` is declared, not available. */
 export const espImageSegmentMetadataSchema = z.strictObject({
   kind: z.literal("esp-image-segment"),
@@ -316,7 +355,10 @@ export const espImageSegmentMetadataSchema = z.strictObject({
   load_addr: uint32,
   data_len: uint32,
   header_offset: offset,
-  /** ESP-IDF's cold-boot `should_map` and `should_load`; derived. */
+  /**
+   * ESP-IDF's cold-boot `should_map` and `should_load`; derived. Always
+   * unknown in an ESP8266 image, whose loaders those rules do not describe.
+   */
   classification: z.enum(["mapped", "loaded", "not-loaded", "unknown"]),
 });
 export type EspImageSegmentMetadata = z.infer<
@@ -420,6 +462,7 @@ export const artifactFormatMetadataSchema = z.discriminatedUnion("kind", [
   espImageMetadataSchema,
   espImageSegmentMetadataSchema,
   espImageSignatureBlockMetadataSchema,
+  esp8266ImageMetadataSchema,
 ]);
 export type ArtifactFormatMetadata = z.infer<
   typeof artifactFormatMetadataSchema

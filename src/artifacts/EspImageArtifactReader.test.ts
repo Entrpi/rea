@@ -11,8 +11,11 @@ import { extractArtifact } from "./extraction/ArtifactExtraction.js";
 import * as espImageDecoding from "../domain/firmware/espImage.js";
 import {
   ESP32C3_APP_SEGMENTS,
+  ESP8266_SEGMENTS,
   esp8266Image,
+  esp8266ImageOf,
   espImage,
+  pattern,
   signedEspImage,
 } from "../../tests/fixtures/espImage.js";
 import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
@@ -222,6 +225,158 @@ it("refuses an ESP8266 image with its specific reason", async () => {
     await expect(list(reader)).rejects.toMatchObject({
       reason: "unavailable",
       message: espImageDecoding.ESP8266_REFUSAL,
+    });
+  } finally {
+    await reader.close();
+  }
+});
+
+// A NONOS SDK 0x00000.bin followed by erased flash and an unrelated record.
+const ESP8266_DUMP = Buffer.concat([
+  esp8266ImageOf({ segments: ESP8266_SEGMENTS }),
+  Buffer.alloc(16, 0xff),
+  pattern(16, 3),
+]);
+
+it("inventories an ESP8266 image only when the caller names the chip", async () => {
+  const path = await writeImage(ESP8266_DUMP, "esp8266.bin");
+  const snapshot = await scanCanonicalArtifactInventory(path, {
+    selectedRootFormat: "esp8266-image",
+  });
+  expect(snapshot.manifest.root_format).toBe("esp8266-image");
+  expect(snapshot.coverage).toEqual({
+    scope: "container-entries",
+    status: "unknown",
+  });
+  expect(snapshot.limitations).toEqual(
+    expect.arrayContaining([
+      ESP_IMAGE_LIMITATIONS.esp8266InventoryScope,
+      ESP_IMAGE_LIMITATIONS.esp8266UndescribedTrailing(16, 96),
+    ]),
+  );
+  expect(
+    snapshot.occurrences.find((row) => row.logical_path === "."),
+  ).toMatchObject({
+    artifact_kind: "container",
+    artifact_format: "esp8266-image",
+    format_metadata: {
+      kind: "esp8266-image",
+      checksum: { status: "valid" },
+      image_end: 80,
+      undescribed_trailing: [{ offset: 96, length: 16 }],
+    },
+  });
+  expect(
+    snapshot.occurrences
+      .filter((row) => row.logical_path !== ".")
+      .map((row) => [
+        row.logical_path,
+        row.source_location,
+        row.hash_status,
+        row.format_metadata,
+      ]),
+  ).toEqual([
+    [
+      "segment-00.bin",
+      { offset: 16, length: 32 },
+      "verified",
+      {
+        kind: "esp-image-segment",
+        index: 0,
+        load_addr: 0x4010_0000,
+        data_len: 32,
+        header_offset: 8,
+        classification: "unknown",
+      },
+    ],
+    [
+      "segment-01.bin",
+      { offset: 56, length: 16 },
+      "verified",
+      {
+        kind: "esp-image-segment",
+        index: 1,
+        load_addr: 0x3ffe_8000,
+        data_len: 16,
+        header_offset: 48,
+        classification: "unknown",
+      },
+    ],
+  ]);
+  // Without the caller's chip, inventory does not read the bytes as an image.
+  const detected = await scanCanonicalArtifactInventory(path);
+  expect(detected.manifest.root_format).not.toMatch(/^esp/u);
+  expect(detected.occurrences).toHaveLength(1);
+});
+
+it("refuses a named ESP8266 image whose header does not admit one", async () => {
+  await expect(
+    scanCanonicalArtifactInventory(await writeImage(pattern(64, 0x5a)), {
+      selectedRootFormat: "esp8266-image",
+    }),
+  ).rejects.toMatchObject({
+    reason: "format",
+    message: expect.stringContaining("ESP8266 image header needs magic 0xe9"),
+  });
+  const v2 = Buffer.from(ESP8266_DUMP);
+  v2[0] = 0xea;
+  await expect(
+    scanCanonicalArtifactInventory(await writeImage(v2), {
+      selectedRootFormat: "esp8266-image",
+    }),
+  ).rejects.toMatchObject({ reason: "unavailable" });
+});
+
+it("extracts byte-exact ESP8266 segments", async () => {
+  const directory = await createTestTempDirectory("rea-esp8266-extract-");
+  const path = join(directory, "esp8266.bin");
+  await writeFile(path, ESP8266_DUMP);
+  const resourceScope = new ArtifactResourceScope();
+  try {
+    const extracted = await extractArtifact({
+      inputPath: path,
+      inputFormat: "esp8266-image",
+      selectedRootFormat: "esp8266-image",
+      outputRoot: join(directory, "out"),
+      environment: process.env,
+      integrityPolicy: "fail",
+      resourceScope,
+    });
+    expect(extracted.containment_verified).toBe(true);
+    expect(extracted.artifacts.map((row) => row.relative_path).sort()).toEqual([
+      "segment-00.bin",
+      "segment-01.bin",
+    ]);
+    for (const [name, offset, length] of [
+      ["segment-00.bin", 16, 32],
+      ["segment-01.bin", 56, 16],
+    ] as const)
+      expect(
+        Buffer.compare(
+          await readFile(join(extracted.output_root, name)),
+          ESP8266_DUMP.subarray(offset, offset + length),
+        ),
+      ).toBe(0);
+  } finally {
+    await resourceScope.close();
+  }
+});
+
+it("reads ESP8266 root metadata through the reader it names", async () => {
+  const reader = new EspImageArtifactReader(
+    await writeImage(ESP8266_DUMP, "esp8266.bin"),
+    undefined,
+    "esp8266-image",
+  );
+  try {
+    expect(reader.format).toBe("esp8266-image");
+    expect((await list(reader)).map((entry) => entry.path)).toEqual([
+      "segment-00.bin",
+      "segment-01.bin",
+    ]);
+    expect(reader.formatMetadata()).toMatchObject({
+      kind: "esp8266-image",
+      header: { segment_count: 2, entry_addr: 0x4010_0004 },
     });
   } finally {
     await reader.close();

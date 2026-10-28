@@ -36,6 +36,7 @@ export type ArtifactReaderFormat =
   | "mach-o-universal"
   | "dmg"
   | "esp-image"
+  | "esp8266-image"
   | ZipPackageFormat;
 
 interface ArtifactReaderConstruction {
@@ -131,7 +132,8 @@ export function createArtifactReader(
     case "dmg":
       return new NativeDmgArtifactReader(path, options.environment);
     case "esp-image":
-      return new EspImageArtifactReader(path, rootSource);
+    case "esp8266-image":
+      return new EspImageArtifactReader(path, rootSource, format);
     default:
       return undefined;
   }

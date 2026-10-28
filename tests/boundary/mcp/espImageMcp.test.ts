@@ -83,11 +83,47 @@ it.each(["full", "compact"] as const)(
         ),
       ).toBe(0);
       await call("close_binary", {});
-      await writeFile(path, esp8266Image());
+      await rm(outputRoot, { recursive: true, force: true });
+      outputRoot = undefined;
+      const esp8266 = esp8266Image();
+      await writeFile(path, esp8266);
       const refused = await call("open_binary", { path });
       expect(JSON.stringify(parseMcpToolError(refused))).toContain(
         ESP8266_REFUSAL,
       );
+      // Naming the chip reads the same bytes.
+      const named = await call("open_binary", {
+        path,
+        format: "esp8266-image",
+      });
+      expect(named.isError, JSON.stringify(named)).not.toBe(true);
+      const inspected = await call("inspect_artifact", { detail: "summary" });
+      expect(inspected.isError, JSON.stringify(inspected)).not.toBe(true);
+      expect(
+        z
+          .object({
+            summary: z.object({ root_format_metadata: z.unknown() }),
+          })
+          .parse(parseEvidence(inspected.structuredContent).normalized_result)
+          .summary.root_format_metadata,
+      ).toMatchObject({
+        kind: "esp8266-image",
+        header: { segment_count: 2 },
+        checksum: { status: "valid" },
+        undescribed_trailing: [],
+      });
+      const segments = await call("extract_artifact", {});
+      expect(segments.isError, JSON.stringify(segments)).not.toBe(true);
+      const written = artifactExtractionResultSchema.parse(
+        parseEvidence(segments.structuredContent).normalized_result,
+      );
+      outputRoot = written.output_root;
+      expect(
+        Buffer.compare(
+          await readFile(join(written.output_root, "segment-00.bin")),
+          esp8266.subarray(16, 48),
+        ),
+      ).toBe(0);
     } finally {
       if (outputRoot !== undefined)
         await rm(outputRoot, { recursive: true, force: true });

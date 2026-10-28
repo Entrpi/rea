@@ -1,4 +1,5 @@
 import type {
+  Esp8266ImageMetadata,
   EspImageMetadata,
   EspImageSegmentMetadata,
   EspImageSignatureBlockMetadata,
@@ -41,8 +42,10 @@ export interface EspImageSignatureBlock {
   readonly metadata: EspImageSignatureBlockMetadata;
 }
 
-export interface EspImage {
-  readonly metadata: EspImageMetadata;
+export interface EspImage<
+  Metadata extends EspImageMetadata | Esp8266ImageMetadata = EspImageMetadata,
+> {
+  readonly metadata: Metadata;
   readonly segments: readonly EspImageSegment[];
   readonly signatureBlocks: readonly EspImageSignatureBlock[];
   /** Unknown when truncation or undescribed bytes may hide content. */
@@ -158,6 +161,19 @@ export const ESP_IMAGE_LIMITATIONS = {
     sectorEnd: number,
   ): string =>
     `Secure Boot v2 signature sector at offset ${offsetText(sector)} is truncated: the file ends at ${offsetText(fileSize)}, before ${offsetText(sectorEnd)}.`,
+  /** What an ESP8266 image inventory reads, and what it leaves unverified. */
+  esp8266InventoryScope:
+    "ESP8266 image inventory reads the 8-byte header, the header-declared segments and the checksum, as esptool v5.6.0 reads an ESP8266 image with magic 0xE9. The caller named the chip; the header does not record it. Segments are not classified: ESP-IDF's should_map and should_load describe ESP32-family bootloaders, and REA models neither the ESP8266 ROM bootloader nor a second-stage loader. Code is not disassembled.",
+  esp8266SegmentLengthUnaligned: (index: number, length: number): string =>
+    `ESP8266 image segment ${String(index)} length ${offsetText(length)} is not a multiple of 4; esptool does not write such a segment.`,
+  esp8266SuspiciousSegment: (
+    index: number,
+    address: number,
+    length: number,
+  ): string =>
+    `esptool v5.6.0 warns that ESP8266 image segment ${String(index)} is suspicious: it loads ${String(length)} bytes at ${offsetText(address)}, and esptool expects at most 65536 bytes at an address from 0x3ffe0000 through 0x40200000. A file that is not an ESP8266 image also gives such segments.`,
+  esp8266UndescribedTrailing: (bytes: number, firstOffset: number): string =>
+    `${String(bytes)} bytes after the ESP8266 image, from offset ${offsetText(firstOffset)}, are not described by its header or erased flash. They may be other flash contents, or the SHA-256 that esptool appends to a version 3 image.`,
 } as const;
 
 /** Derive chip, classification, integrity, descriptor and coverage facts. */
@@ -224,6 +240,83 @@ export const deriveEspImage = (observed: EspImageObservations): EspImage => {
       !imageComplete(observed) ||
       trailing.undescribed.length > 0 ||
       trailing.truncated
+        ? "unknown"
+        : "complete",
+    limitations,
+  };
+};
+
+/** esptool `BaseFirmwareImage.warn_if_unusual_segment`, which ESP8266 loads apply. */
+const ESP8266_USUAL_LOW = 0x3ffe_0000;
+const ESP8266_USUAL_HIGH = 0x4020_0000;
+const ESP8266_USUAL_LENGTH = 0x1_0000;
+
+/**
+ * Derive header, segment, checksum and coverage facts for an image whose
+ * caller named the ESP8266 chip. Nothing follows its checksum by format, so
+ * every later byte is erased flash or undescribed.
+ */
+export const deriveEsp8266Image = (
+  observed: EspImageObservations,
+): EspImage<Esp8266ImageMetadata> => {
+  const limitations: string[] = [];
+  const segments = observed.segments.map((segment) =>
+    segmentFacts(observed, segment, undefined),
+  );
+  for (const { metadata } of segments) {
+    if (metadata.data_len % 4 !== 0)
+      limitations.push(
+        ESP_IMAGE_LIMITATIONS.esp8266SegmentLengthUnaligned(
+          metadata.index,
+          metadata.data_len,
+        ),
+      );
+    if (
+      metadata.load_addr > ESP8266_USUAL_HIGH ||
+      metadata.load_addr < ESP8266_USUAL_LOW ||
+      metadata.data_len > ESP8266_USUAL_LENGTH
+    )
+      limitations.push(
+        ESP_IMAGE_LIMITATIONS.esp8266SuspiciousSegment(
+          metadata.index,
+          metadata.load_addr,
+          metadata.data_len,
+        ),
+      );
+  }
+  const truncated = truncation(observed, segments, limitations);
+  const checksum = checksumFacts(observed, truncated, limitations);
+  const first = observed.restFirstUnerased;
+  const undescribed =
+    observed.imageEnd === undefined || first === undefined
+      ? []
+      : [{ offset: first, length: observed.fileSize - first }];
+  if (first !== undefined && undescribed.length > 0)
+    limitations.push(
+      ESP_IMAGE_LIMITATIONS.esp8266UndescribedTrailing(
+        observed.fileSize - first,
+        first,
+      ),
+    );
+  const { header } = observed;
+  return {
+    metadata: {
+      kind: "esp8266-image",
+      header: {
+        segment_count: header[1] ?? 0,
+        spi_mode: header[2] ?? 0,
+        spi_speed: (header[3] ?? 0) & 0x0f,
+        spi_size: (header[3] ?? 0) >> 4,
+        entry_addr: u32(header, 4),
+      },
+      checksum,
+      image_end: observed.imageEnd ?? null,
+      undescribed_trailing: undescribed,
+    },
+    segments,
+    signatureBlocks: [],
+    coverage:
+      truncated || !imageComplete(observed) || undescribed.length > 0
         ? "unknown"
         : "complete",
     limitations,

@@ -292,8 +292,11 @@ Use `inspect-artifact` / `inspect_artifact` on an ESP32-family app or
 bootloader image, such as an OTA download or app partition, for its chip,
 classified segments, checksum and SHA-256 results, descriptor and Secure Boot
 v2 signature blocks. `extract-artifact` / `extract_artifact` writes one file
-per segment and signature block. Reading is portable and needs no external
-tool. See [ESP images](esp-image.md).
+per segment and signature block. For an ESP8266 image, name the chip with
+`--target-format esp8266-image` or `open_binary` `format: "esp8266-image"`;
+REA reads its header, segments and checksum, and never detects one, because
+it shares the ESP32 magic. Reading is portable and needs no external tool.
+See [ESP images](esp-image.md).
 
 ## Inspect extracted devicetrees
 

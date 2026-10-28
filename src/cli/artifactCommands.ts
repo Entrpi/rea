@@ -10,6 +10,7 @@ import { ARTIFACT_GRAPH_PROVIDER } from "../domain/investigationProviders.js";
 import { keyedArchiveInputSchema } from "../domain/apple/keyedArchive.js";
 import { z } from "incur";
 
+import type { ArtifactTargetSelection } from "../application/DirectAnalysis.js";
 import type { DirectAnalysis } from "../composition/directAnalysis.js";
 import { createArtifactExtractionDestination } from "../application/artifacts/ArtifactExtractionDestination.js";
 import { logCliCommand } from "../cliLogging.js";
@@ -196,6 +197,23 @@ const registerInterfaceBuilderCommand = (
   });
 };
 
+/** Read a target whose bytes do not identify its format. */
+const artifactTargetFormatOption = {
+  targetFormat: z
+    .enum(["esp8266-image"])
+    .optional()
+    .describe(
+      "Read the target as an ESP8266 firmware image, which is never detected because it shares the ESP32 image magic",
+    ),
+};
+
+const artifactTargetSelection = (options: {
+  readonly targetFormat?: "esp8266-image" | undefined;
+}): ArtifactTargetSelection =>
+  options.targetFormat === undefined
+    ? {}
+    : { formatHint: options.targetFormat };
+
 const registerExtractionCommand = (
   cli: CliInstance,
   logger: Logger,
@@ -212,6 +230,7 @@ const registerExtractionCommand = (
         .enum(["fail", "record-and-continue"])
         .default("fail")
         .describe("Behavior when declared artifact integrity does not match"),
+      ...artifactTargetFormatOption,
     }),
     run: ({ args, options }) =>
       logCliCommand(logger, "extract-artifact", () =>
@@ -223,6 +242,9 @@ const registerExtractionCommand = (
             output_root: createArtifactExtractionDestination(),
           },
           logger,
+          undefined,
+          undefined,
+          artifactTargetSelection(options),
         ).then(projectCliAnalysisResult),
       ),
   });
@@ -245,6 +267,7 @@ const registerInspectionCommand = (
         .enum(["fail", "record-and-continue"])
         .default("fail")
         .describe("Behavior when declared artifact integrity does not match"),
+      ...artifactTargetFormatOption,
     }),
     run: ({ args, options }) =>
       logCliCommand(logger, "inspect-artifact", () =>
@@ -264,6 +287,8 @@ const registerInspectionCommand = (
             { integrity_policy: options.integrityPolicy },
             logger,
             signal,
+            undefined,
+            artifactTargetSelection(options),
           );
           return publishCliAnalysisEvidence(complete, delivery);
         }),

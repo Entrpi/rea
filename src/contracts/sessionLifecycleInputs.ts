@@ -25,7 +25,7 @@ export const openBinaryInputSchema = z
     format: executableFormatHintSchema
       .optional()
       .describe(
-        "Explicit interpretation: dos-com or raw-binary (headerless), or gamecube-dol (GameCube/Wii DOL, never auto-detected). Omission preserves header-based detection.",
+        "Explicit interpretation: dos-com or raw-binary (headerless), gamecube-dol (GameCube/Wii DOL, never auto-detected), or esp8266-image (an ESP8266 firmware image, never auto-detected because it shares the ESP32 image magic). Omission preserves header-based detection.",
       ),
     architecture: binaryArchitectureSchema
       .optional()

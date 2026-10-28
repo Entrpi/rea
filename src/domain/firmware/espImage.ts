@@ -1,9 +1,15 @@
 import { createHash, type Hash } from "node:crypto";
 
+import type {
+  Esp8266ImageMetadata,
+  EspImageMetadata,
+} from "../artifactFormatMetadata.js";
 import { err, ok, type Result } from "../result.js";
 import {
+  deriveEsp8266Image,
   deriveEspImage,
   type EspImage,
+  type EspImageObservations,
   type ObservedSegmentHeader,
 } from "./espImageFacts.js";
 import {
@@ -23,7 +29,11 @@ import {
  */
 export const ESP_IMAGE_MAGIC = 0xe9;
 export const ESP_IMAGE_HEADER_BYTES = 24;
+/** The common header that esptool's `load_common_header` reads for ESP8266. */
+export const ESP8266_IMAGE_HEADER_BYTES = 8;
 export const ESP_IMAGE_MAX_SEGMENTS = 16;
+/** esptool's `ESP8266V2FirmwareImage.IMAGE_V2_MAGIC`. */
+const ESP8266_V2_MAGIC = 0xea;
 const CHECKSUM_SEED = 0xef;
 /** `esp_image_spi_freq_t` values; every esptool target uses only these. */
 const SPI_SPEEDS = new Set([0x0, 0x1, 0x2, 0xf]);
@@ -42,7 +52,7 @@ const ESP8266_LOAD_REGIONS = [
 ] as const;
 
 export const ESP8266_REFUSAL =
-  "ESP8266 firmware images are not supported: they share the 0xE9 magic but have an 8-byte header without the ESP32 extended header";
+  "ESP8266 images are not detected automatically: they share the 0xE9 magic with ESP32-family images, and their 8-byte header does not name the chip. To read this file as an ESP8266 image, open it with format esp8266-image (CLI: --target-format esp8266-image).";
 
 export type EspImageRecognition = "esp-image" | "esp8266";
 
@@ -52,13 +62,15 @@ export interface EspImageFailure {
   readonly message: string;
 }
 
-export interface EspImageDecoder {
+export interface EspImageDecoder<
+  Metadata extends EspImageMetadata | Esp8266ImageMetadata = EspImageMetadata,
+> {
   /** Consume the next file bytes in order; chunks may split any field. */
   write(chunk: Uint8Array): void;
   /** True once later bytes can no longer change the result. */
   readonly satisfied: boolean;
   /** Decode after `satisfied` or after the last byte of the file. */
-  finish(): Result<EspImage, EspImageFailure>;
+  finish(): Result<EspImage<Metadata>, EspImageFailure>;
 }
 
 const alignUp = (value: number, alignment: number): number =>
@@ -123,9 +135,105 @@ export const recognizeEspImage = (
   return u32(prefix, 28) % 4 === 0 ? "esp-image" : undefined;
 };
 
+/**
+ * Admit the header of an image whose caller named the ESP8266 chip. esptool
+ * reads a 0xE9 image as its v1 layout for ESP8266 (`LoadFirmwareImage`), and
+ * `verify` refuses more than 16 segments.
+ */
+export const admitEsp8266ImageHeader = (
+  header: Uint8Array,
+  fileSize: number,
+): Result<null, EspImageFailure> => {
+  const held = Math.min(header.length, fileSize);
+  if (held < ESP8266_IMAGE_HEADER_BYTES)
+    return err({
+      kind: "format",
+      message: `ESP8266 image header needs ${String(ESP8266_IMAGE_HEADER_BYTES)} bytes; the file holds ${String(held)}`,
+    });
+  if (header[0] === ESP8266_V2_MAGIC)
+    return err({
+      kind: "unsupported",
+      message:
+        "ESP8266 v2 images (magic 0xea), which second-stage bootloaders load, are not supported; REA reads ESP8266 images with magic 0xe9, esptool's v1 layout",
+    });
+  if (header[0] !== ESP_IMAGE_MAGIC)
+    return err({
+      kind: "format",
+      message: `ESP8266 image header needs magic 0xe9; the file begins with 0x${(header[0] ?? 0).toString(16).padStart(2, "0")}`,
+    });
+  const count = header[1] ?? 0;
+  if (count > ESP_IMAGE_MAX_SEGMENTS)
+    return err({
+      kind: "format",
+      message: `ESP8266 image header declares ${String(count)} segments; esptool accepts at most ${String(ESP_IMAGE_MAX_SEGMENTS)}`,
+    });
+  return ok(null);
+};
+
+/** How one image family lays out the bytes the shared decoder walks. */
+interface EspImageLayout<
+  Metadata extends EspImageMetadata | Esp8266ImageMetadata,
+> {
+  /** How error messages name the image. */
+  readonly label: string;
+  readonly headerBytes: number;
+  /** A whole-image refusal from the complete header, if any. */
+  readonly admitHeader: (
+    header: Uint8Array,
+    fileSize: number,
+  ) => EspImageFailure | undefined;
+  /**
+   * ESP32-family images may append a SHA-256 and a Secure Boot v2 sector,
+   * which need the image's digests; ESP8266 images have neither.
+   */
+  readonly secured: boolean;
+  readonly derive: (observed: EspImageObservations) => EspImage<Metadata>;
+}
+
+const ESP32_LAYOUT: EspImageLayout<EspImageMetadata> = {
+  label: "ESP image",
+  headerBytes: ESP_IMAGE_HEADER_BYTES,
+  admitHeader: (header, fileSize) => {
+    const recognized = recognizeHeader(header, fileSize);
+    if (recognized === "esp-image") return undefined;
+    return recognized === "esp8266"
+      ? { kind: "unsupported", message: ESP8266_REFUSAL }
+      : {
+          kind: "format",
+          message:
+            "ESP image header is not recognized: it needs magic 0xe9, at most 16 segments, ESP-IDF flash mode and speed codes, and a hash_appended byte of 0 or 1",
+        };
+  },
+  secured: true,
+  derive: deriveEspImage,
+};
+
+const ESP8266_LAYOUT: EspImageLayout<Esp8266ImageMetadata> = {
+  label: "ESP8266 image",
+  headerBytes: ESP8266_IMAGE_HEADER_BYTES,
+  admitHeader: (header, fileSize) => {
+    const admitted = admitEsp8266ImageHeader(header, fileSize);
+    return admitted.ok ? undefined : admitted.error;
+  },
+  secured: false,
+  derive: deriveEsp8266Image,
+};
+
 /** Start a decoder that reads each byte once and retains bounded state. */
-export const createEspImageDecoder = (fileSize: number): EspImageDecoder =>
-  new StreamingEspImageDecoder(fileSize);
+export const createEspImageDecoder = (
+  fileSize: number,
+): EspImageDecoder<EspImageMetadata> =>
+  new StreamingEspImageDecoder(fileSize, ESP32_LAYOUT);
+
+/**
+ * Start a decoder for an image whose caller named the ESP8266 chip: the
+ * 8-byte header, the segments and the checksum, then erased or undescribed
+ * bytes.
+ */
+export const createEsp8266ImageDecoder = (
+  fileSize: number,
+): EspImageDecoder<Esp8266ImageMetadata> =>
+  new StreamingEspImageDecoder(fileSize, ESP8266_LAYOUT);
 
 /** File regions in order; each ends where the next begins. */
 type Stage =
@@ -139,9 +247,12 @@ type Stage =
   | "sector"
   | "rest";
 
-class StreamingEspImageDecoder implements EspImageDecoder {
+class StreamingEspImageDecoder<
+  Metadata extends EspImageMetadata | Esp8266ImageMetadata,
+> implements EspImageDecoder<Metadata> {
   readonly #fileSize: number;
-  readonly #header = new Uint8Array(ESP_IMAGE_HEADER_BYTES);
+  readonly #layout: EspImageLayout<Metadata>;
+  readonly #header: Uint8Array;
   readonly #segmentHeader = new Uint8Array(ESP_IMAGE_SEGMENT_HEADER_BYTES);
   readonly #segments: ObservedSegmentHeader[] = [];
   readonly #descriptor = new Uint8Array(ESP_APP_DESC_BYTES);
@@ -153,7 +264,7 @@ class StreamingEspImageDecoder implements EspImageDecoder {
   #stage: Stage = "header";
   #position = 0;
   #regionStart = 0;
-  #regionEnd = ESP_IMAGE_HEADER_BYTES;
+  #regionEnd: number;
   #segmentCount = 0;
   #checksum = CHECKSUM_SEED;
   #descriptorBytes = 0;
@@ -168,11 +279,17 @@ class StreamingEspImageDecoder implements EspImageDecoder {
   #contentSha384: string | undefined;
   #failure: EspImageFailure | undefined;
 
-  constructor(fileSize: number) {
+  constructor(fileSize: number, layout: EspImageLayout<Metadata>) {
     this.#fileSize = fileSize;
+    this.#layout = layout;
+    this.#header = new Uint8Array(layout.headerBytes);
+    this.#regionEnd = layout.headerBytes;
   }
 
-  /** Reading stops at the first byte after the sector that is not erased. */
+  /**
+   * Reading stops at the first byte that is not erased after the image, or
+   * after the signature sector that may follow an ESP32-family image.
+   */
   get satisfied(): boolean {
     return (
       this.#failure !== undefined ||
@@ -196,20 +313,21 @@ class StreamingEspImageDecoder implements EspImageDecoder {
     }
   }
 
-  finish(): Result<EspImage, EspImageFailure> {
+  finish(): Result<EspImage<Metadata>, EspImageFailure> {
     if (this.#failure !== undefined) return err(this.#failure);
+    const { label } = this.#layout;
     if (!this.satisfied && this.#position !== this.#fileSize)
       return err({
         kind: "format",
-        message: `ESP image input ended at offset ${offsetText(this.#position)}, before the admitted size ${offsetText(this.#fileSize)}`,
+        message: `${label} input ended at offset ${offsetText(this.#position)}, before the admitted size ${offsetText(this.#fileSize)}`,
       });
     if (this.#stage === "header")
       return err({
         kind: "format",
-        message: `ESP image header needs ${String(ESP_IMAGE_HEADER_BYTES)} bytes; the file holds ${String(this.#position)}`,
+        message: `${label} header needs ${String(this.#layout.headerBytes)} bytes; the file holds ${String(this.#position)}`,
       });
     return ok(
-      deriveEspImage({
+      this.#layout.derive({
         fileSize: this.#fileSize,
         observedEnd: this.#position,
         header: this.#header,
@@ -280,8 +398,8 @@ class StreamingEspImageDecoder implements EspImageDecoder {
     }
     // Regions never span the sector boundary, so this is exact.
     if (
-      this.#sectorOffset === undefined ||
-      this.#position < this.#sectorOffset
+      this.#layout.secured &&
+      (this.#sectorOffset === undefined || this.#position < this.#sectorOffset)
     ) {
       this.#sha256.update(bytes);
       this.#sha384.update(bytes);
@@ -293,18 +411,8 @@ class StreamingEspImageDecoder implements EspImageDecoder {
   #advance(): void {
     switch (this.#stage) {
       case "header": {
-        const recognized = recognizeHeader(this.#header, this.#fileSize);
-        if (recognized !== "esp-image") {
-          this.#failure =
-            recognized === "esp8266"
-              ? { kind: "unsupported", message: ESP8266_REFUSAL }
-              : {
-                  kind: "format",
-                  message:
-                    "ESP image header is not recognized: it needs magic 0xe9, at most 16 segments, ESP-IDF flash mode and speed codes, and a hash_appended byte of 0 or 1",
-                };
-          return;
-        }
+        this.#failure = this.#layout.admitHeader(this.#header, this.#fileSize);
+        if (this.#failure !== undefined) return;
         this.#segmentCount = this.#header[1] ?? 0;
         this.#nextSegment();
         return;
@@ -327,6 +435,10 @@ class StreamingEspImageDecoder implements EspImageDecoder {
         this.#enter("checksum", 1);
         return;
       case "checksum":
+        if (!this.#layout.secured) {
+          this.#endImage();
+          return;
+        }
         // The appended digest covers every byte through the checksum.
         this.#imageSha256 = this.#sha256.copy().digest("hex");
         if (this.#header[23] === 1)
@@ -368,6 +480,10 @@ class StreamingEspImageDecoder implements EspImageDecoder {
 
   #endImage(): void {
     this.#imageEnd = this.#position;
+    if (!this.#layout.secured) {
+      this.#enter("rest", Number.POSITIVE_INFINITY);
+      return;
+    }
     // A signature sector begins at the next 4 KiB flash sector boundary.
     this.#sectorOffset = alignUp(this.#position, ESP_FLASH_SECTOR_BYTES);
     this.#enter("gap", this.#sectorOffset - this.#position);

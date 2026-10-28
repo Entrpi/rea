@@ -184,6 +184,7 @@ export interface ArtifactReader {
     | "intel-hex"
     | "srec"
     | "esp-image"
+    | "esp8266-image"
     | "file";
   entries(
     signal?: AbortSignal,

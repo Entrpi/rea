@@ -196,25 +196,54 @@ export const signedEspImage = (
   return Buffer.concat([padded, sector]);
 };
 
+export interface Esp8266ImageFixtureOptions {
+  readonly segments: readonly EspFixtureSegment[];
+  readonly entry?: number;
+  /** Header count; defaults to the number of segments. */
+  readonly segmentCount?: number;
+  /** Replace the computed checksum. */
+  readonly checksum?: number;
+}
+
 /**
- * An ESP8266 image: an 8-byte header without an extended header. A v1 image
- * starts in IRAM, Arduino's eboot at 0x4010F000, a v3 image in IROM.
+ * The 8-byte header (QIO, 1 MB at 40 MHz in ESP8266 codes), the segments and
+ * the 16-byte-aligned checksum, as esptool's ESP8266ROMFirmwareImage writes
+ * an image.
  */
-export const esp8266Image = (firstAddress = 0x4010_0000): Buffer => {
-  const segments = [
-    { address: firstAddress, data: pattern(32, 7) },
-    { address: 0x3ffe_8000, data: pattern(16, 8) },
-  ];
+export const esp8266ImageOf = (options: Esp8266ImageFixtureOptions): Buffer => {
   const parts: Buffer[] = [
-    Buffer.from([0xe9, segments.length, 0x00, 0x20]),
-    word(0x4010_0004),
+    Buffer.from([
+      0xe9,
+      options.segmentCount ?? options.segments.length,
+      0x00,
+      0x20,
+    ]),
+    word(options.entry ?? 0x4010_0004),
   ];
-  for (const { address, data } of segments)
-    parts.push(word(address), word(data.length), data);
+  for (const { address, data } of options.segments)
+    parts.push(word(address), word(data.length), Buffer.from(data));
   const body = Buffer.concat(parts);
   return Buffer.concat([
     body,
     Buffer.alloc(15 - (body.length % 16)),
-    Buffer.from([espChecksum(segments)]),
+    Buffer.from([options.checksum ?? espChecksum(options.segments)]),
   ]);
 };
+
+/** IRAM code and DRAM data, as a NONOS SDK `0x00000.bin` holds them. */
+export const ESP8266_SEGMENTS: readonly EspFixtureSegment[] = [
+  { address: 0x4010_0000, data: pattern(32, 7) },
+  { address: 0x3ffe_8000, data: pattern(16, 8) },
+];
+
+/**
+ * An ESP8266 image: an 8-byte header without an extended header. A v1 image
+ * starts in IRAM, Arduino's eboot at 0x4010F000, a v3 image in IROM.
+ */
+export const esp8266Image = (firstAddress = 0x4010_0000): Buffer =>
+  esp8266ImageOf({
+    segments: [
+      { address: firstAddress, data: pattern(32, 7) },
+      { address: 0x3ffe_8000, data: pattern(16, 8) },
+    ],
+  });

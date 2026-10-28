@@ -6,7 +6,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { withVerifierCleanup } from "../../lib/verifier-cleanup.mjs";
 import {
+  ESP8266_SELECTION,
   assertAgrees,
+  assertEsp8266Agrees,
   buildElf,
   checkTools,
   commands,
@@ -389,23 +391,99 @@ await withVerifierCleanup(async () => {
     path("esp8266-v3.bin"),
     esp8266App,
   ]);
+  const unnamed = /ESP8266 images are not detected automatically/u;
   const v3Oracle = await imageInfo(path("esp8266-v3.bin"), "esp8266");
   assert.ok((v3Oracle.segments[0]?.address ?? 0) >= 0x4020_0000);
-  assert.match(
-    (await inspect(path("esp8266-v3.bin"))).refused ?? "",
-    /ESP8266 firmware images are not supported/u,
-  );
-  report.images.push({ name: "esp8266-v3.bin", refused: true });
+  assert.match((await inspect(path("esp8266-v3.bin"))).refused ?? "", unnamed);
 
   // ESP8266 v1: esptool falls back to ESP8266; REA refuses it by name.
   const esp8266Image = path("esp8266-0x00000.bin");
   assert.equal((await imageInfo(esp8266Image)).detected, "ESP8266");
-  const refused = await inspect(esp8266Image);
-  assert.match(
-    refused.refused ?? "",
-    /ESP8266 firmware images are not supported/u,
+  assert.match((await inspect(esp8266Image)).refused ?? "", unnamed);
+
+  // Named, REA reads both as esptool --chip esp8266 does. The version 3
+  // image's appended SHA-256 is not part of the version 1 layout.
+  const v1 = await inspect(esp8266Image, ESP8266_SELECTION);
+  assertEsp8266Agrees(
+    "esp8266-0x00000.bin",
+    await imageInfo(esp8266Image, "esp8266"),
+    v1,
   );
-  report.images.push({ name: "esp8266-0x00000.bin", refused: true });
+  assert.equal(v1.inventory.coverage.status, "complete");
+  assert.deepEqual(v1.root.undescribed_trailing, []);
+  const v3 = await inspect(path("esp8266-v3.bin"), ESP8266_SELECTION);
+  assertEsp8266Agrees("esp8266-v3.bin", v3Oracle, v3);
+  const v3Bytes = await readFile(path("esp8266-v3.bin"));
+  assert.deepEqual(v3.root.undescribed_trailing, [
+    { offset: v3.root.image_end, length: 32 },
+  ]);
+  assert.equal(v3Bytes.length, v3.root.image_end + 32);
+  assert.ok(
+    createHash("sha256")
+      .update(v3Bytes.subarray(0, v3.root.image_end))
+      .digest()
+      .equals(v3Bytes.subarray(v3.root.image_end)),
+    "esp8266-v3.bin appended SHA-256",
+  );
+  for (const [name, rea] of [
+    ["esp8266-0x00000.bin", v1],
+    ["esp8266-v3.bin", v3],
+  ])
+    report.images.push({
+      name,
+      selected: "esp8266-image",
+      segments: rea.segments.map(
+        ({ format_metadata: segment }) =>
+          `${segment.index}:0x${segment.load_addr.toString(16)}:${segment.classification}`,
+      ),
+      checksum: rea.root.checksum.status,
+      coverage: rea.inventory.coverage.status,
+    });
+
+  // A flipped checksum stays readable; both tools report the computed value.
+  const flippedV1 = Buffer.from(await readFile(esp8266Image));
+  flippedV1[v1.root.checksum.offset] ^= 0xff;
+  await writeFile(path("esp8266-bad-checksum.bin"), flippedV1);
+  const flippedOracle = await imageInfo(
+    path("esp8266-bad-checksum.bin"),
+    "esp8266",
+  );
+  assert.equal(flippedOracle.checksum.valid, false);
+  const flippedRea = await inspect(
+    path("esp8266-bad-checksum.bin"),
+    ESP8266_SELECTION,
+  );
+  assertEsp8266Agrees("esp8266-bad-checksum.bin", flippedOracle, flippedRea);
+  assert.equal(flippedRea.root.checksum.status, "invalid");
+
+  // Extraction writes the bytes after each segment header esptool reports.
+  const v1Source = await readFile(esp8266Image);
+  const v1Expected = new Map(
+    (await imageInfo(esp8266Image, "esp8266")).segments.map(
+      ({ index, headerOffset, length }) => [
+        `segment-${String(index).padStart(2, "0")}.bin`,
+        v1Source.subarray(headerOffset + 8, headerOffset + 8 + length),
+      ],
+    ),
+  );
+  const v1Extracted = await extract(esp8266Image, workspace, ESP8266_SELECTION);
+  assert.equal(v1Extracted.containment_verified, true);
+  assert.equal(v1Extracted.manifest.root_sha256, sha256(v1Source));
+  assert.deepEqual(
+    v1Extracted.artifacts.map(({ relative_path }) => relative_path).sort(),
+    [...v1Expected.keys()].sort(),
+    "esp8266-0x00000.bin entries",
+  );
+  for (const [entry, bytes] of v1Expected)
+    assert.ok(
+      (await readFile(join(v1Extracted.output_root, entry))).equals(bytes),
+      `esp8266-0x00000.bin ${entry}`,
+    );
+  assert.equal(sha256(await readFile(esp8266Image)), sha256(v1Source));
+  report.extractions.push({
+    name: "esp8266-0x00000.bin",
+    entries: v1Extracted.artifacts.length,
+  });
   console.log(JSON.stringify(report, null, 2));
 }, [
   // Remove outputs only after every owned command tree has stopped; a failed

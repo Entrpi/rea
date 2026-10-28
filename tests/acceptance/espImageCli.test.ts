@@ -93,13 +93,61 @@ cliTest.for(cases)(
   },
 );
 
-cliTest("refuses an ESP8266 image through the CLI", async ({ cli }) => {
-  const directory = await createTestTempDirectory("rea-esp8266-cli-");
-  const source = join(directory, "esp8266.bin");
-  await writeFile(source, esp8266Image());
-  const result = await cli.run({
-    arguments: ["inspect-artifact", source, "--json"],
-  });
-  expect(result.exitCode).not.toBe(0);
-  expect(result.stdout + result.stderr).toContain(ESP8266_REFUSAL);
-});
+cliTest(
+  "reads an ESP8266 image through the CLI only when the caller names the chip",
+  async ({ cli }) => {
+    const directory = await createTestTempDirectory("rea-esp8266-cli-");
+    const source = join(directory, "esp8266.bin");
+    const bytes = esp8266Image();
+    await writeFile(source, bytes);
+    const refused = await cli.run({
+      arguments: ["inspect-artifact", source, "--json"],
+    });
+    expect(refused.exitCode).not.toBe(0);
+    expect(refused.stdout + refused.stderr).toContain(ESP8266_REFUSAL);
+    const inspected = await cli.run({
+      arguments: [
+        "inspect-artifact",
+        source,
+        "--target-format",
+        "esp8266-image",
+        "--json",
+      ],
+    });
+    expect(inspected.exitCode, inspected.stdout + inspected.stderr).toBe(0);
+    const graph = artifactInventoryResultSchema.parse(
+      artifactInspectionResultSchema.parse(
+        parseEvidence(inspected.json).normalized_result,
+      ).substeps[0]?.evidence.normalized_result,
+    );
+    expect(graph.manifest.root_format).toBe("esp8266-image");
+    expect(graph.coverage.status).toBe("complete");
+    expect(
+      graph.occurrences.find((row) => row.logical_path === ".")
+        ?.format_metadata,
+    ).toMatchObject({ kind: "esp8266-image", checksum: { status: "valid" } });
+    const extracted = await cli.run({
+      arguments: [
+        "extract-artifact",
+        source,
+        "--target-format",
+        "esp8266-image",
+        "--json",
+      ],
+      environment: { TMPDIR: directory, TMP: directory, TEMP: directory },
+    });
+    expect(extracted.exitCode, extracted.stdout + extracted.stderr).toBe(0);
+    const result = artifactExtractionResultSchema.parse(
+      parseEvidence(extracted.json).normalized_result,
+    );
+    onTestFinished(() =>
+      rm(result.output_root, { recursive: true, force: true }),
+    );
+    expect(
+      Buffer.compare(
+        await readFile(join(result.output_root, "segment-01.bin")),
+        bytes.subarray(56, 72),
+      ),
+    ).toBe(0);
+  },
+);

@@ -83,6 +83,9 @@ export const inventoryCoverage = (
         ...(reader.format === "esp-image"
           ? [ESP_IMAGE_LIMITATIONS.inventoryScope]
           : []),
+        ...(reader.format === "esp8266-image"
+          ? [ESP_IMAGE_LIMITATIONS.esp8266InventoryScope]
+          : []),
         ...(reader.format === "uimage"
           ? [
               "uImage inventory establishes the 64-byte legacy header facts and stored payload bytes. Compressed payloads are not decompressed, and the image is not executed.",
@@ -116,7 +119,8 @@ export const inventoryCoverage = (
     format === "node-sea" ||
     format === "intel-hex" ||
     format === "srec" ||
-    format === "esp-image"
+    format === "esp-image" ||
+    format === "esp8266-image"
   )
     return {
       coverage: { scope: "container-entries", status: "unknown" },

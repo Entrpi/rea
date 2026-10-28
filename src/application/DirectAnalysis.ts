@@ -154,10 +154,23 @@ export const runDirectAnalysis = async (
     }),
   );
 
+/** How the caller asks an artifact target to be read. */
+export interface ArtifactTargetSelection {
+  readonly formatHint?: ExecutableFormatHint;
+}
+
 /** Execute one provider-native semantic operation with atomic provenance. */
 export const runProviderAnalysis = async (
   dependencies: DirectAnalysisDependencies,
-  ...[path, tool, arguments_, logger = silentLogger, signal, delivery]:
+  ...[
+    path,
+    tool,
+    arguments_,
+    logger = silentLogger,
+    signal,
+    delivery,
+    selection,
+  ]:
     | readonly [
         path: string,
         tool: NativeToolName | ArtifactAnalysisOperation | ManagedToolName,
@@ -175,6 +188,15 @@ export const runProviderAnalysis = async (
           readonly detail?: "complete" | "summary";
           readonly evidenceBundlePath?: string;
         },
+      ]
+    | readonly [
+        path: string,
+        tool: ArtifactAnalysisOperation,
+        arguments_: Readonly<Record<string, JsonValue>>,
+        logger: Logger | undefined,
+        signal: AbortSignal | undefined,
+        delivery: undefined,
+        selection: ArtifactTargetSelection,
       ]
 ): Promise<Result<Evidence, JsonValue>> => {
   if (delivery !== undefined && tool !== "inspect_managed_members")
@@ -247,6 +269,9 @@ export const runProviderAnalysis = async (
       snapshotPath: undefined,
       signal: operationSignal,
       evidenceParameters,
+      ...(selection?.formatHint === undefined
+        ? {}
+        : { formatHint: selection.formatHint }),
       ...(ARTIFACT_ANALYSIS_OPERATION_SET.has(tool)
         ? { createSession: dependencies.createArtifactBinarySession }
         : NATIVE_INSPECTION_OPERATIONS.has(tool)

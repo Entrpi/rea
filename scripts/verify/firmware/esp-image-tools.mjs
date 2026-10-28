@@ -198,14 +198,17 @@ export const imageInfo = async (file, chip) => {
     secureVersion: field("Secure version"),
     bootloaderVersion: field("Bootloader version"),
     compileTime: field("Compile time"),
+    flashSize: field("Flash size"),
+    flashFreq: field("Flash freq"),
+    flashMode: field("Flash mode"),
   };
 };
 
 /** REA's complete inline inventory for one file through the built CLI. */
-export const inspect = async (file) => {
+export const inspect = async (file, selection = []) => {
   const result = await execute(
     process.execPath,
-    [entrypoint, "inspect-artifact", file, "--json"],
+    [entrypoint, "inspect-artifact", file, ...selection, "--json"],
     { ...options, env: { ...process.env, REA_LOG_LEVEL: "silent" } },
   ).then(
     ({ stdout }) => ({ ok: true, stdout }),
@@ -235,10 +238,10 @@ const oracleDescriptorKind = (oracle) => {
 };
 
 /** Extract every entry through the built CLI into a new directory in `root`. */
-export const extract = async (file, root) => {
+export const extract = async (file, root, selection = []) => {
   const { stdout } = await execute(
     process.execPath,
-    [entrypoint, "extract-artifact", file, "--json"],
+    [entrypoint, "extract-artifact", file, ...selection, "--json"],
     {
       ...options,
       env: {
@@ -305,4 +308,66 @@ export const assertAgrees = (name, oracle, rea) => {
     assert.equal(digest.status === "valid", oracle.hash.valid, name);
   }
   assertDescriptorAgrees(name, oracle, rea.root.descriptor);
+};
+
+/** Read a file as an ESP8266 image; its bytes do not name the chip. */
+export const ESP8266_SELECTION = ["--target-format", "esp8266-image"];
+
+/** esptool `ESP8266ROM.FLASH_SIZES`, `FLASH_FREQUENCY` and `FLASH_MODES`. */
+const ESP8266_FLASH_SIZES = new Map([
+  [0, "512KB"],
+  [1, "256KB"],
+  [2, "1MB"],
+  [3, "2MB"],
+  [4, "4MB"],
+  [5, "2MB-c1"],
+  [6, "4MB-c1"],
+  [8, "8MB"],
+  [9, "16MB"],
+]);
+const FLASH_FREQUENCIES = new Map([
+  [0x0, "40m"],
+  [0x1, "26m"],
+  [0x2, "20m"],
+  [0xf, "80m"],
+]);
+const FLASH_MODES = ["QIO", "QOUT", "DIO", "DOUT"];
+
+/** REA's ESP8266 facts agree with `image-info --chip esp8266` field by field. */
+export const assertEsp8266Agrees = (name, oracle, rea) => {
+  assert.equal(rea.inventory.manifest.root_format, "esp8266-image", name);
+  assert.equal(rea.root.kind, "esp8266-image", name);
+  const { header, checksum } = rea.root;
+  assert.equal(header.entry_addr, oracle.entry, `${name} entry`);
+  assert.equal(header.segment_count, oracle.segments.length, name);
+  assert.equal(
+    ESP8266_FLASH_SIZES.get(header.spi_size),
+    oracle.flashSize,
+    `${name} flash size`,
+  );
+  assert.equal(
+    FLASH_FREQUENCIES.get(header.spi_speed),
+    oracle.flashFreq,
+    `${name} flash freq`,
+  );
+  assert.equal(FLASH_MODES[header.spi_mode], oracle.flashMode, name);
+  assert.deepEqual(
+    rea.segments.map(({ format_metadata: segment }) => ({
+      index: segment.index,
+      length: segment.data_len,
+      address: segment.load_addr,
+      headerOffset: segment.header_offset,
+    })),
+    oracle.segments,
+    `${name} segments`,
+  );
+  assert.ok(
+    rea.segments.every(
+      ({ format_metadata: segment }) => segment.classification === "unknown",
+    ),
+    `${name} classes`,
+  );
+  assert.equal(checksum.stored, oracle.checksum.stored, `${name} checksum`);
+  assert.equal(checksum.computed, oracle.checksum.computed, name);
+  assert.equal(checksum.status === "valid", oracle.checksum.valid, name);
 };

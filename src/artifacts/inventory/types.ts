@@ -14,4 +14,9 @@ export interface ArtifactInventoryOptions {
   readonly environment?: Readonly<NodeJS.ProcessEnv> | undefined;
   /** ASAR header/index admission resolved from the owner's environment; default when absent. */
   readonly asarHeaderAdmission?: AsarHeaderAdmission | undefined;
+  /**
+   * A root format the caller named because its bytes do not identify it;
+   * byte classification applies otherwise.
+   */
+  readonly selectedRootFormat?: "esp8266-image" | undefined;
 }

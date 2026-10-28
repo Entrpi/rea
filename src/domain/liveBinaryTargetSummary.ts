@@ -78,6 +78,7 @@ export const liveBinaryTargetSummaryVariants = [
       "intel-hex",
       "srec",
       "esp-image",
+      "esp8266-image",
     ]),
     architecture: z.null(),
   }),

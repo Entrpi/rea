@@ -7,6 +7,8 @@ import { ESP_DESCRIPTOR_LIMITATIONS } from "./espImageStructures.js";
 
 import {
   ESP8266_REFUSAL,
+  admitEsp8266ImageHeader,
+  createEsp8266ImageDecoder,
   createEspImageDecoder,
   recognizeEspImage,
 } from "./espImage.js";
@@ -19,10 +21,12 @@ import {
 import {
   ESP32C3_APP_SEGMENTS,
   ESP32C3_BOOTLOADER_SEGMENTS,
+  ESP8266_SEGMENTS,
   appDescriptor,
   bootloaderDescriptor,
   erasedTo4KiB,
   esp8266Image,
+  esp8266ImageOf,
   espChecksum,
   espImage,
   pattern,
@@ -917,6 +921,235 @@ describe("ESP image refusals", () => {
       ok: false,
       error: {
         kind: "format",
+      },
+    });
+  });
+});
+
+const decodeEsp8266 = (bytes: Uint8Array, chunkBytes = 7) => {
+  const decoder = createEsp8266ImageDecoder(bytes.length);
+  for (
+    let offset = 0;
+    offset < bytes.length && !decoder.satisfied;
+    offset += chunkBytes
+  )
+    decoder.write(bytes.subarray(offset, offset + chunkBytes));
+  return decoder.finish();
+};
+
+const esp8266 = (bytes: Uint8Array, chunkBytes?: number) => {
+  const decoded = decodeEsp8266(bytes, chunkBytes);
+  if (!decoded.ok) throw new Error(decoded.error.message);
+  return decoded.value;
+};
+
+/** Segment data ends at 72; the checksum ends the next 16-byte block. */
+const ESP8266 = esp8266ImageOf({ segments: ESP8266_SEGMENTS });
+
+describe("ESP8266 image decoding", () => {
+  it("reports header, segment, checksum and coverage facts", () => {
+    const decoded = esp8266(ESP8266);
+    expect(decoded.metadata).toEqual({
+      kind: "esp8266-image",
+      header: {
+        segment_count: 2,
+        spi_mode: 0,
+        spi_speed: 0,
+        spi_size: 2,
+        entry_addr: 0x4010_0004,
+      },
+      checksum: {
+        offset: 79,
+        stored: espChecksum(ESP8266_SEGMENTS),
+        computed: espChecksum(ESP8266_SEGMENTS),
+        status: "valid",
+      },
+      image_end: 80,
+      undescribed_trailing: [],
+    });
+    expect(
+      decoded.segments.map(({ dataOffset, availableLength, metadata }) => [
+        metadata.index,
+        metadata.load_addr,
+        metadata.data_len,
+        metadata.header_offset,
+        dataOffset,
+        availableLength,
+        metadata.classification,
+      ]),
+    ).toEqual([
+      [0, 0x4010_0000, 32, 8, 16, 32, "unknown"],
+      [1, 0x3ffe_8000, 16, 48, 56, 16, "unknown"],
+    ]);
+    expect(decoded.coverage).toBe("complete");
+    expect(decoded.limitations).toEqual([]);
+    expect(decoded.signatureBlocks).toEqual([]);
+  });
+
+  it("reads bytes that the ESP32-family decoder refuses", () => {
+    expect(decode(ESP8266)).toEqual({
+      ok: false,
+      error: { kind: "unsupported", message: ESP8266_REFUSAL },
+    });
+  });
+
+  it("decodes identically from any chunking", () => {
+    const bytes = Buffer.concat([
+      ESP8266,
+      Buffer.alloc(9, 0xff),
+      pattern(5, 1),
+    ]);
+    const expected = esp8266(bytes, bytes.length);
+    for (const chunkBytes of [1, 3, 16, 4096])
+      expect(esp8266(bytes, chunkBytes)).toEqual(expected);
+  });
+
+  it("describes erased flash after the checksum and reports other bytes", () => {
+    expect(
+      esp8266(Buffer.concat([ESP8266, Buffer.alloc(4096, 0xff)])).coverage,
+    ).toBe("complete");
+    const decoded = esp8266(
+      Buffer.concat([
+        ESP8266,
+        Buffer.alloc(16, 0xff),
+        pattern(32, 1),
+        Buffer.alloc(16, 0xff),
+      ]),
+    );
+    expect(decoded.metadata.undescribed_trailing).toEqual([
+      { offset: 96, length: 48 },
+    ]);
+    expect(decoded.coverage).toBe("unknown");
+    expect(decoded.limitations).toEqual([
+      ESP_IMAGE_LIMITATIONS.esp8266UndescribedTrailing(48, 96),
+    ]);
+  });
+
+  it("stops reading at the first byte after the image that is not erased", () => {
+    const bytes = Buffer.concat([
+      ESP8266,
+      Buffer.alloc(4, 0xff),
+      Buffer.alloc(1 << 20),
+    ]);
+    const decoder = createEsp8266ImageDecoder(bytes.length);
+    decoder.write(bytes.subarray(0, 4096));
+    expect(decoder.satisfied).toBe(true);
+    expect(decoder.finish()).toMatchObject({
+      ok: true,
+      value: {
+        metadata: {
+          undescribed_trailing: [{ offset: 84, length: bytes.length - 84 }],
+        },
+      },
+    });
+  });
+});
+
+describe("ESP8266 image integrity and refusals", () => {
+  it("reports a checksum that does not match", () => {
+    const computed = espChecksum(ESP8266_SEGMENTS);
+    const decoded = esp8266(
+      esp8266ImageOf({ segments: ESP8266_SEGMENTS, checksum: computed ^ 1 }),
+    );
+    expect(decoded.metadata.checksum).toEqual({
+      offset: 79,
+      stored: computed ^ 1,
+      computed,
+      status: "invalid",
+    });
+    expect(decoded.limitations).toEqual([
+      ESP_IMAGE_LIMITATIONS.checksumMismatch(computed ^ 1, 79, computed),
+    ]);
+  });
+
+  it("reports truncation inside a segment and before the checksum", () => {
+    const cut = esp8266(ESP8266.subarray(0, 40));
+    expect(cut.segments[0]?.availableLength).toBe(24);
+    expect(cut.metadata).toMatchObject({
+      checksum: { status: "unavailable", computed: null },
+      image_end: null,
+    });
+    expect(cut.coverage).toBe("unknown");
+    expect(cut.limitations).toEqual([
+      ESP_IMAGE_LIMITATIONS.truncatedSegment(0, 32, 16, 24),
+    ]);
+    const headers = esp8266(ESP8266.subarray(0, 50));
+    expect(headers.segments).toHaveLength(1);
+    expect(headers.limitations).toEqual([
+      ESP_IMAGE_LIMITATIONS.truncatedSegmentHeaders(2, 1),
+    ]);
+    const checksum = esp8266(ESP8266.subarray(0, 78));
+    expect(checksum.coverage).toBe("unknown");
+    expect(checksum.limitations).toEqual([
+      ESP_IMAGE_LIMITATIONS.truncatedBeforeChecksum(79),
+    ]);
+  });
+
+  it("reads an image with no segments", () => {
+    const decoded = esp8266(esp8266ImageOf({ segments: [] }));
+    expect(decoded.metadata).toMatchObject({
+      header: { segment_count: 0 },
+      checksum: { offset: 15, stored: 0xef, computed: 0xef, status: "valid" },
+      image_end: 16,
+    });
+    expect(decoded.coverage).toBe("complete");
+  });
+
+  it("reports segments esptool warns about or would not write", () => {
+    const decoded = esp8266(
+      esp8266ImageOf({
+        segments: [
+          { address: 0x4020_1010, data: pattern(0x1_0004, 1) },
+          { address: 0x3ffe_8000, data: pattern(6, 2) },
+        ],
+      }),
+    );
+    expect(decoded.limitations).toEqual([
+      ESP_IMAGE_LIMITATIONS.esp8266SuspiciousSegment(0, 0x4020_1010, 0x1_0004),
+      ESP_IMAGE_LIMITATIONS.esp8266SegmentLengthUnaligned(1, 6),
+    ]);
+  });
+
+  it("keeps the facts of an ESP32-family image a caller named ESP8266", () => {
+    // esptool reads wp_pin and the chip fields as the first segment header.
+    const decoded = esp8266(APP);
+    expect(decoded.segments[0]?.metadata).toMatchObject({
+      load_addr: 0xee,
+      data_len: 5,
+    });
+    expect(decoded.limitations).toContain(
+      ESP_IMAGE_LIMITATIONS.esp8266SuspiciousSegment(0, 0xee, 5),
+    );
+    expect(decoded.coverage).toBe("unknown");
+  });
+
+  it.each([
+    [
+      "the v2 magic",
+      Buffer.from([0xea, ...ESP8266.subarray(1)]),
+      "unsupported",
+    ],
+    ["another magic", pattern(64, 0x5a), "format"],
+    [
+      "17 segments",
+      esp8266ImageOf({ segments: [], segmentCount: 17 }),
+      "format",
+    ],
+    ["fewer than 8 bytes", ESP8266.subarray(0, 7), "format"],
+  ] as const)("refuses %s", (_name, bytes, kind) => {
+    expect(decodeEsp8266(bytes)).toMatchObject({ ok: false, error: { kind } });
+  });
+
+  it("admits the header the resolver and inventory check", () => {
+    expect(admitEsp8266ImageHeader(ESP8266, ESP8266.length)).toEqual({
+      ok: true,
+      value: null,
+    });
+    expect(admitEsp8266ImageHeader(ESP8266, 7)).toMatchObject({
+      ok: false,
+      error: {
+        kind: "format",
+        message: "ESP8266 image header needs 8 bytes; the file holds 7",
       },
     });
   });

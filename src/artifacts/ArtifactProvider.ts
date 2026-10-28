@@ -332,6 +332,7 @@ class ArtifactClient implements AnalysisClient {
                 : undefined,
             selectedPath: this.target.artifactSelectedPath,
             inputFormat: this.target.format,
+            selectedRootFormat: selectedRootFormat(this.target),
             outputRoot: parsed.output_root,
             environment: this.environment,
             asarHeaderAdmission: runtimeAsarHeaderAdmission(
@@ -542,11 +543,18 @@ class ArtifactClient implements AnalysisClient {
         this.environment,
         this.settings,
       ),
+      selectedRootFormat: selectedRootFormat(this.target),
       ...(options?.signal === undefined ? {} : { signal: options.signal }),
       integrity: parsed.integrity_policy,
     });
   }
 }
+
+/** A target format the caller named, which inventory must not reclassify. */
+const selectedRootFormat = (
+  target: BinaryTarget,
+): "esp8266-image" | undefined =>
+  target.format === "esp8266-image" ? target.format : undefined;
 
 const isArtifactOperation = (
   operation: AnalysisOperation,

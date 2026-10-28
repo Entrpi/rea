@@ -33,8 +33,12 @@ export const snapshotSelectionOption = z
   .optional()
   .describe("Load and update a local analysis snapshot");
 
-/** Explicit interpretation for headerless native executable formats. */
+/**
+ * Explicit interpretation for headerless native executable formats. ESP8266
+ * images are archives, so the artifact commands select them instead.
+ */
 export const formatSelectionOption = executableFormatHintSchema
+  .exclude(["esp8266-image"])
   .optional()
   .describe(
     "Explicit interpretation: dos-com or raw-binary (headerless), or gamecube-dol (GameCube/Wii DOL, never auto-detected); omission preserves header-based detection",
@@ -64,7 +68,9 @@ export const nativeOpenOptionFields = {
 export interface NativeOpenCliFlags {
   readonly snapshot?: string | undefined;
   readonly provider?: AnalysisProviderSelector | undefined;
-  readonly "target-format"?: ExecutableFormatHint | undefined;
+  readonly "target-format"?:
+    | Exclude<ExecutableFormatHint, "esp8266-image">
+    | undefined;
   readonly architecture?: BinaryArchitecture | undefined;
   readonly "entry-point"?: string | undefined;
 }
