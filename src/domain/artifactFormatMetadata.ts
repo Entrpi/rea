@@ -661,6 +661,14 @@ const declarationsByKind: {
       length: metadata.length,
     }),
   },
+  uimage: {
+    notCompared:
+      "Its header facts come from the image's own bytes, which content comparison covers.",
+  },
+  "uimage-entry": {
+    notCompared:
+      "role and index restate the entry's path; its stored bytes are compared by content.",
+  },
   "esp-flash-image": {
     notCompared:
       "Its fields come from the dump's bytes and from the caller's flash_offset and partition_table_offset, which are target identity; each partition's range, compared by content, reflects them.",
