@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 
 import { EspImageArtifactReader } from "./EspImageArtifactReader.js";
+import { ESP_IMAGE_LIMITATIONS } from "../domain/firmware/espImageFacts.js";
 import { ArtifactResourceScope } from "./ArtifactResourceScope.js";
 import type { ArtifactEntry } from "./ArtifactReader.js";
 import { extractArtifact } from "./extraction/ArtifactExtraction.js";
@@ -18,8 +19,7 @@ import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory
 import { scanCanonicalArtifactInventory } from "../../tests/fixtures/artifactInventory.js";
 import { awaitAcknowledgement } from "../../tests/fixtures/lifecycleAcknowledgement.js";
 
-const INVENTORY_LIMITATION =
-  "ESP image inventory reads the header-declared segments, checksum, appended SHA-256, descriptor and Secure Boot v2 signature blocks. Segment classification follows ESP-IDF v6.1 should_map and should_load for a cold boot and does not check RAM ranges; signatures are not cryptographically verified, and code is not disassembled.";
+const INVENTORY_LIMITATION = ESP_IMAGE_LIMITATIONS.inventoryScope;
 
 const APP = espImage({ segments: ESP32C3_APP_SEGMENTS });
 // An erased slot between two blocks must not hide the later block.
@@ -135,15 +135,13 @@ it("reports truncation and undescribed trailing bytes as coverage", async () => 
   expect(truncated.manifest.root_format).toBe("esp-image");
   expect(truncated.coverage.status).toBe("unknown");
   expect(truncated.limitations).toContain(
-    "ESP image is truncated: segment 2 declares 32 bytes at offset 0x160, but the file holds 8.",
+    ESP_IMAGE_LIMITATIONS.truncatedSegment(2, 32, 0x160, 8),
   );
   expect(
     truncated.occurrences.find((row) => row.logical_path === "segment-02.bin"),
   ).toMatchObject({
     declared_size: 8,
-    limitations: [
-      "ESP image segment 2 is truncated: its header declares 32 bytes; the file holds 8.",
-    ],
+    limitations: [ESP_IMAGE_LIMITATIONS.segmentEntryTruncated(2, 32, 8)],
   });
   const extended = await scanCanonicalArtifactInventory(
     await writeImage(Buffer.concat([APP, Buffer.from("trailing data")])),
