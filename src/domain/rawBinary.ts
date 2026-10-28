@@ -122,6 +122,8 @@ export interface RawBinaryAdmissionRejection {
 export interface RawBinaryVectorTableRead {
   /** File offset of vector-table word 0. */
   readonly fileOffset: number;
+  /** Bytes to read at `fileOffset`: word 0, the initial stack pointer, and word 1, Reset. */
+  readonly byteLength: number;
   /** Finish admission from the bytes read at `fileOffset`. */
   readonly admit: (
     words: Uint8Array,
@@ -218,6 +220,9 @@ const addressWidth = (architecture: BinaryArchitecture): bigint =>
 const hexAddress = (value: bigint): string => `0x${value.toString(16)}`;
 /** Minimum M-profile vector-table alignment: VTOR.TBLOFF is bits 31:7. */
 const VECTOR_TABLE_ALIGNMENT = 128n;
+/** Admission reads vector-table words 0 and 1. */
+const VECTOR_TABLE_READ_BYTES = 8;
+const VECTOR_TABLE_READ_LAST = BigInt(VECTOR_TABLE_READ_BYTES - 1);
 /** A 32-bit word as read, at full width, unlike a canonical address. */
 const hexWord = (value: number): string =>
   `0x${value.toString(16).padStart(8, "0")}`;
@@ -410,16 +415,17 @@ export const admitRawBinary = (input: {
       `raw-binary vector table at ${table.canonical} must lie inside the image mapped at ${mapped}`,
       tableField,
     );
-  if (table.value + 7n > last)
+  if (table.value + VECTOR_TABLE_READ_LAST > last)
     return selectionRejected(
-      `raw-binary file ends before the Reset vector at ${hexAddress(table.value + 4n)}; the vector table at ${table.canonical} needs 8 bytes`,
+      `raw-binary file ends before the Reset vector at ${hexAddress(table.value + 4n)}; the vector table at ${table.canonical} needs ${VECTOR_TABLE_READ_BYTES} bytes`,
       // No base moves a table at file offset 0 further from the end.
       input.vectorTableAddress === undefined ? undefined : tableField,
     );
   return ok({
     fileOffset: Number(table.value - start.value),
+    byteLength: VECTOR_TABLE_READ_BYTES,
     admit: (words) => {
-      if (words.byteLength !== 8)
+      if (words.byteLength !== VECTOR_TABLE_READ_BYTES)
         return err({
           reason: `raw-binary vector table at ${table.canonical} could not be read in full`,
           constraint: "file_format_rejected",
@@ -455,7 +461,7 @@ export const admitRawBinary = (input: {
           undefined,
           observed,
         );
-      if (code >= table.value && code <= table.value + 7n)
+      if (code >= table.value && code <= table.value + VECTOR_TABLE_READ_LAST)
         return selectionRejected(
           `raw-binary Reset vector ${reset} points to ${hexAddress(code)}, inside the vector-table words read at ${table.canonical}`,
           undefined,

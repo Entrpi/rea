@@ -632,7 +632,8 @@ describe.each(ARCHITECTURE_VARIANT_NAMES)(
 
     it("reads Reset from the vector table at the base", () => {
       const read = derived({ baseAddress: "0x08000000", fileBytes: 0x200 });
-      expect(read.fileOffset).toBe(0);
+      // Words 0 and 1: the initial stack pointer and Reset.
+      expect(read).toMatchObject({ fileOffset: 0, byteLength: 8 });
       expect(read.admit(vectorWords(0x20005000, 0x080001c5))).toEqual({
         ok: true,
         value: {

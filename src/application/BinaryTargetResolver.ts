@@ -280,7 +280,12 @@ const readOpenedBinaryTarget = async (
     // An omitted M-profile entry is the Reset word of the selected vector table.
     else if ("admit" in selected.value)
       admitted = selected.value.admit(
-        await readHandleRange(handle, selected.value.fileOffset, 8, signal),
+        await readHandleRange(
+          handle,
+          selected.value.fileOffset,
+          selected.value.byteLength,
+          signal,
+        ),
       );
     else admitted = ok(selected.value);
     if (!admitted.ok)
