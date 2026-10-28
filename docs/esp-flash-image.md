@@ -191,13 +191,19 @@ or anti-rollback, and `basis` names its branch:
   a factory app is declared; or records are set but none is valid, as after
   a CRC mismatch, which selects the factory index whether or not a factory
   app is declared;
-- `ota_0-fallback`: no record is usable and no factory app is declared, so
-  the bootloader selects boot index 0;
-- `no-otadata`: the table declares no otadata partition, so the bootloader
-  selects the factory index, as in the common factory-only layout;
-- `none`: the otadata partition is smaller than two 4 KiB sectors, so the
-  bootloader cannot read it and resets without selecting an app;
+- `ota_0-fallback`: no record is usable, or the table has no OTA app, and no
+  factory app is declared, so the bootloader selects boot index 0;
+- `no-otadata`: the table declares no otadata partition, or one at offset 0,
+  which the bootloader takes for none, so it selects the factory index, as in
+  the common factory-only layout;
+- `none`: the bootloader rejects the table, for an MD5 mismatch or a second
+  MD5 entry, or cannot read an otadata partition smaller than two 4 KiB
+  sectors, and resets without selecting an app;
 - `unknown`: the dump lacks an otadata record the bootloader reads.
+
+Without an OTA app the records do not matter, so a dump that lacks them
+still selects a fallback. REA does not compare the partitions with the
+flash size in the bootloader header, which the bootloader also checks.
 
 `active_record` and `slot` are set for `otadata` and `slot` for
 `ota_0-fallback`. `partition_index` is null when the table declares no

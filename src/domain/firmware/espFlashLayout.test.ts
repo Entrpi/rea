@@ -191,8 +191,9 @@ const select = (
   otadataSize = 0x2000,
 ) =>
   selectEspBootPartition(espBootPartitions(parts), {
-    records: [decodeEspOtaRecord(first, 0), decodeEspOtaRecord(second, 1)],
+    offset: 0xd000,
     size: otadataSize,
+    records: [decodeEspOtaRecord(first, 0), decodeEspOtaRecord(second, 1)],
   });
 const erased = Buffer.alloc(32, 0xff);
 
@@ -343,16 +344,63 @@ describe("ESP boot selection without a derivable slot", () => {
       assumptions: [],
       running_partition: "unknown",
     });
+    const oneRecord = {
+      offset: 0xd000,
+      size: 0x2000,
+      records: [decodeEspOtaRecord(otaRecord({ seq: 1 }), 0)],
+    };
     expect(
-      selectEspBootPartition(espBootPartitions(partitions()), {
-        records: [decodeEspOtaRecord(otaRecord({ seq: 1 }), 0)],
-        size: 0x2000,
-      }),
+      selectEspBootPartition(espBootPartitions(partitions()), oneRecord),
     ).toMatchObject({
       basis: "unknown",
       partition_index: null,
       assumptions: [],
     });
+    // Without an OTA app the bootloader does not need the records.
+    const noOtaApps = partitions().filter(
+      ({ label }) => !label?.startsWith("ota_"),
+    );
+    expect(
+      selectEspBootPartition(espBootPartitions(noOtaApps), oneRecord),
+    ).toMatchObject({ basis: "factory-fallback", partition_index: 3 });
+  });
+
+  it("selects nothing from a rejected table and treats an otadata at offset 0 as absent", () => {
+    // An MD5 mismatch fails esp_partition_table_verify before any selection.
+    expect(
+      select(otaRecord({ seq: 1 }), erased, partitions(), 0x2000),
+    ).toMatchObject({
+      basis: "otadata",
+    });
+    expect(
+      selectEspBootPartition(
+        espBootPartitions(partitions()),
+        {
+          offset: 0xd000,
+          size: 0x2000,
+          records: [
+            decodeEspOtaRecord(otaRecord({ seq: 1 }), 0),
+            decodeEspOtaRecord(erased, 1),
+          ],
+        },
+        true,
+      ),
+    ).toEqual({
+      basis: "none",
+      active_record: null,
+      slot: null,
+      partition_index: null,
+      assumptions: [],
+      running_partition: "unknown",
+    });
+    // bootloader_utility_get_selected_boot_partition takes offset 0 for no otadata.
+    expect(
+      selectEspBootPartition(espBootPartitions(partitions()), {
+        offset: 0,
+        size: 0x2000,
+        records: [],
+      }),
+    ).toMatchObject({ basis: "no-otadata", partition_index: 3 });
   });
 });
 

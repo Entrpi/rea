@@ -357,7 +357,12 @@ export const finishEspFlashLayout = (
       plan.boot,
       plan.otadata === undefined || otadata === null
         ? undefined
-        : { records: otadata.records, size: plan.otadata.partition.size },
+        : {
+            offset: plan.otadata.partition.offset,
+            size: plan.otadata.partition.size,
+            records: otadata.records,
+          },
+      plan.input.table.md5.status === "invalid",
     ),
     undescribed,
     coverage:
