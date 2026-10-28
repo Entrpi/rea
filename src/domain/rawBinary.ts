@@ -287,7 +287,10 @@ export const admitRawBinary = (input: {
   RawBinaryAdmissionRejection
 > => {
   if (input.providerLanguage !== undefined)
-    return selectionRejected("provider_language is not admitted yet");
+    return admitProviderLanguageLoad({
+      ...input,
+      providerLanguage: input.providerLanguage,
+    });
   const architecture = binaryArchitectureSchema.safeParse(input.architecture);
   if (!architecture.success)
     return selectionRejected(
@@ -465,6 +468,63 @@ export const admitRawBinary = (input: {
           },
         },
       });
+    },
+  });
+};
+
+// The widest address REA admits for any family; a language may be narrower.
+const MAX_ADDRESS = 0xffffffffffffffffn;
+
+/**
+ * Admit a load decoded by a caller-named provider language. The domain cannot
+ * know the language's address width or alignment, so it checks the extent
+ * against REA's widest address and records the last address for the
+ * provider, which checks it against the language before launch.
+ */
+const admitProviderLanguageLoad = (input: {
+  readonly architecture: unknown;
+  readonly entryPoint: unknown;
+  readonly baseAddress?: unknown;
+  readonly architectureVariant?: unknown;
+  readonly vectorTableAddress?: unknown;
+  readonly providerLanguage: ProviderLanguageSelection;
+  readonly fileBytes: number;
+}): Result<RawBinaryAdmission, RawBinaryAdmissionRejection> => {
+  const issue = rawBinaryVariantSelectionIssue(input);
+  if (issue !== undefined) return selectionRejected(issue.message);
+  if (typeof input.entryPoint !== "string")
+    return selectionRejected(
+      "raw-binary format requires entry_point as a hexadecimal address of the form 0x…",
+    );
+  const entry = parseRawBinaryEntryPoint(input.entryPoint);
+  if (!entry.ok) return selectionRejected(entry.error);
+  let start = entry.value;
+  if (input.baseAddress !== undefined) {
+    const parsed = parseRawBinaryAddress(input.baseAddress, "base_address");
+    if (!parsed.ok) return parsed;
+    start = parsed.value;
+  }
+  const length = validateRawBinaryLength(input.fileBytes);
+  if (!length.ok)
+    return err({ reason: length.error, constraint: "file_format_rejected" });
+  const last = start.value + BigInt(input.fileBytes) - 1n;
+  if (last > MAX_ADDRESS)
+    return selectionRejected(
+      `raw-binary mapping from ${start.canonical} must fit in 64-bit addresses`,
+    );
+  const mapped = `${start.canonical}..${hexAddress(last)}`;
+  if (entry.value.value < start.value || entry.value.value > last)
+    return selectionRejected(
+      `raw-binary entry_point ${entry.value.canonical} must lie inside the image mapped at ${mapped}`,
+    );
+  return ok({
+    architecture: null,
+    load: {
+      baseAddress: start.canonical,
+      entryPoint: entry.value.canonical,
+      entrySource: { kind: "caller" },
+      providerLanguage: input.providerLanguage,
+      lastAddress: hexAddress(last),
     },
   });
 };

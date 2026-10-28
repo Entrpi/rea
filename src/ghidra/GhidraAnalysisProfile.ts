@@ -229,6 +229,14 @@ export const resolveGhidraAnalysisProfile = async (
           ),
         ),
       );
+    if (target.architecture === undefined)
+      return err(
+        new AnalysisUnsupportedTargetError(
+          "resolve_analysis_profile",
+          target.path,
+          "Ghidra does not load provider languages yet.",
+        ),
+      );
     const { rawLoad } = target;
     const language = ghidraRawBinaryLanguage(target);
     // A legacy-equivalent load commits exactly the parameters it always did.

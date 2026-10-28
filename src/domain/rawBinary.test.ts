@@ -18,6 +18,7 @@ import {
   type ArchitectureVariant,
 } from "./architectureVariant.js";
 import { admittedRawLoad, vectorTableWords } from "./rawBinary.fixture.js";
+import type { ProviderLanguageSelection } from "./providerLanguage.js";
 
 describe("headerless format hints", () => {
   it("admits dos-com and raw-binary names only", () => {
@@ -877,24 +878,137 @@ describe("raw load identity", () => {
 });
 
 describe("provider language admission", () => {
-  it("refuses a provider language until its admission lands", () => {
-    expect(
-      admitRawBinary({
-        architecture: undefined,
-        entryPoint: "0x8c000010",
-        providerLanguage: {
-          provider: "ghidra",
-          languageId: "SuperH4:LE:32:default",
-          compilerSpecId: "default",
+  const providerLanguage = {
+    provider: "ghidra",
+    languageId: "SuperH4:LE:32:default",
+    compilerSpecId: "default",
+  } as const;
+  const admit = (selection: {
+    readonly entryPoint?: unknown;
+    readonly baseAddress?: unknown;
+    readonly architecture?: unknown;
+    readonly fileBytes?: number;
+  }) =>
+    admitRawBinary({
+      architecture: selection.architecture,
+      entryPoint: selection.entryPoint,
+      ...(selection.baseAddress === undefined
+        ? {}
+        : { baseAddress: selection.baseAddress }),
+      providerLanguage,
+      fileBytes: selection.fileBytes ?? 32,
+    });
+  const refused = (reason: string) => ({
+    ok: false,
+    error: { reason, constraint: "load_selection_rejected" },
+  });
+
+  it("maps file offset 0 at the entry and names no family", () => {
+    expect(admit({ entryPoint: "0x08000000" })).toEqual({
+      ok: true,
+      value: {
+        architecture: null,
+        load: {
+          baseAddress: "0x8000000",
+          entryPoint: "0x8000000",
+          entrySource: { kind: "caller" },
+          providerLanguage,
+          lastAddress: "0x800001f",
         },
-        fileBytes: 32,
-      }),
-    ).toEqual({
-      ok: false,
-      error: {
-        reason: "provider_language is not admitted yet",
-        constraint: "load_selection_rejected",
       },
     });
+  });
+
+  it("maps a separate base and keeps an unaligned entry inside it", () => {
+    expect(
+      admit({ baseAddress: "0x8C000000", entryPoint: "0x8c000011" }),
+    ).toMatchObject({
+      ok: true,
+      value: {
+        load: {
+          baseAddress: "0x8c000000",
+          entryPoint: "0x8c000011",
+          lastAddress: "0x8c00001f",
+        },
+      },
+    });
+  });
+
+  it.each([
+    [
+      { baseAddress: "0x8c000000", entryPoint: "0x8bfffffe" },
+      "raw-binary entry_point 0x8bfffffe must lie inside the image mapped at 0x8c000000..0x8c00001f",
+    ],
+    [
+      { baseAddress: "0x8c000000", entryPoint: "0x8c000020" },
+      "raw-binary entry_point 0x8c000020 must lie inside the image mapped at 0x8c000000..0x8c00001f",
+    ],
+    [
+      { entryPoint: "0xffffffffffffffff", fileBytes: 2 },
+      "raw-binary mapping from 0xffffffffffffffff must fit in 64-bit addresses",
+    ],
+    [
+      { baseAddress: "8c000000", entryPoint: "0x8c000000" },
+      "base_address must be a hexadecimal address of the form 0x…",
+    ],
+    [
+      { entryPoint: "0x" },
+      "entry_point must be a hexadecimal address of the form 0x…",
+    ],
+    [{ entryPoint: undefined }, "provider_language requires entry_point"],
+    [
+      { entryPoint: "0x0", architecture: "arm" },
+      "provider_language replaces architecture; omit architecture",
+    ],
+  ])("refuses %j before any provider starts", (selection, reason) => {
+    expect(admit(selection)).toEqual(refused(reason));
+  });
+
+  it("keeps an empty file a target refusal", () => {
+    expect(admit({ entryPoint: "0x0", fileBytes: 0 })).toEqual({
+      ok: false,
+      error: {
+        reason: "raw-binary requires at least one file byte",
+        constraint: "file_format_rejected",
+      },
+    });
+  });
+
+  it("gives every provider-language load a versioned identity", () => {
+    const load = admittedRawLoad({
+      architecture: undefined,
+      entryPoint: "0x0",
+      providerLanguage,
+      fileBytes: 4,
+    });
+    expect(isLegacyRawLoad(load)).toBe(false);
+    expect(rawLoadIdentity(load)).toEqual({
+      version: 1,
+      base_address: "0x0",
+      provider_language: {
+        provider: "ghidra",
+        language_id: "SuperH4:LE:32:default",
+        compiler_spec_id: "default",
+      },
+      entries: [{ address: "0x0", role: "entry", basis: "caller" }],
+    });
+  });
+
+  it.each([
+    { languageId: "SuperH4:BE:32:default" },
+    { compilerSpecId: "windows" },
+  ])("separates loads by the caller's language: %j", (change) => {
+    const identity = (language: ProviderLanguageSelection) =>
+      rawLoadIdentity(
+        admittedRawLoad({
+          architecture: undefined,
+          entryPoint: "0x0",
+          providerLanguage: language,
+          fileBytes: 4,
+        }),
+      );
+    expect(identity({ ...providerLanguage, ...change })).not.toEqual(
+      identity(providerLanguage),
+    );
   });
 });
