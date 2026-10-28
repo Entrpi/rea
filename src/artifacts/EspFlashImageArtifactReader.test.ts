@@ -21,7 +21,7 @@ import {
   ESP32C3_BOOTLOADER_SEGMENTS,
   espImage,
   pattern,
-} from "../domain/firmware/espImage.fixture.js";
+} from "../../tests/fixtures/espImage.js";
 import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
 import { scanCanonicalArtifactInventory } from "../../tests/fixtures/artifactInventory.js";
 
