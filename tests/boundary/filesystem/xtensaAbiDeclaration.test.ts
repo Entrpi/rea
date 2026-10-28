@@ -154,6 +154,20 @@ describe("Xtensa ELF target resolution", () => {
       "name offset is outside its string table",
     ],
     [
+      "a visible .xtensa.info beside another unreadable section name",
+      (() => {
+        // The name table's own name is unreadable; it could be a second
+        // .xtensa.info, so the visible one is not known to be unique.
+        const bytes = xtensaElf();
+        bytes.writeUInt32LE(
+          bytes.readUInt32LE(NAMES_SECTION + 20),
+          NAMES_SECTION,
+        );
+        return bytes;
+      })(),
+      "name offset is outside its string table",
+    ],
+    [
       "a section-name table that is not a string table",
       (() => {
         const bytes = xtensaElf();
