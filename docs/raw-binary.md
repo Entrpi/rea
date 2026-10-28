@@ -155,6 +155,10 @@ the ARMv8.1-M one.
   address, such as a word copied from the vector table. REA refuses it instead
   of clearing bit 0; `details.diagnostics` in the error give the even
   `code_address` and suggest omitting `entry_point`.
+- Each refusal of a load selection is an `invalid_request` with
+  `details.constraint: "load_selection_rejected"` and, when one input is to
+  blame, that input in `details.field`, such as `entry_point` for an odd Thumb
+  entry. The Reset-word refusals name none.
 
 Before auto-analysis, REA's preparation script requires Ghidra's Thumb context
 (`TMode=1`) at the entry and seeds the entry there; `inspect_native_load_image`

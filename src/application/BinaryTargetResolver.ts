@@ -287,6 +287,9 @@ const readOpenedBinaryTarget = async (
       return err(
         new BinaryTargetError(path, admitted.error.reason, {
           constraint: admitted.error.constraint,
+          ...(admitted.error.field === undefined
+            ? {}
+            : { field: admitted.error.field }),
           ...(admitted.error.diagnostics === undefined
             ? {}
             : { diagnostics: admitted.error.diagnostics }),
@@ -309,6 +312,7 @@ const readOpenedBinaryTarget = async (
     return err(
       new BinaryTargetError(path, pairing.message, {
         constraint: "load_selection_rejected",
+        field: pairing.field,
       }),
     );
   if (formatHint === "gamecube-dol") {

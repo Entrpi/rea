@@ -112,6 +112,8 @@ export interface RawBinaryAdmissionRejection {
    * `file_format_rejected` names a refusal caused by the target file itself.
    */
   readonly constraint: "load_selection_rejected" | "file_format_rejected";
+  /** The input to correct, when one input is to blame. */
+  readonly field?: LoadSelectionIssue["field"];
   /** Facts a caller can act on, such as the even address of an odd Thumb entry. */
   readonly diagnostics?: Readonly<Record<string, JsonValue>>;
 }
@@ -217,6 +219,19 @@ const VECTOR_TABLE_ALIGNMENT = 128n;
 const hexWord = (value: number): string =>
   `0x${value.toString(16).padStart(8, "0")}`;
 
+/** Name the input to correct, or undefined when no single input is to blame. */
+const selectionRejected = (
+  reason: string,
+  field: LoadSelectionIssue["field"] | undefined,
+  diagnostics?: Readonly<Record<string, JsonValue>>,
+): Result<never, RawBinaryAdmissionRejection> =>
+  err({
+    reason,
+    constraint: "load_selection_rejected",
+    ...(field === undefined ? {} : { field }),
+    ...(diagnostics === undefined ? {} : { diagnostics }),
+  });
+
 const parseRawBinaryAddress = (
   value: unknown,
   field: "base_address" | "vector_table_address",
@@ -227,20 +242,10 @@ const parseRawBinaryAddress = (
         canonical: hexAddress(BigInt(value)),
         value: BigInt(value),
       })
-    : err({
-        reason: `${field} must be a hexadecimal address of the form 0x…`,
-        constraint: "load_selection_rejected",
-      });
-
-const selectionRejected = (
-  reason: string,
-  diagnostics?: Readonly<Record<string, JsonValue>>,
-): Result<never, RawBinaryAdmissionRejection> =>
-  err({
-    reason,
-    constraint: "load_selection_rejected",
-    ...(diagnostics === undefined ? {} : { diagnostics }),
-  });
+    : selectionRejected(
+        `${field} must be a hexadecimal address of the form 0x…`,
+        field,
+      );
 
 /**
  * Validate the selected family, variant, base and entry, and that the mapped
@@ -262,26 +267,29 @@ export const admitRawBinary = (input: {
   if (!architecture.success)
     return selectionRejected(
       "raw-binary format requires architecture (x86, x86_64, arm, arm64, 6502, or m68k)",
+      "architecture",
     );
   const variant = architectureVariantRow(input.architectureVariant);
   if (input.architectureVariant !== undefined && variant === undefined)
     return selectionRejected(
       `architecture_variant must be one of ${ARCHITECTURE_VARIANT_NAMES.join(", ")}`,
+      "architecture_variant",
     );
   const issue = rawBinaryVariantSelectionIssue({
     ...input,
     architecture: architecture.data,
   });
-  if (issue !== undefined) return selectionRejected(issue.message);
+  if (issue !== undefined) return selectionRejected(issue.message, issue.field);
   let entry: CanonicalRawBinaryEntry | undefined;
   // Without an entry, the shared rules above guarantee a variant and a base.
   if (input.entryPoint !== undefined || variant === undefined) {
     if (typeof input.entryPoint !== "string")
       return selectionRejected(
         "raw-binary format requires entry_point as a hexadecimal address of the form 0x…",
+        "entry_point",
       );
     const parsed = parseRawBinaryEntryPoint(input.entryPoint);
-    if (!parsed.ok) return selectionRejected(parsed.error);
+    if (!parsed.ok) return selectionRejected(parsed.error, "entry_point");
     entry = parsed.value;
   }
   let base: CanonicalRawBinaryEntry | undefined;
@@ -297,6 +305,7 @@ export const admitRawBinary = (input: {
         const codeAddress = hexAddress(entry.value - 1n);
         return selectionRejected(
           `raw-binary ${variant.name} entry_point ${entry.canonical} is a Thumb interworking address with bit 0 set; its code address is ${codeAddress}`,
+          "entry_point",
           {
             entry_point: entry.source,
             code_address: codeAddress,
@@ -312,6 +321,7 @@ export const admitRawBinary = (input: {
     )
       return selectionRejected(
         `raw-binary ${architecture.data} entry_point ${entry.canonical} must be 4-byte aligned`,
+        "entry_point",
         // An odd ARM entry is most often a Cortex-M Reset vector.
         architecture.data === "arm" && entry.value % 2n !== 0n
           ? {
@@ -325,6 +335,7 @@ export const admitRawBinary = (input: {
     else if (architecture.data === "m68k" && entry.value % 2n !== 0n)
       return selectionRejected(
         `raw-binary m68k entry_point ${entry.canonical} must be 2-byte aligned`,
+        "entry_point",
       );
   }
   const length = validateRawBinaryLength(input.fileBytes);
@@ -339,6 +350,7 @@ export const admitRawBinary = (input: {
   if (start.value > max || last > max)
     return selectionRejected(
       `raw-binary mapping from ${start.canonical} must fit in the ${architecture.data} address width`,
+      base === undefined ? "entry_point" : "base_address",
     );
   const mapped = `${start.canonical}..${hexAddress(last)}`;
   const shared = {
@@ -351,6 +363,7 @@ export const admitRawBinary = (input: {
     if (entry.value < start.value || entry.value > last)
       return selectionRejected(
         `raw-binary entry_point ${entry.canonical} must lie inside the image mapped at ${mapped}`,
+        "entry_point",
       );
     return ok({
       architecture: architecture.data,
@@ -364,6 +377,11 @@ export const admitRawBinary = (input: {
   if (variant === undefined)
     throw new Error("raw-binary admission derived an entry without a variant");
   let table = start;
+  // The table is at the base unless the caller names it.
+  const tableField =
+    input.vectorTableAddress === undefined
+      ? "base_address"
+      : "vector_table_address";
   if (input.vectorTableAddress !== undefined) {
     const parsed = parseRawBinaryAddress(
       input.vectorTableAddress,
@@ -382,14 +400,18 @@ export const admitRawBinary = (input: {
           ? "; it is at base_address unless vector_table_address is given"
           : ""
       }`,
+      tableField,
     );
   if (table.value < start.value || table.value > last)
     return selectionRejected(
       `raw-binary vector table at ${table.canonical} must lie inside the image mapped at ${mapped}`,
+      tableField,
     );
   if (table.value + 7n > last)
     return selectionRejected(
       `raw-binary file ends before the Reset vector at ${hexAddress(table.value + 4n)}; the vector table at ${table.canonical} needs 8 bytes`,
+      // No base moves a table at file offset 0 further from the end.
+      input.vectorTableAddress === undefined ? undefined : tableField,
     );
   return ok({
     fileOffset: Number(table.value - start.value),
@@ -415,21 +437,25 @@ export const admitRawBinary = (input: {
       // A raw dump has no format these words can violate. An even Reset word,
       // or one outside the image or inside the words just read, almost always
       // means the selected base, vector table or variant is wrong, so these
-      // refusals are load selections that report the words observed.
+      // refusals are load selections that report the words observed and name
+      // no single input.
       if (resetWord % 2 === 0)
         return selectionRejected(
           `raw-binary Reset vector ${reset} at ${hexAddress(table.value + 4n)} is even; an M-profile Reset handler runs in Thumb state, so bit 0 must be set`,
+          undefined,
           observed,
         );
       const code = BigInt(resetWord - 1);
       if (code < start.value || code > last)
         return selectionRejected(
           `raw-binary Reset vector ${reset} points to ${hexAddress(code)}, outside the image mapped at ${mapped}`,
+          undefined,
           observed,
         );
       if (code >= table.value && code <= table.value + 7n)
         return selectionRejected(
           `raw-binary Reset vector ${reset} points to ${hexAddress(code)}, inside the vector-table words read at ${table.canonical}`,
+          undefined,
           observed,
         );
       return ok({
