@@ -1019,7 +1019,10 @@ export class ReverseEngineeringService {
         });
       const line = output.stdout.split(/\r?\n/u, 1)[0]?.trim() ?? "";
       const banner = boundedUtf8Text(line, VERSION_PROBE_TEXT_BYTES);
-      const identification = probe.identify(banner.text);
+      // A cut banner identifies nothing: the cut could fall inside its version.
+      const identification = banner.truncated
+        ? undefined
+        : probe.identify(banner.text);
       return ok(
         identification === undefined
           ? {
