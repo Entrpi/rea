@@ -524,6 +524,7 @@ it("passes decoder and map inputs to Rizin before the path and records them", as
       "16",
       "-e",
       "asm.cpu=cortexm",
+      "-n",
       "-m",
       "0x08000000",
       "-c",
@@ -539,7 +540,14 @@ it("passes decoder and map inputs to Rizin before the path and records them", as
     expect(result.value.limitations).toEqual(
       expect.arrayContaining([...rizinCommandLimitations(input)]),
     );
-    expect(rizinCommandLimitations(input)).toHaveLength(1);
+    // One statement for the decoder inputs and one for the raw map.
+    expect(rizinCommandLimitations(input)).toHaveLength(2);
+    expect(
+      rizinCommandLimitations({ path, command: "pi 1", asm_bits: 16 }),
+    ).toHaveLength(1);
+    expect(
+      rizinCommandLimitations({ path, command: "pi 1", base_address: "0x0" }),
+    ).toHaveLength(1);
     expect(rizinCommandLimitations({ path, command: "pi 1" })).toEqual([]);
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -567,8 +575,11 @@ it("checks only the spelling and range of decoder and map inputs", async () => {
       [{ asm_cpu: "c166-generic" }, ["-e", "asm.cpu=c166-generic"]],
       [{ asm_cpu: "ATxmega128a4u" }, ["-e", "asm.cpu=ATxmega128a4u"]],
       [{ asm_bits: 1 }, ["-b", "1"]],
-      [{ base_address: "0x0" }, ["-m", "0x0"]],
-      [{ base_address: "0xFFFFFFFFFFFFFFFF" }, ["-m", "0xFFFFFFFFFFFFFFFF"]],
+      [{ base_address: "0x0" }, ["-n", "-m", "0x0"]],
+      [
+        { base_address: "0xFFFFFFFFFFFFFFFF" },
+        ["-n", "-m", "0xFFFFFFFFFFFFFFFF"],
+      ],
     ] as const) {
       const result = await service.executeRizinCommand({
         path,
