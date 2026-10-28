@@ -813,3 +813,70 @@ posix(
     expect(digests).toEqual([await digest(), await digest()]);
   },
 );
+
+/** As when the server's working directory has been removed. */
+const unreadableWorkingDirectory = () =>
+  vi.spyOn(process, "cwd").mockImplementation(() => {
+    throw Object.assign(new Error("uv_cwd"), { code: "ENOENT" });
+  });
+
+posix(
+  "identifies and runs an absolute command and target without reading the working directory",
+  async () => {
+    const { executable, path } = await fixture();
+    const run = runner(() => "rizin 0.9.1 @ linux-x86-64");
+    const service = new TestReverseEngineeringService({
+      run,
+      lookup: lookupExecutable,
+      // A relative PATH entry is not searched for an explicit command.
+      environment: { REA_RIZIN_COMMAND: executable, PATH: "bin" },
+    });
+    const cwd = unreadableWorkingDirectory();
+    try {
+      const result = await service.executeRizinCommand({ path, command: "iI" });
+      if (!result.ok) throw result.error;
+      expect(result.value.provider.version).toBe("0.9.1");
+      expect(result.value.parameters).toMatchObject({
+        provider_executable_path: executable,
+        provider_identity: "banner",
+      });
+      expect(cwd).not.toHaveBeenCalled();
+    } finally {
+      cwd.mockRestore();
+    }
+  },
+);
+
+posix.each([
+  ["a relative command", { REA_RIZIN_COMMAND: "bin/rizin" }],
+  ["a relative PATH entry", { REA_RIZIN_COMMAND: "rizin", PATH: "bin" }],
+] as const)(
+  "returns a result when %s needs a working directory that cannot be read",
+  async (_case, environment) => {
+    const { path } = await fixture();
+    const run = runner(() => "rizin 0.9.1 @ linux-x86-64");
+    const service = new TestReverseEngineeringService({
+      run,
+      lookup: lookupExecutable,
+      environment,
+    });
+    const cwd = unreadableWorkingDirectory();
+    try {
+      const result = await service.executeRizinCommand({ path, command: "iI" });
+      if (!result.ok) throw result.error;
+      expect(result.value.provider).toEqual({
+        id: "rizin",
+        name: "Rizin",
+        version: null,
+      });
+      expect(result.value.parameters.provider_identity).toBe("assumed");
+      expect(result.value.parameters).not.toHaveProperty(
+        "provider_executable_path",
+      );
+      expect(probes(run)).toBe(0);
+      expect(cwd).toHaveBeenCalled();
+    } finally {
+      cwd.mockRestore();
+    }
+  },
+);

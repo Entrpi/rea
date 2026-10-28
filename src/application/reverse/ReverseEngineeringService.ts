@@ -893,7 +893,7 @@ export class ReverseEngineeringService {
       return ok(unidentified("no reliable version probe was performed"));
     const lookup = await this.#lookup(
       profile.executable,
-      process.cwd(),
+      () => process.cwd(),
       environment.PATH,
       { signal, timeoutMs },
     );
@@ -908,7 +908,13 @@ export class ReverseEngineeringService {
       );
     // The command launch reports an executable that cannot be selected.
     if (lookup.status !== "found")
-      return ok(unidentified("the executable could not be located"));
+      return ok(
+        unidentified(
+          lookup.status === "no-working-directory"
+            ? "the executable could not be located: its lookup needed the working directory, which could not be read"
+            : "the executable could not be located",
+        ),
+      );
     let sha256: string;
     try {
       sha256 = await this.#digest(lookup.path, signal, this.#stat, timeoutMs);

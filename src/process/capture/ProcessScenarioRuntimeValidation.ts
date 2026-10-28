@@ -79,7 +79,11 @@ export const resolveExecutable = async (
   workingDirectory: string,
   searchPath: string | undefined,
 ): Promise<string> => {
-  const lookup = await lookupExecutable(command, workingDirectory, searchPath);
+  const lookup = await lookupExecutable(
+    command,
+    () => workingDirectory,
+    searchPath,
+  );
   if (lookup.status === "found") return lookup.path;
   if (lookup.status === "denied")
     throw new AnalysisAccessDeniedError(
@@ -87,6 +91,13 @@ export const resolveExecutable = async (
       lookup.path,
       lookup.code,
       { cause: lookup.cause },
+    );
+  // The scenario's working directory is already resolved, so it is readable.
+  if (lookup.status === "no-working-directory")
+    throw invalidScenarioPath(
+      "working_directory",
+      `working directory could not be read: ${workingDirectory}`,
+      lookup.cause,
     );
   // An unbounded lookup cannot be interrupted.
   if (lookup.status === "interrupted")
