@@ -89,7 +89,13 @@ import {
 } from "./GhidraPspProfile.js";
 import { ghidraPspExtensionSchema } from "./GhidraPspExtension.js";
 import { ghidraRiscvLimitations } from "./GhidraRiscvProfile.js";
-import { ghidraXtensaLimitations } from "./GhidraXtensaProfile.js";
+import {
+  GHIDRA_XTENSA_CALL0_PROTOTYPE,
+  ghidraXtensaCall0Failure,
+  ghidraXtensaCall0Limitations,
+  ghidraXtensaLimitations,
+  isGhidraXtensaCall0Target,
+} from "./GhidraXtensaProfile.js";
 import { ghidraPePdbLimitations } from "./GhidraPeProfile.js";
 import { unverifiedGhidraBuildLimitation } from "./GhidraReleasePolicy.js";
 import { GhidraHeadlessLauncher } from "./GhidraLauncher.js";
@@ -193,6 +199,20 @@ export const createGhidraProviderClient = (input: {
         diagnostics: {
           reason:
             "Resolve the soft-float MIPS storage policy into the analysis profile before opening the session.",
+        },
+      }),
+    );
+  const call0 = isGhidraXtensaCall0Target(target);
+  if (
+    call0 !==
+    (committedProfile.parameters.xtensa_call0_prototype ===
+      GHIDRA_XTENSA_CALL0_PROTOTYPE)
+  )
+    return err(
+      new ProviderAdapterError("ghidra", "open_binary", {
+        diagnostics: {
+          reason:
+            "Resolve the Xtensa call0 prototype policy into the analysis profile before opening the session.",
         },
       }),
     );
@@ -347,6 +367,8 @@ export const createGhidraProviderClient = (input: {
   const softFloatLimitations: string[] = [
     ...ghidraMipsSoftFloatLimitations(softFloat),
   ];
+  // Replaced by the reported prototype outcome once the handshake is checked.
+  const call0Limitations: string[] = [...ghidraXtensaCall0Limitations(call0)];
   // Replaced by the reported per-program outcome once the handshake is checked.
   const disabledAnalyzerLimitations: string[] = [];
   const rawLanguage =
@@ -442,6 +464,7 @@ export const createGhidraProviderClient = (input: {
         ? { pspExtension: pspExtension.data }
         : {}),
       ...(softFloat ? { mipsSoftFloat: true as const } : {}),
+      ...(call0 ? { xtensaCall0: true as const } : {}),
       ...(target.format === "dos-mz" ? { dosMz: true } : {}),
       ...(target.format === "dos-com" ? { dosCom: true } : {}),
       ...(rawLanguage === undefined || target.format !== "raw-binary"
@@ -545,6 +568,10 @@ export const createGhidraProviderClient = (input: {
         softFloat,
         info.mips_soft_float_storage,
       );
+      const call0Reason = ghidraXtensaCall0Failure(
+        call0,
+        info.xtensa_call0_prototype,
+      );
       extensionFailure =
         ghidraExtensionFailure(
           extensions,
@@ -561,6 +588,11 @@ export const createGhidraProviderClient = (input: {
           ? undefined
           : new ProviderAdapterError("ghidra", operation, {
               diagnostics: { reason: softFloatReason },
+            })) ??
+        (call0Reason === undefined
+          ? undefined
+          : new ProviderAdapterError("ghidra", operation, {
+              diagnostics: { reason: call0Reason },
             }));
       if (extensionFailure === undefined && info.analysis_seeds !== undefined)
         seedLimitations.splice(
@@ -576,6 +608,12 @@ export const createGhidraProviderClient = (input: {
             softFloat,
             info.mips_soft_float_storage,
           ),
+        );
+      if (extensionFailure === undefined)
+        call0Limitations.splice(
+          0,
+          call0Limitations.length,
+          ...ghidraXtensaCall0Limitations(call0, info.xtensa_call0_prototype),
         );
       if (extensionFailure === undefined)
         disabledAnalyzerLimitations.splice(
@@ -620,6 +658,7 @@ export const createGhidraProviderClient = (input: {
     ...targetLimitations,
     ...(psp ? GHIDRA_PSP_LIMITATIONS : []),
     ...softFloatLimitations,
+    ...call0Limitations,
     ...ghidraExtensionLimitations(extensions),
     ...seedLimitations,
     ...disabledAnalyzerLimitations,
@@ -761,7 +800,8 @@ export const createGhidraProviderClient = (input: {
         extensions.length > 0 ||
         seeds !== undefined ||
         disabledAnalyzers !== undefined ||
-        softFloat
+        softFloat ||
+        call0
       ) {
         const started = await startSession(operation, options);
         if (!started.ok) return started;

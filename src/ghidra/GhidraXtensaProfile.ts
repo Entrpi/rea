@@ -5,7 +5,7 @@ import type { JsonValue } from "../domain/jsonValue.js";
 /**
  * Ghidra 12.1.4 `xtensa.ldefs` defines this language with a single compiler
  * specification, id `default` (`xtensa.cspec`); there is no `gcc` id. Its
- * default prototype models windowed calls.
+ * default prototype models windowed calls; it also defines `__call0`.
  */
 export const GHIDRA_XTENSA_LANGUAGE: GhidraLanguageOverride = {
   languageId: "Xtensa:LE:32:default",
@@ -54,23 +54,66 @@ export const ghidraXtensaUnsupportedReason = (
     return `Xtensa e_flags declares machine ${metadata.flags & EF_XTENSA_MACH}; binutils defines only E_XTENSA_MACH (0), so this lane does not guess a core.`;
   const abi = metadata.abi;
   if (abi === undefined)
-    return "The Xtensa ABI declaration in .xtensa.info was not inspected; this lane does not infer the windowed ABI.";
+    return "The Xtensa ABI declaration in .xtensa.info was not inspected; this lane does not infer an ABI.";
   switch (abi.status) {
     case "declared":
-      return abi.abi === "windowed"
-        ? null
-        : "The image declares the call0 ABI in .xtensa.info, as ESP8266 builds do. This lane admits the windowed ABI that ESP-IDF uses for ESP32, ESP32-S2 and ESP32-S3; Ghidra's default Xtensa prototype models windowed calls, so call0 needs its own calling-convention selection and verification.";
+      return null;
     case "unrecognized":
-      return `The image declares ABI=${abi.value} in .xtensa.info, which binutils does not define; this lane admits only the windowed ABI (0).`;
+      return `The image declares ABI=${abi.value} in .xtensa.info, which binutils does not define; this lane admits only the windowed (0) and call0 (1) ABIs.`;
     case "absent":
-      return "The image declares no ABI in .xtensa.info; this lane does not infer the windowed ABI from the family name.";
+      return "The image declares no ABI in .xtensa.info; this lane does not infer an ABI from the family name.";
     case "unavailable":
       return [
-        "The Xtensa ABI declaration is unreadable or malformed, so this lane does not infer the windowed ABI.",
+        "The Xtensa ABI declaration is unreadable or malformed, so this lane does not infer an ABI.",
         abi.reason,
       ].join(" ");
   }
 };
+
+/** Prototype policy ReaGhidraXtensaCall0.java applies after analysis. */
+export const GHIDRA_XTENSA_CALL0_PROTOTYPE = "call0-prototype-v1";
+
+/** Whether the admitted target declares the call0 ABI in `.xtensa.info`. */
+export const isGhidraXtensaCall0Target = (target: BinaryTarget): boolean =>
+  target.kind === "executable" &&
+  target.architecture === "xtensa" &&
+  ghidraXtensaUnsupportedReason(target) === null &&
+  target.xtensa.abi?.status === "declared" &&
+  target.xtensa.abi.abi === "call0";
+
+/** Prototype outcome the post-analysis script records for the bridge handshake. */
+export interface GhidraXtensaCall0Report {
+  readonly policy: typeof GHIDRA_XTENSA_CALL0_PROTOTYPE;
+  readonly functions: number;
+  readonly definitions: number;
+}
+
+/** Fail closed unless the call0 prototype ran exactly for call0 targets. */
+export const ghidraXtensaCall0Failure = (
+  expected: boolean,
+  report: GhidraXtensaCall0Report | undefined,
+): string | undefined =>
+  expected === (report !== undefined)
+    ? undefined
+    : expected
+      ? "The Ghidra session did not report the committed Xtensa call0 prototype."
+      : "The Ghidra session reported an Xtensa call0 prototype that the profile did not commit.";
+
+/** The prototype REA assigns, then the outcome the session reports. */
+export const ghidraXtensaCall0Limitations = (
+  expected: boolean,
+  report?: GhidraXtensaCall0Report,
+): readonly string[] =>
+  expected
+    ? [
+        "Call0 ABI: Ghidra 12.1.4's default Xtensa prototype models windowed calls, which preserve a8-a11 across a call. After analysis REA assigns Ghidra's `__call0` prototype, which preserves a12-a15, to every function, external function and function definition, so calls to them have call0 register effects.",
+        ...(report === undefined
+          ? []
+          : [
+              `Call0 prototype outcome: ${report.functions} functions and ${report.definitions} function definitions use __call0.`,
+            ]),
+      ]
+    : [];
 
 /** Pin the language only for declarations admitted by the same lane boundary. */
 export const ghidraXtensaLanguage = (
@@ -89,6 +132,7 @@ export const ghidraXtensaProfileParameters = (
   if (target.kind !== "executable" || target.architecture !== "xtensa")
     return {};
   const { elfClass, byteOrder, type, flags, abi } = target.xtensa;
+  const call0 = isGhidraXtensaCall0Target(target);
   return {
     xtensa_elf: {
       elf_class: elfClass,
@@ -97,18 +141,29 @@ export const ghidraXtensaProfileParameters = (
       flags,
       abi: abi?.status === "declared" ? abi.abi : null,
     },
-    xtensa_support_lane: "elf32-le-exec-windowed-generic-v1",
+    xtensa_support_lane: call0
+      ? "elf32-le-exec-call0-generic-v1"
+      : "elf32-le-exec-windowed-generic-v1",
+    ...(call0 ? { xtensa_call0_prototype: GHIDRA_XTENSA_CALL0_PROTOTYPE } : {}),
   };
 };
 
 /** What verify:ghidra:xtensa and REA's ESP-IDF measurement establish, and what they do not. */
 export const ghidraXtensaLimitations = (
   target: BinaryTarget,
-): readonly string[] =>
-  target.kind === "executable" && target.architecture === "xtensa"
-    ? [
-        "REA verifies this lane against Ghidra 12.1.4 with source-owned windowed-call fixtures (entry, call8, retw.n, l32r). Decompiled code for other images is not verified function by function; check call targets and arguments against the assembly when they matter.",
-        "REA pins Ghidra's generic `Xtensa:LE:32:default` language with the `default` compiler specification, whose default prototype models windowed calls according to Ghidra 12.1.4's xtensa.cspec. The language does not identify the ESP32, ESP32-S2 or ESP32-S3 core configuration or the producing compiler.",
-        "Measured by REA: Ghidra 12.1.4 does not decode SALT/SALTU, which ESP32-S3 builds use, so disassembly, calls and parameters after them are missing in that function. Reported upstream or derived from Ghidra 12.1.4 sources, not reproduced by REA: decompiled output approximates register-window rotation; FLIX bundles and ESP32-S3 `ee.*` vector instructions are not decoded; zero-overhead loops are mis-modeled.",
-      ]
-    : [];
+): readonly string[] => {
+  if (target.kind !== "executable" || target.architecture !== "xtensa")
+    return [];
+  if (!isGhidraXtensaCall0Target(target))
+    return [
+      "REA verifies this lane against Ghidra 12.1.4 with source-owned windowed-call fixtures (entry, call8, retw.n, l32r). Decompiled code for other images is not verified function by function; check call targets and arguments against the assembly when they matter.",
+      "REA pins Ghidra's generic `Xtensa:LE:32:default` language with the `default` compiler specification, whose default prototype models windowed calls according to Ghidra 12.1.4's xtensa.cspec. The language does not identify the ESP32, ESP32-S2 or ESP32-S3 core configuration or the producing compiler.",
+      "Measured by REA: Ghidra 12.1.4 does not decode SALT/SALTU, which ESP32-S3 builds use, so disassembly, calls and parameters after them are missing in that function. Reported upstream or derived from Ghidra 12.1.4 sources, not reproduced by REA: decompiled output approximates register-window rotation; FLIX bundles and ESP32-S3 `ee.*` vector instructions are not decoded; zero-overhead loops are mis-modeled.",
+    ];
+  return [
+    "REA verifies this lane against Ghidra 12.1.4 with source-owned call0 fixtures (call0, ret.n, l32r, a value kept in a12 across a call). Decompiled code for other images is not verified function by function; check call targets and arguments against the assembly when they matter.",
+    "REA pins Ghidra's generic `Xtensa:LE:32:default` language with the `default` compiler specification. The language does not identify the ESP8266 or another core configuration, or the producing compiler.",
+    "Derived from Ghidra 12.1.4 sources, not reproduced by REA: a call to an address with no function in the program, such as a mask-ROM routine outside the image, keeps the windowed default prototype, because Ghidra has no program option for the model of a called function it cannot resolve.",
+    "Measured by REA: Ghidra 12.1.4 does not decode SALT/SALTU, so disassembly, calls and parameters after them are missing in that function. Reported upstream or derived from Ghidra 12.1.4 sources, not reproduced by REA: FLIX bundles are not decoded; zero-overhead loops are mis-modeled.",
+  ];
+};

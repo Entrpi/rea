@@ -14,12 +14,37 @@ export const XTENSA_C_FIXTURE_VALUES: {
   factor: number;
   constant: number;
 };
+export const XTENSA_CALL0_FIXTURE_TEXT: Buffer;
+export const XTENSA_CALL0_FIXTURE_SYMBOLS: Record<
+  | "rea_xtensa_call0_literal"
+  | "rea_xtensa_call0_entry"
+  | "rea_xtensa_call0_leaf",
+  { address: number; size: number; type: "OBJECT" | "FUNC" }
+>;
+export const XTENSA_CALL0_FIXTURE_INSTRUCTIONS: Record<
+  "l32r" | "call0" | "ret",
+  number
+>;
+export const XTENSA_CALL0_FIXTURE_VALUES: {
+  literal: number;
+  addend: number;
+  kept: number;
+};
+export const XTENSA_CALL0_C_FIXTURE_VALUES: {
+  mask: number;
+  factor: number;
+  constant: number;
+};
 export function xtensaFixtureBytes(): Buffer;
+export function xtensaCall0FixtureBytes(): Buffer;
 export function mutateXtensaFixture(
   bytes: Buffer,
   change: { flags?: number; type?: number; abi?: string },
 ): Buffer;
 export function writeXtensaFixture(
+  directory: string,
+): Promise<{ path: string; bytes: Buffer; sha256: string }>;
+export function writeXtensaCall0Fixture(
   directory: string,
 ): Promise<{ path: string; bytes: Buffer; sha256: string }>;
 export function buildXtensaCFixture(
@@ -35,3 +60,9 @@ export function buildXtensaCFixture(
   };
   source_sha256: string;
 }>;
+export function buildXtensaCall0CFixture(
+  directory: string,
+  compiler: string,
+  flags: readonly string[],
+  output: string,
+): ReturnType<typeof buildXtensaCFixture>;

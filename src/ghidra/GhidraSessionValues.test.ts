@@ -140,6 +140,35 @@ describe("Ghidra MIPS soft-float storage report", () => {
   });
 });
 
+describe("Ghidra Xtensa call0 prototype report", () => {
+  const valid = {
+    policy: "call0-prototype-v1",
+    functions: 3,
+    definitions: 0,
+  };
+  it("accepts the exact committed policy outcome", () => {
+    const parsed = parseGhidraSessionInfo(
+      { ...session(), xtensa_call0_prototype: valid },
+      expected,
+    );
+    if (!parsed.ok) throw parsed.error;
+    expect(parsed.value.xtensa_call0_prototype).toEqual(valid);
+  });
+  it.each([
+    ["another policy", { ...valid, policy: "o32-soft-float-prototype-v1" }],
+    ["a negative count", { ...valid, functions: -1 }],
+    ["a missing count", { policy: valid.policy, functions: 3 }],
+    ["an undeclared field", { ...valid, skipped: 0 }],
+  ])("rejects %s", (_label, report) => {
+    expect(
+      parseGhidraSessionInfo(
+        { ...session(), xtensa_call0_prototype: report },
+        expected,
+      ).ok,
+    ).toBe(false);
+  });
+});
+
 describe("Ghidra disabled analyzer report", () => {
   const valid = {
     format: "rea-ghidra-disabled-analyzers-v1",

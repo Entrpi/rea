@@ -26,6 +26,7 @@ const members = [
   "package/bridge/ghidra/ReaGhidraAnalysisOptions.java",
   "package/bridge/ghidra/ReaGhidraNoReturnFix.java",
   "package/bridge/ghidra/ReaGhidraMipsSoftFloat.java",
+  "package/bridge/ghidra/ReaGhidraXtensaCall0.java",
   "package/scripts/lib/cli-process-environment.mjs",
 ];
 

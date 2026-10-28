@@ -548,6 +548,11 @@ public final class ReaGhidraBridge extends HeadlessScript {
         String softFloat = currentProgram.getOptions(ghidra.program.model.listing.Program.PROGRAM_INFO)
             .getString("REA MIPS soft-float storage", null);
         if (softFloat != null) result.add("mips_soft_float_storage", JsonParser.parseString(softFloat));
+        // Written by ReaGhidraXtensaCall0 after analysis; REA requires it
+        // exactly when the committed profile declares the call0 prototype.
+        String call0 = currentProgram.getOptions(ghidra.program.model.listing.Program.PROGRAM_INFO)
+            .getString("REA Xtensa call0 prototype", null);
+        if (call0 != null) result.add("xtensa_call0_prototype", JsonParser.parseString(call0));
         return result;
     }
 

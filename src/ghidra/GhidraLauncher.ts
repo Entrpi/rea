@@ -251,6 +251,8 @@ export interface GhidraHeadlessLauncherOptions {
   readonly pspExtension?: GhidraPspExtension;
   /** Remap typed float storage for the soft-float o32 ABI after analysis. */
   readonly mipsSoftFloat?: true;
+  /** Assign the call0 prototype to every function after analysis. */
+  readonly xtensaCall0?: true;
   /** Spawn seam for provider-boundary lifecycle tests. */
   readonly spawnProcess?: typeof spawnOwnedProviderProcess;
   /** LaunchSupport probe seam for Java-free launcher fixtures. */
@@ -414,6 +416,9 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
         ...(this.options.mipsSoftFloat === undefined
           ? {}
           : { mipsSoftFloat: this.options.mipsSoftFloat }),
+        ...(this.options.xtensaCall0 === undefined
+          ? {}
+          : { xtensaCall0: this.options.xtensaCall0 }),
         projectRoot: paths.projectRoot,
         targetPath: session.targetPath,
         ...(existingProject === undefined ? {} : { existingProject }),
@@ -766,6 +771,7 @@ export interface GhidraHeadlessArgumentOptions {
   readonly scriptLogPath: string;
   readonly psp?: true;
   readonly mipsSoftFloat?: true;
+  readonly xtensaCall0?: true;
   readonly dosMz?: true;
   readonly dosCom?: true;
   readonly rawBinary?: {
@@ -795,6 +801,7 @@ type ExistingProjectOptions = Pick<
   | "rawBinary"
   | "languageOverride"
   | "mipsSoftFloat"
+  | "xtensaCall0"
   | "seedPath"
   | "disabledAnalyzers"
 > & { readonly analysisSeeds?: GhidraSeedCommitment };
@@ -837,6 +844,10 @@ const validateExistingProjectOptions = (
       throw new Error(
         "MIPS soft-float storage applies only to a fresh import.",
       );
+    if (options.xtensaCall0 === true)
+      throw new Error(
+        "The Xtensa call0 prototype applies only to a fresh import.",
+      );
     if (
       options.seedPath !== undefined ||
       options.analysisSeeds !== undefined ||
@@ -868,6 +879,7 @@ export const ghidraHeadlessArguments = (
       options.dosMz === true ||
       options.dosCom === true ||
       options.mipsSoftFloat === true ||
+      options.xtensaCall0 === true ||
       rawBinary !== undefined ||
       override !== undefined)
   )
@@ -896,6 +908,17 @@ export const ghidraHeadlessArguments = (
   )
     throw new Error(
       "MIPS soft-float storage applies only to a generic MIPS ELF import.",
+    );
+  if (
+    options.xtensaCall0 === true &&
+    (options.psp === true ||
+      options.dosMz === true ||
+      options.dosCom === true ||
+      options.mipsSoftFloat === true ||
+      rawBinary !== undefined)
+  )
+    throw new Error(
+      "The Xtensa call0 prototype applies only to an Xtensa ELF import.",
     );
   if (
     override !== undefined &&
@@ -1051,6 +1074,12 @@ export const ghidraHeadlessArguments = (
       ? [
           "-postScript",
           scriptPath.join(bridgeDirectory, GHIDRA_BRIDGE_SOURCES.mipsSoftFloat),
+        ]
+      : []),
+    ...(options.xtensaCall0 === true
+      ? [
+          "-postScript",
+          scriptPath.join(bridgeDirectory, GHIDRA_BRIDGE_SOURCES.xtensaCall0),
         ]
       : []),
     "-postScript",

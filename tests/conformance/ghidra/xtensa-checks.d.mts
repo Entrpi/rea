@@ -29,3 +29,21 @@ export function assertXtensaCFixturePseudocode(
   scale: string,
   values: { global: string; factor: number; constant: number },
 ): void;
+export function assertXtensaCall0FixtureInstructions(
+  instructions: Record<"l32r" | "call0" | "ret", unknown>,
+  addresses: { leaf: string; literal: string },
+): void;
+export function xtensaCall0KeptValue(
+  entry: string,
+  values: { literal: number; kept: number },
+): "folded" | "before-call";
+export function assertXtensaCall0FixturePseudocode(
+  entry: string,
+  leaf: string,
+  values: { literal: number; addend: number; kept: number },
+): void;
+export function assertXtensaCall0CFixturePseudocode(
+  entry: string,
+  scale: string,
+  values: { mask: number; factor: number; constant: number },
+): void;

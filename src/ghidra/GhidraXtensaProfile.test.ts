@@ -26,7 +26,10 @@ import {
   GHIDRA_SESSION_CAPABILITIES,
   parseGhidraSessionInfo,
 } from "./GhidraSessionValues.js";
-import { ghidraXtensaLimitations } from "./GhidraXtensaProfile.js";
+import {
+  ghidraXtensaLimitations,
+  type GhidraXtensaCall0Report,
+} from "./GhidraXtensaProfile.js";
 
 // Abbreviated from Ghidra 12.1.4 Processors/Xtensa/data/languages/xtensa.ldefs:
 // one compiler specification per language, with id `default` and no `gcc`.
@@ -225,7 +228,6 @@ const registerRefusalCases = () => {
     [{ flags: 0x700 }, "(0x400)"],
     [{ flags: 0x8000_0300 }, "(0x80000000)"],
     [{ flags: 0x301 }, "declares machine 1"],
-    [{ abi: { status: "declared", abi: "call0" } }, "call0 ABI"],
     [{ abi: { status: "unrecognized", value: "2" } }, "ABI=2"],
     [{ abi: { status: "absent" } }, "declares no ABI"],
     [
@@ -432,9 +434,154 @@ const registerProviderCases = () => {
   });
 };
 
+const CALL0 = { status: "declared", abi: "call0" } as const;
+const CALL0_REPORT: GhidraXtensaCall0Report = {
+  policy: "call0-prototype-v1",
+  functions: 4,
+  definitions: 1,
+};
+
+/** A client whose stub handshake reports `reported`; counts each lifecycle step. */
+const call0Session = async (
+  value: BinaryTarget,
+  reported: GhidraXtensaCall0Report | undefined,
+  profileFor: BinaryTarget = value,
+) => {
+  const counts = { starts: 0, calls: 0, closes: 0 };
+  const launches: GhidraClientOptions[] = [];
+  const provider = ghidra({}, (options) => {
+    launches.push(options);
+    return {
+      start: () => {
+        counts.starts++;
+        return Promise.resolve(
+          ok({
+            ...session(PINNED.languageId, "default"),
+            ...(reported === undefined
+              ? {}
+              : { xtensa_call0_prototype: reported }),
+          }),
+        );
+      },
+      callTool: () => {
+        counts.calls++;
+        return Promise.resolve(ok(null));
+      },
+      close: () => {
+        counts.closes++;
+        return Promise.resolve(ok(null));
+      },
+    };
+  });
+  const resolved = await provider.resolveAnalysisProfile(profileFor);
+  if (!resolved.ok || resolved.value.profile === null)
+    throw new Error("expected an Xtensa profile");
+  return {
+    counts,
+    launches,
+    profile: resolved.value.profile,
+    client: provider.createClient(value, resolved.value.profile),
+  };
+};
+
+const registerCall0Cases = () => {
+  it("admits call0 under its own lane and commits its prototype only for it", async () => {
+    const call0 = target({ abi: CALL0 });
+    expect(ghidra().inspectTargetSupport(call0)).toMatchObject({
+      status: "supported",
+    });
+    expect(ghidraPinnedLanguage(call0)).toEqual(PINNED);
+    const { profile } = await call0Session(call0, CALL0_REPORT);
+    expect(profile.parameters).toMatchObject({
+      language_id: "Xtensa:LE:32:default",
+      compiler_spec_id: "default",
+      xtensa_elf: { abi: "call0" },
+      xtensa_support_lane: "elf32-le-exec-call0-generic-v1",
+      xtensa_call0_prototype: "call0-prototype-v1",
+    });
+    const windowed = await call0Session(target(), undefined);
+    expect(windowed.profile.parameters).not.toHaveProperty(
+      "xtensa_call0_prototype",
+    );
+    expect(windowed.profile.digest).not.toBe(profile.digest);
+  });
+
+  it("launches the call0 prototype and delivers its reported outcome", async () => {
+    const call0 = target({ abi: CALL0 });
+    const { client, launches } = await call0Session(call0, CALL0_REPORT);
+    let delivered: readonly string[] = [];
+    try {
+      const health = await client.execute("health", {});
+      if (!health.ok) throw health.error;
+      delivered = health.value.limitations;
+    } finally {
+      await client.close();
+    }
+    expect(launches).toEqual([
+      expect.objectContaining({
+        launcher: expect.objectContaining({
+          options: expect.objectContaining({
+            languageOverride: PINNED,
+            xtensaCall0: true,
+          }),
+        }),
+      }),
+    ]);
+    expect(delivered).toEqual(
+      expect.arrayContaining([
+        ...ghidraXtensaLimitations(call0),
+        expect.stringContaining("preserves a12-a15"),
+        "Call0 prototype outcome: 4 functions and 1 function definitions use __call0.",
+      ]),
+    );
+    expect(delivered.join("\n")).not.toContain("windowed-call fixtures");
+  });
+
+  it.each([
+    {
+      reason: "a call0 session without a prototype report",
+      value: target({ abi: CALL0 }),
+      reported: undefined,
+      operation: "list_procedures",
+    },
+    {
+      reason: "a call0 prototype reported by a windowed session",
+      value: target(),
+      reported: CALL0_REPORT,
+      operation: "health",
+    },
+  ] as const)("rejects $reason", async ({ value, reported, operation }) => {
+    const { counts, client } = await call0Session(value, reported);
+    const failed = await client.execute(operation, {});
+    expect(failed.ok).toBe(false);
+    if (!failed.ok) expect(failed.error._tag).toBe("ProviderAdapterError");
+    expect(counts).toEqual({ starts: 1, calls: 0, closes: 1 });
+  });
+
+  it("refuses a profile whose call0 policy disagrees with the target", async () => {
+    for (const [value, profileFor] of [
+      [target({ abi: CALL0 }), target()],
+      [target(), target({ abi: CALL0 })],
+    ] as const) {
+      const { counts, client } = await call0Session(
+        value,
+        CALL0_REPORT,
+        profileFor,
+      );
+      const failed = await client.execute("health", {});
+      expect(failed.ok).toBe(false);
+      expect(counts.starts).toBe(0);
+    }
+  });
+};
+
 describe("bounded Ghidra Xtensa admission", () => {
   registerPinCases();
   registerRefusalCases();
   registerOverrideCases();
   registerProviderCases();
+});
+
+describe("Ghidra Xtensa call0 prototype", () => {
+  registerCall0Cases();
 });

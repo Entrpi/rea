@@ -11,6 +11,7 @@ import {
 import { GHIDRA_FUNCTION_OPERATIONS } from "./GhidraFunctionValues.js";
 import { ghidraExtensionResultSchema } from "./extensions/GhidraExtensions.js";
 import { GHIDRA_MIPS_SOFT_FLOAT_STORAGE } from "./GhidraMipsProfile.js";
+import { GHIDRA_XTENSA_CALL0_PROTOTYPE } from "./GhidraXtensaProfile.js";
 
 /** Exact methods proved by the selected Program bridge handshake. */
 export const GHIDRA_SESSION_CAPABILITIES = [
@@ -89,6 +90,14 @@ const sessionInfoSchema = z
     mips_soft_float_storage: z
       .object({
         policy: z.literal(GHIDRA_MIPS_SOFT_FLOAT_STORAGE),
+        functions: z.int().nonnegative(),
+        definitions: z.int().nonnegative(),
+      })
+      .strict()
+      .optional(),
+    xtensa_call0_prototype: z
+      .object({
+        policy: z.literal(GHIDRA_XTENSA_CALL0_PROTOTYPE),
         functions: z.int().nonnegative(),
         definitions: z.int().nonnegative(),
       })

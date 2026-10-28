@@ -6,13 +6,20 @@ import { ghidraXtensaUnsupportedReason } from "../../../src/ghidra/GhidraXtensaP
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import {
   assertXtensaCFixturePseudocode,
+  assertXtensaCall0CFixturePseudocode,
+  assertXtensaCall0FixtureInstructions,
+  assertXtensaCall0FixturePseudocode,
   assertXtensaFixtureInstructions,
   assertXtensaFixturePseudocode,
   parseXtensaReadelf,
+  xtensaCall0KeptValue,
 } from "./xtensa-checks.mjs";
 import {
   mutateXtensaFixture,
+  writeXtensaCall0Fixture,
   writeXtensaFixture,
+  XTENSA_CALL0_C_FIXTURE_VALUES,
+  XTENSA_CALL0_FIXTURE_VALUES,
   XTENSA_FIXTURE_SYMBOLS,
 } from "./xtensa-fixture.mjs";
 
@@ -127,6 +134,18 @@ describe("Xtensa lane oracle and assertions", () => {
     expect(() =>
       parseXtensaReadelf(readelf.replace(/Displaying notes[^]*$/u, ""), names),
     ).toThrow(/Xtensa_Info note/u);
+    // ABI=1 is call0; binutils defines no other value.
+    const call0 = readelf.replace("41 42 49 3d 30 0a", "41 42 49 3d 31 0a");
+    expect(parseXtensaReadelf(call0, names).xtensa.abi).toEqual({
+      status: "declared",
+      abi: "call0",
+    });
+    expect(() =>
+      parseXtensaReadelf(
+        readelf.replace("41 42 49 3d 30 0a", "41 42 49 3d 32 0a"),
+        names,
+      ),
+    ).toThrow(/ABI=2/u);
   });
 
   it("accepts the fixture's decoded instructions and refuses a wrong call target", () => {
@@ -174,7 +193,7 @@ describe("Xtensa lane oracle and assertions", () => {
         [{ flags: 0x700 }, "(0x400)"],
         [{ flags: 0x301 }, "machine 1"],
         [{ type: 3 }, "shared and position-independent"],
-        [{ abi: "1" }, "call0 ABI"],
+        [{ abi: "2" }, "ABI=2"],
       ] as const
     ).entries()) {
       const path = join(directory, `mutated-${index}.elf`);
@@ -280,5 +299,144 @@ describe("Xtensa lane decompiled dataflow", () => {
     expect(() =>
       assertXtensaCFixturePseudocode(entry, scale, C_VALUES),
     ).toThrow(error);
+  });
+});
+
+// Ghidra 12.1.4 decompiled the call0 fixture this way in verify:ghidra:xtensa,
+// and the same bytes declared windowed with the default prototype.
+const CALL0_ENTRY =
+  "\nint __call0 rea_xtensa_call0_entry(int param_1)\n\n{\n  int iVar1;\n  \n  iVar1 = rea_xtensa_call0_leaf(0x12345678);\n  return iVar1 + param_1 + 5;\n}\n\n";
+const WINDOWED_DEFAULT_ENTRY =
+  "\nint rea_xtensa_call0_entry(int param_1)\n\n{\n  int iVar1;\n  \n  param_1 = param_1 + 5;\n  iVar1 = rea_xtensa_call0_leaf(0x12345678);\n  return iVar1 + param_1;\n}\n\n";
+const CALL0_LEAF =
+  "\nint __call0 rea_xtensa_call0_leaf(int param_1)\n\n{\n  return param_1 + 7;\n}\n\n";
+// verify:ghidra:xtensa output for xtensa-esp32-elf-gcc 14.2.0 -mabi=call0 -O1 -g.
+const CALL0_C_ENTRY =
+  "\nuint __call0 rea_xtensa_call0_c_entry(uint value)\n\n{\n  uint uVar1;\n  \n                    /* Unresolved local var: uint kept@[???] */\n  uVar1 = rea_xtensa_call0_c_scale(value ^ 0x5a,5);\n  return uVar1 + (value ^ 0x5a);\n}\n\n";
+const CALL0_C_SCALE =
+  "\nuint __call0 rea_xtensa_call0_c_scale(uint value,uint factor)\n\n{\n  return factor + 0x1234567 + value;\n}\n\n";
+const call0Decoded = {
+  l32r: instruction(
+    "l32r",
+    "21fcff",
+    { kind: "fallthrough", direct_destinations: [] },
+    [{ target_address: "0x40100000" }],
+  ),
+  call0: instruction("call0", "c50000", {
+    kind: "call",
+    direct_destinations: ["0x40100020"],
+  }),
+  ret: instruction("ret.n", "0df0", {
+    kind: "return",
+    direct_destinations: [],
+  }),
+};
+
+describe("Xtensa call0 lane fixture and dataflow", () => {
+  it("writes a call0 fixture REA admits, which the lane can declare windowed", async () => {
+    const directory = await createTestTempDirectory("rea-xtensa-call0-");
+    const fixture = await writeXtensaCall0Fixture(directory);
+    const target = await parseBinaryTarget(fixture.path);
+    if (!target.ok) throw target.error;
+    expect(target.value).toMatchObject({
+      architecture: "xtensa",
+      xtensa: { flags: 0x300, abi: { status: "declared", abi: "call0" } },
+    });
+    expect(ghidraXtensaUnsupportedReason(target.value)).toBeNull();
+    const path = join(directory, "declared-windowed.elf");
+    await writeFile(path, mutateXtensaFixture(fixture.bytes, { abi: "0" }));
+    const windowed = await parseBinaryTarget(path);
+    if (!windowed.ok) throw windowed.error;
+    expect(windowed.value).toMatchObject({
+      xtensa: { abi: { status: "declared", abi: "windowed" } },
+    });
+  });
+
+  it("accepts the call0 fixture's decoded instructions", () => {
+    const addresses = { leaf: "0x40100020", literal: "0x40100000" };
+    expect(() =>
+      assertXtensaCall0FixtureInstructions(call0Decoded, addresses),
+    ).not.toThrow();
+    expect(() =>
+      assertXtensaCall0FixtureInstructions(
+        {
+          ...call0Decoded,
+          call0: instruction("call0", "c50000", {
+            kind: "call",
+            direct_destinations: ["0x40100024"],
+          }),
+        },
+        addresses,
+      ),
+    ).toThrow();
+  });
+
+  it("tells the folded a12 value from the windowed default's spill", () => {
+    expect(xtensaCall0KeptValue(CALL0_ENTRY, XTENSA_CALL0_FIXTURE_VALUES)).toBe(
+      "folded",
+    );
+    expect(
+      xtensaCall0KeptValue(WINDOWED_DEFAULT_ENTRY, XTENSA_CALL0_FIXTURE_VALUES),
+    ).toBe("before-call");
+    expect(() =>
+      assertXtensaCall0FixturePseudocode(
+        CALL0_ENTRY,
+        CALL0_LEAF,
+        XTENSA_CALL0_FIXTURE_VALUES,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertXtensaCall0FixturePseudocode(
+        WINDOWED_DEFAULT_ENTRY,
+        CALL0_LEAF,
+        XTENSA_CALL0_FIXTURE_VALUES,
+      ),
+    ).toThrow(/must keep a12 across call0/u);
+  });
+
+  it.each([
+    {
+      name: "a lost a12 value",
+      entry: CALL0_ENTRY.replace("+ param_1 + 5", "+ unaff_a12"),
+      error: /plus its argument plus 5/u,
+    },
+    {
+      name: "the literal not passed",
+      entry: CALL0_ENTRY.replace("0x12345678", "in_a2"),
+      error: /must pass 0x12345678/u,
+    },
+  ])("refuses $name", ({ entry, error }) => {
+    expect(() =>
+      xtensaCall0KeptValue(entry, XTENSA_CALL0_FIXTURE_VALUES),
+    ).toThrow(error);
+  });
+
+  it("accepts the compiled call0 fixture and refuses its windowed-default spill", () => {
+    expect(() =>
+      assertXtensaCall0CFixturePseudocode(
+        CALL0_C_ENTRY,
+        CALL0_C_SCALE,
+        XTENSA_CALL0_C_FIXTURE_VALUES,
+      ),
+    ).not.toThrow();
+    // Ghidra 12.1.4 printed this for the same build with the default prototype.
+    const spilled = CALL0_C_ENTRY.replace(
+      "uVar1 = rea_xtensa_call0_c_scale(value ^ 0x5a,5);\n  return uVar1 + (value ^ 0x5a);",
+      "value_00 = value ^ 0x5a;\n  uVar1 = rea_xtensa_call0_c_scale(value_00,5);\n  return uVar1 + value_00;",
+    );
+    expect(() =>
+      assertXtensaCall0CFixturePseudocode(
+        spilled,
+        CALL0_C_SCALE,
+        XTENSA_CALL0_C_FIXTURE_VALUES,
+      ),
+    ).toThrow(/must pass value \^ 0x5a and 5/u);
+    expect(() =>
+      assertXtensaCall0CFixturePseudocode(
+        CALL0_C_ENTRY,
+        CALL0_C_SCALE.replace("factor + ", ""),
+        XTENSA_CALL0_C_FIXTURE_VALUES,
+      ),
+    ).toThrow(/must return value \+ factor \+ 0x1234567/u);
   });
 });

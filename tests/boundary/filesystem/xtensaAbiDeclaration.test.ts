@@ -4,7 +4,11 @@ import { describe, expect, it } from "vitest";
 import { parseBinaryTarget } from "../../../src/application/BinaryTargetResolver.js";
 import { readXtensaElfAbi } from "../../../src/application/XtensaElfMetadata.js";
 import type { XtensaAbiDeclaration } from "../../../src/domain/binaryTargetTypes.js";
-import { ghidraXtensaUnsupportedReason } from "../../../src/ghidra/GhidraXtensaProfile.js";
+import {
+  ghidraXtensaProfileParameters,
+  ghidraXtensaUnsupportedReason,
+  isGhidraXtensaCall0Target,
+} from "../../../src/ghidra/GhidraXtensaProfile.js";
 import {
   elfNote,
   elfNoteFixture,
@@ -93,10 +97,18 @@ describe("Xtensa ELF target resolution", () => {
     expect(ghidraXtensaUnsupportedReason(target)).toBeNull();
   });
 
-  it("records call0 and keeps the Ghidra refusal specific", async () => {
+  it("records call0 and admits the Ghidra call0 lane", async () => {
     const target = await resolveFixture(xtensaElf({ abi: "1" }));
     expect(target.xtensa.abi).toEqual({ status: "declared", abi: "call0" });
-    expect(ghidraXtensaUnsupportedReason(target)).toContain("call0 ABI");
+    expect(ghidraXtensaUnsupportedReason(target)).toBeNull();
+    expect(isGhidraXtensaCall0Target(target)).toBe(true);
+    expect(ghidraXtensaProfileParameters(target)).toMatchObject({
+      xtensa_elf: { abi: "call0" },
+      xtensa_support_lane: "elf32-le-exec-call0-generic-v1",
+      xtensa_call0_prototype: "call0-prototype-v1",
+    });
+    const windowed = await resolveFixture(xtensaElf());
+    expect(isGhidraXtensaCall0Target(windowed)).toBe(false);
   });
 
   it("reads big-endian note words without admitting big-endian images", async () => {
@@ -171,7 +183,7 @@ describe("Xtensa ELF target resolution", () => {
     // Only REA's own fixed bound attaches limit facts.
     expect(target.xtensa.abi).not.toHaveProperty("limit");
     expect(ghidraXtensaUnsupportedReason(target)).toContain(
-      "does not infer the windowed ABI",
+      "does not infer an ABI",
     );
   });
 
@@ -190,7 +202,7 @@ describe("Xtensa ELF target resolution", () => {
       },
     });
     expect(ghidraXtensaUnsupportedReason(target)).toContain(
-      "does not infer the windowed ABI",
+      "does not infer an ABI",
     );
   });
 

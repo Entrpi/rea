@@ -236,6 +236,7 @@ describe("Ghidra GameCube DOL loader", () => {
     ["DOS MZ", { dosMz: true }],
     ["DOS COM", { dosCom: true }],
     ["MIPS soft-float", { mipsSoftFloat: true }],
+    ["Xtensa call0", { xtensaCall0: true }],
     [
       "raw binary",
       {
@@ -347,6 +348,43 @@ describe("Ghidra headless launcher", () => {
       expect(() =>
         ghidraHeadlessArguments({ ...base, mipsSoftFloat: true, ...conflict }),
       ).toThrow(/generic MIPS ELF/u);
+  });
+  it("assigns the call0 prototype after the no-return fix and before the bridge", () => {
+    const base = {
+      platform: "linux" as const,
+      projectRoot: "/tmp/project",
+      targetPath: "/tmp/target",
+      bridgeScriptPath: "/package/bridge/ReaGhidraBridge.java",
+      descriptorPath: "/tmp/session.json",
+      ghidraLogPath: "/tmp/ghidra.log",
+      scriptLogPath: "/tmp/script.log",
+    };
+    const call0 = "/package/bridge/ReaGhidraXtensaCall0.java";
+    expect(ghidraHeadlessArguments(base)).not.toContain(call0);
+    const arguments_ = ghidraHeadlessArguments({ ...base, xtensaCall0: true });
+    expect(arguments_[arguments_.indexOf(call0) - 1]).toBe("-postScript");
+    expect(
+      arguments_.indexOf("/package/bridge/ReaGhidraNoReturnFix.java"),
+    ).toBeLessThan(arguments_.indexOf(call0));
+    expect(arguments_.indexOf(call0)).toBeLessThan(
+      arguments_.indexOf("/package/bridge/ReaGhidraBridge.java"),
+    );
+    for (const conflict of [
+      { psp: true as const },
+      { dosMz: true as const },
+      { dosCom: true as const },
+      { mipsSoftFloat: true as const },
+      {
+        rawBinary: {
+          languageId: "x86:LE:32:default",
+          compilerSpecId: "default",
+          baseAddr: "0x1000",
+        },
+      },
+    ])
+      expect(() =>
+        ghidraHeadlessArguments({ ...base, xtensaCall0: true, ...conflict }),
+      ).toThrow(/Xtensa ELF import/u);
   });
 });
 
@@ -591,6 +629,7 @@ describe("Ghidra existing project", () => {
     { languageOverride: { languageId: "x86:LE:32:default" } },
     { psp: true as const },
     { mipsSoftFloat: true as const },
+    { xtensaCall0: true as const },
     { seedPath: "/tmp/runtime/seeds/seeds.tsv" },
     { disabledAnalyzers: ["Decompiler Parameter ID"] },
   ])(

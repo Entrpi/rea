@@ -50,6 +50,10 @@ export function parseXtensaReadelf(text, names) {
     .split("\n")
     .find((line) => line.startsWith("ABI="));
   assert.ok(abiLine, "Xtensa_Info note declares no ABI");
+  assert.ok(
+    ["ABI=0", "ABI=1"].includes(abiLine),
+    `Xtensa_Info note declares ${abiLine}, which binutils does not define`,
+  );
   return {
     xtensa: {
       elfClass: 32,
@@ -314,4 +318,205 @@ export function assertXtensaCFixturePseudocode(entry, scale, values) {
     callee: "rea_xtensa_c_scale",
     args: [values.global, BigInt(values.factor)],
   });
+}
+
+/** Decoded call0 fixture instructions, as annotated in xtensa-fixture.mjs. */
+export function assertXtensaCall0FixtureInstructions(instructions, addresses) {
+  const at = (name) => instructions[name];
+  for (const [name, mnemonic, bytes] of [
+    ["l32r", "l32r", "21fcff"],
+    ["call0", "call0", "c50000"],
+    ["ret", "ret.n", "0df0"],
+  ]) {
+    assert.equal(at(name).status, "decoded", `${name} was not decoded`);
+    assert.equal(at(name).architecture, XTENSA_LANGUAGE);
+    assert.equal(at(name).mnemonic?.toLowerCase(), mnemonic);
+    assert.equal(at(name).bytes, bytes);
+  }
+  assert.equal(at("call0").flow.kind, "call");
+  assert.deepEqual(
+    at("call0").flow.direct_destinations.map((value) => BigInt(value)),
+    [BigInt(addresses.leaf)],
+  );
+  assert.equal(at("ret").flow.kind, "return");
+  assert.ok(
+    at("l32r").references.some(
+      (reference) =>
+        BigInt(reference.target_address) === BigInt(addresses.literal),
+    ),
+    `l32r has no reference to its literal: ${JSON.stringify(at("l32r").references)}`,
+  );
+}
+
+/** A local declaration, which Ghidra prints before the body's statements. */
+const isDeclaration = (statement) =>
+  !statement.startsWith("return") && !/[=(]/u.test(statement);
+
+/** The operands a top-level `operator` chain combines, without casts or parentheses. */
+const chain = (text, operator) => {
+  const value = operand(text);
+  return typeof value === "string"
+    ? topLevel(value, operator).map(operand)
+    : [value];
+};
+
+/** Whether two operand lists hold the same values, in any order. */
+const sameOperands = (left, right) => {
+  const remaining = [...right];
+  for (const value of left) {
+    const index = remaining.findIndex((candidate) => candidate === value);
+    if (index < 0) return false;
+    remaining.splice(index, 1);
+  }
+  return remaining.length === 0;
+};
+
+/**
+ * The one call to `callee` in `caller`: its statement index, call text and
+ * arguments, and what names its result afterwards (a temporary or the call).
+ */
+const singleCall = (code, caller, callee) => {
+  const { parameters, statements } = decompiledFunction(code, caller);
+  const calls = statements.flatMap((statement, index) =>
+    [...statement.matchAll(new RegExp(`\\b${callee}\\s*\\(`, "gu"))].map(
+      (match) => ({
+        index,
+        start: match.index,
+        open: match.index + match[0].length - 1,
+      }),
+    ),
+  );
+  assert.equal(calls.length, 1, `${caller} must call ${callee} once: ${code}`);
+  const [{ index, start, open }] = calls;
+  const statement = statements[index];
+  const close = closingParenthesis(statement, open);
+  assert.notEqual(close, -1, `${caller} has an unbalanced call: ${code}`);
+  const text = statement.slice(start, close + 1);
+  const list = statement.slice(open + 1, close);
+  const assignment = ASSIGNMENT.exec(statement);
+  return {
+    parameters,
+    statements,
+    index,
+    args: list.trim() === "" ? [] : topLevel(list, ",").map(operand),
+    result:
+      assignment !== null && operand(assignment[2]) === text
+        ? assignment[1]
+        : text,
+  };
+};
+
+/** The expression the function's single return statement returns. */
+const returned = (statements, code, name) => {
+  const returns = statements
+    .map((statement) => RETURN.exec(statement))
+    .filter((match) => match !== null);
+  assert.equal(returns.length, 1, `${name} must return once: ${code}`);
+  return returns[0][1];
+};
+
+/**
+ * How decompiled code carries the value the call0 caller keeps in
+ * callee-saved a12 across call0, its parameter plus `values.kept`:
+ * "folded" when the return adds the callee's result, the parameter and the
+ * constant, which needs a12 to survive the call; "before-call" when a
+ * statement first computes the sum into a variable, as Ghidra's windowed
+ * default prototype, which does not preserve a12, leaves it.
+ */
+export function xtensaCall0KeptValue(entry, values) {
+  const name = "rea_xtensa_call0_entry";
+  const call = singleCall(entry, name, "rea_xtensa_call0_leaf");
+  assert.deepEqual(
+    call.args,
+    [BigInt(values.literal)],
+    `${name} must pass ${display(BigInt(values.literal))} to rea_xtensa_call0_leaf: ${entry}`,
+  );
+  const [parameter] = call.parameters;
+  const before = call.statements
+    .slice(0, call.index)
+    .filter((statement) => !isDeclaration(statement));
+  const sum = chain(returned(call.statements, entry, name), "+");
+  const kept = BigInt(values.kept);
+  if (before.length === 0 && sameOperands(sum, [call.result, parameter, kept]))
+    return "folded";
+  const assignment = before.length === 1 ? ASSIGNMENT.exec(before[0]) : null;
+  if (
+    assignment !== null &&
+    sameOperands(chain(assignment[2], "+"), [parameter, kept]) &&
+    sameOperands(sum, [call.result, assignment[1]])
+  )
+    return "before-call";
+  throw new assert.AssertionError({
+    message: `${name} must return the rea_xtensa_call0_leaf result plus its argument plus ${values.kept}: ${entry}`,
+  });
+}
+
+/**
+ * The call0 caller passes the l32r literal in a2, and Ghidra's `__call0`
+ * prototype keeps the a12 value across call0; the leaf adds its addend.
+ */
+export function assertXtensaCall0FixturePseudocode(entry, leaf, values) {
+  const callee = returnedExpression(leaf, "rea_xtensa_call0_leaf");
+  assert.ok(
+    sameOperands(chain(callee.expression, "+"), [
+      callee.parameters[0],
+      BigInt(values.addend),
+    ]),
+    `rea_xtensa_call0_leaf must return its argument plus ${values.addend}: ${leaf}`,
+  );
+  assert.equal(
+    xtensaCall0KeptValue(entry, values),
+    "folded",
+    `rea_xtensa_call0_entry must keep a12 across call0: ${entry}`,
+  );
+}
+
+/** `text` is the parameter XOR `mask`, in either order. */
+const xorOf = (text, parameter, mask) =>
+  sameOperands(chain(text, "^"), [parameter, mask]);
+
+/**
+ * The compiled call0 caller passes `value ^ mask` and the factor and returns
+ * the result plus `value ^ mask`, which the compiler keeps in a callee-saved
+ * register: under `__call0` both uses fold to the parameter expression.
+ */
+export function assertXtensaCall0CFixturePseudocode(entry, scale, values) {
+  const callee = returnedExpression(scale, "rea_xtensa_call0_c_scale");
+  assert.ok(
+    sameOperands(chain(callee.expression, "+"), [
+      ...callee.parameters,
+      BigInt(values.constant),
+    ]),
+    `rea_xtensa_call0_c_scale must return value + factor + ${display(BigInt(values.constant))}: ${scale}`,
+  );
+  const name = "rea_xtensa_call0_c_entry";
+  const call = singleCall(entry, name, "rea_xtensa_call0_c_scale");
+  const [parameter] = call.parameters;
+  const mask = BigInt(values.mask);
+  assert.ok(
+    call.args.length === 2 &&
+      typeof call.args[0] === "string" &&
+      xorOf(call.args[0], parameter, mask) &&
+      call.args[1] === BigInt(values.factor),
+    `${name} must pass ${parameter} ^ ${display(mask)} and ${values.factor} to rea_xtensa_call0_c_scale: ${entry}`,
+  );
+  assert.deepEqual(
+    call.statements
+      .slice(0, call.index)
+      .filter((statement) => !isDeclaration(statement)),
+    [],
+    `${name} must keep the callee-saved value across call0: ${entry}`,
+  );
+  const sum = chain(returned(call.statements, entry, name), "+");
+  assert.ok(
+    sum.length === 2 &&
+      sum.includes(call.result) &&
+      sum.some(
+        (term) =>
+          typeof term === "string" &&
+          term !== call.result &&
+          xorOf(term, parameter, mask),
+      ),
+    `${name} must return the result plus ${parameter} ^ ${display(mask)}: ${entry}`,
+  );
 }
