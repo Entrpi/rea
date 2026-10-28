@@ -102,14 +102,12 @@ describe("ESP flash layout inventory", () => {
         md5: { status: "valid" },
       },
       partitions_outside_dump: [],
-      otadata: {
-        partition_index: 1,
-        selected: {
-          active_record: 0,
-          slot: 0,
-          partition_index: 4,
-          basis: "otadata",
-        },
+      otadata: { partition_index: 1 },
+      boot_selection: {
+        basis: "otadata",
+        active_record: 0,
+        slot: 0,
+        partition_index: 4,
         running_partition: "unknown",
       },
       undescribed: [],

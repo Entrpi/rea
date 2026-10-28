@@ -15,9 +15,9 @@ import {
   ESP_OTA_DATA_SECTOR_BYTES,
   ESP_OTA_SELECT_ENTRY_BYTES,
   decodeEspOtaRecord,
-  selectEspOtaSlot,
+  selectEspBootPartition,
+  type EspBootSelection,
   type EspOtaRecord,
-  type EspOtaSelection,
 } from "./espOtaData.js";
 
 /** Where the file's first byte sits in flash, and who said so. */
@@ -300,10 +300,6 @@ export interface EspFlashOtaFacts {
   readonly partition_index: number;
   /** The records the dump holds, each with its index. */
   readonly records: readonly EspOtaRecord[];
-  /** Derived from the records; see its assumptions. Null when unknown. */
-  readonly selected: EspOtaSelection | null;
-  /** The bootloader's rollback and fallback decide it at boot. */
-  readonly running_partition: "unknown";
 }
 
 /** Facts the adapter read for the plan: the otadata records and the gaps. */
@@ -316,6 +312,8 @@ export interface EspFlashReads {
 
 export interface EspFlashLayoutFacts {
   readonly otadata: EspFlashOtaFacts | null;
+  /** Derived for every table, with or without otadata; see its basis. */
+  readonly boot_selection: EspBootSelection;
   readonly undescribed: readonly { offset: number; length: number }[];
   readonly coverage: "complete" | "unknown";
   readonly limitations: readonly string[];
@@ -344,11 +342,17 @@ export const finishEspFlashLayout = (
   const otadata =
     plan.otadata === undefined
       ? null
-      : otaFacts(plan, plan.otadata, reads.otadataRecords);
+      : otaFacts(plan.otadata, reads.otadataRecords);
   // The table names every partition, so one cut short or left out by the end
   // of the file hides no entry: its entry says what the file lacks.
   return {
     otadata,
+    boot_selection: selectEspBootPartition(
+      plan.boot,
+      plan.otadata === undefined || otadata === null
+        ? undefined
+        : { records: otadata.records, size: plan.otadata.partition.size },
+    ),
     undescribed,
     coverage:
       undescribed.length > 0 || plan.input.bootloader === undefined
@@ -359,25 +363,19 @@ export const finishEspFlashLayout = (
 };
 
 const otaFacts = (
-  plan: EspFlashPlan,
   otadata: NonNullable<EspFlashPlan["otadata"]>,
   bytes: readonly (Uint8Array | undefined)[],
-): EspFlashOtaFacts => {
-  const records = otadata.records.flatMap(({ index, available }, position) => {
+): EspFlashOtaFacts => ({
+  partition_index: otadata.partition.index,
+  records: otadata.records.flatMap(({ index, available }, position) => {
     const read = bytes[position];
     return available &&
       read !== undefined &&
       read.length >= ESP_OTA_SELECT_ENTRY_BYTES
       ? [decodeEspOtaRecord(read, index)]
       : [];
-  });
-  return {
-    partition_index: otadata.partition.index,
-    records,
-    selected: selectEspOtaSlot(records, plan.boot, otadata.partition.size),
-    running_partition: "unknown",
-  };
-};
+  }),
+});
 
 /**
  * Where the bytes of a partition the dump holds are not erased flash,

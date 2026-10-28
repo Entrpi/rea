@@ -398,30 +398,34 @@ export const espFlashImageMetadataSchema = z.strictObject({
       partition_index: uint8,
       /** The records the dump holds, at most one per sector. */
       records: z.array(espOtaRecordSchema).max(2),
-      /**
-       * Derived from both records under the stated assumptions; null when
-       * the dump lacks one. `partition_index` is null when the table
-       * declares no partition for the selected slot or fallback, and `none`
-       * is the bootloader's INVALID_INDEX, after which it resets.
-       */
-      selected: z
-        .strictObject({
-          active_record: z.union([z.literal(0), z.literal(1)]).nullable(),
-          slot: uint8.nullable(),
-          partition_index: uint8.nullable(),
-          basis: z.enum([
-            "otadata",
-            "factory-fallback",
-            "ota_0-fallback",
-            "none",
-          ]),
-          assumptions: z.array(z.string()),
-        })
-        .nullable(),
-      /** Rollback, anti-rollback and load fallback decide it at boot. */
-      running_partition: z.literal("unknown"),
     })
     .nullable(),
+  /**
+   * The app the bootloader would select, derived for every table under the
+   * stated assumptions. `basis` names the branch: `otadata`,
+   * `factory-fallback` and `ota_0-fallback` from the otadata records,
+   * `no-otadata` for a table without otadata (the factory index), `none`
+   * for the bootloader's INVALID_INDEX, after which it resets, and
+   * `unknown` when the dump lacks a record the bootloader reads.
+   * `partition_index` is null when the table declares no partition for the
+   * selected slot or fallback.
+   */
+  boot_selection: z.strictObject({
+    basis: z.enum([
+      "otadata",
+      "factory-fallback",
+      "ota_0-fallback",
+      "no-otadata",
+      "none",
+      "unknown",
+    ]),
+    active_record: z.union([z.literal(0), z.literal(1)]).nullable(),
+    slot: uint8.nullable(),
+    partition_index: uint8.nullable(),
+    assumptions: z.array(z.string()),
+    /** Rollback, anti-rollback and load fallback decide it at boot. */
+    running_partition: z.literal("unknown"),
+  }),
   /**
    * Ranges outside every described region, each from a byte that is not
    * erased flash to the end of its gap.

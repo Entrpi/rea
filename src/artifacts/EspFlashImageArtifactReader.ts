@@ -471,16 +471,13 @@ const layoutMetadata = (
       facts.otadata === null
         ? null
         : {
-            ...facts.otadata,
+            partition_index: facts.otadata.partition_index,
             records: facts.otadata.records.map((record) => ({ ...record })),
-            selected:
-              facts.otadata.selected === null
-                ? null
-                : {
-                    ...facts.otadata.selected,
-                    assumptions: [...facts.otadata.selected.assumptions],
-                  },
           },
+    boot_selection: {
+      ...facts.boot_selection,
+      assumptions: [...facts.boot_selection.assumptions],
+    },
     undescribed: [...facts.undescribed],
   };
 };

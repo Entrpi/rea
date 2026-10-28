@@ -60,8 +60,10 @@ cliTest(
       kind: "esp-flash-image",
       chip: { target: "esp32c3" },
       partition_table: { method: "default", md5: { status: "valid" } },
-      otadata: {
-        selected: { slot: 1, partition_index: 5, basis: "otadata" },
+      boot_selection: {
+        basis: "otadata",
+        slot: 1,
+        partition_index: 5,
         running_partition: "unknown",
       },
     });

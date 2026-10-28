@@ -234,7 +234,10 @@ describe("ESP flash layout otadata", () => {
     });
     expect(facts.otadata).toMatchObject({
       records: [{ index: 0, ota_seq: 1 }],
-      selected: { basis: "none", partition_index: null },
+    });
+    expect(facts.boot_selection).toMatchObject({
+      basis: "none",
+      partition_index: null,
     });
   });
 
@@ -251,9 +254,12 @@ describe("ESP flash layout otadata", () => {
       otadataRecords: [otaRecord({ seq: 3 }), undefined],
       gapFirstUnerased: erasedGaps(plan.gaps.length),
     });
-    expect(facts.otadata).toMatchObject({
-      records: [{ index: 0, ota_seq: 3, valid: true }],
-      selected: null,
+    expect(facts.otadata).toEqual({
+      partition_index: 1,
+      records: [expect.objectContaining({ index: 0, ota_seq: 3, valid: true })],
+    });
+    expect(facts.boot_selection).toMatchObject({
+      basis: "unknown",
       running_partition: "unknown",
     });
   });
@@ -293,15 +299,34 @@ describe("ESP flash layout facts", () => {
     expect(facts.otadata).toMatchObject({
       partition_index: 1,
       records: [{ ota_seq: 2, valid: true }, { valid: false }],
-      selected: {
-        active_record: 0,
-        slot: 1,
-        partition_index: 5,
-        basis: "otadata",
-      },
+    });
+    expect(facts.boot_selection).toMatchObject({
+      basis: "otadata",
+      active_record: 0,
+      slot: 1,
+      partition_index: 5,
       running_partition: "unknown",
     });
     expect(facts.coverage).toBe("complete");
+    // A factory-only table selects its factory app without otadata.
+    const withoutOtadata = planEspFlashLayout(
+      input({
+        table: table(
+          TWO_OTA_PARTITIONS.filter(({ label }) =>
+            ["nvs", "phy_init", "factory"].includes(label),
+          ),
+        ),
+      }),
+    );
+    expect(
+      finishEspFlashLayout(withoutOtadata, {
+        otadataRecords: [],
+        gapFirstUnerased: erasedGaps(withoutOtadata.gaps.length),
+      }),
+    ).toMatchObject({
+      otadata: null,
+      boot_selection: { basis: "no-otadata", partition_index: 2 },
+    });
   });
 
   it("projects a partition's declaration with ESP-IDF names and where it is written", () => {

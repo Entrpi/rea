@@ -87,7 +87,8 @@ The root `format_metadata` (`esp-flash-image`) records:
   (`default`, `caller` or `scan`), the partition count and the MD5 `status`
   (`valid`, `invalid` or `absent`) with the stored and computed digests;
 - `apps`: ESP image facts for each app partition the dump holds;
-- `otadata`: the OTA records and the derived selection;
+- `otadata`: the otadata partition's records, or null without one;
+- `boot_selection`: the app the bootloader would select, for every table;
 - `partitions_outside_dump`: declared partitions with no bytes in the file;
 - `undescribed`: ranges outside every region, each from a byte that is not
   erased flash to the end of its gap.
@@ -163,8 +164,11 @@ record the partition and the dump hold: its `ota_seq`, `seq_label`,
 `ota_seq` seeded with `0xFFFFFFFF`) and whether the bootloader would treat
 it as valid.
 
-`selected` is derived as `bootloader_utility_get_selected_boot_partition`
-does without app rollback or anti-rollback. `basis` names its branch:
+### Boot selection
+
+`boot_selection` is present for every table. It is derived as
+`bootloader_utility_get_selected_boot_partition` does without app rollback
+or anti-rollback, and `basis` names its branch:
 
 - `otadata`: the valid record with the higher `ota_seq` (record 0 on a tie)
   selects slot `(ota_seq - 1) % ota_app_count`, indexed by OTA subtype;
@@ -174,17 +178,22 @@ does without app rollback or anti-rollback. `basis` names its branch:
   app is declared;
 - `ota_0-fallback`: no record is usable and no factory app is declared, so
   the bootloader selects boot index 0;
+- `no-otadata`: the table declares no otadata partition, so the bootloader
+  selects the factory index, as in the common factory-only layout;
 - `none`: the otadata partition is smaller than two 4 KiB sectors, so the
-  bootloader cannot read it and resets without selecting an app.
+  bootloader cannot read it and resets without selecting an app;
+- `unknown`: the dump lacks an otadata record the bootloader reads.
 
-`partition_index` is null when the table declares no partition for the
-selected slot or fallback; the bootloader then tries the other apps.
-`selected` is null when the dump lacks a record the bootloader reads. Its
-`assumptions` list what the derivation leaves out, among them factory-reset
-and test-app GPIO holds and a wake from deep sleep. `running_partition` is
-always `unknown`: at boot the bootloader may first mark a pending-verify
-record aborted, check the app's secure version against eFuse, and fall back
-to another partition when an app fails to load.
+`active_record` and `slot` are set for `otadata` and `slot` for
+`ota_0-fallback`. `partition_index` is null when the table declares no
+partition for the selected slot or fallback; the bootloader then tries the
+other apps. `assumptions` list what the derivation leaves out: records used
+as written (for the branches that read them), anti-rollback, load fallback,
+and factory-reset and test-app GPIO holds and a wake from deep sleep; they
+are empty for `none` and `unknown`. `running_partition` is always
+`unknown`: at boot the bootloader may first mark a pending-verify record
+aborted, check the app's secure version against eFuse, and fall back to
+another partition when an app fails to load.
 
 ## Coverage and extraction
 
@@ -268,7 +277,8 @@ otatool's own OTA logic runs unchanged. The lane then checks:
   source is unchanged;
 - a table with the primary `bootloader` and `partition_table` entries that
   `--primary-bootloader-offset` fills, read with complete coverage and no
-  overlap or misplacement limitation;
+  overlap or misplacement limitation; it has no otadata, so its boot
+  selection is `no-otadata` with the factory app;
 - the relocated table, found by scanning and named with
   `partition_table_offset`, and the dump written from `0x1000`, read with
   `flash_offset` and, without it, left an ESP image;

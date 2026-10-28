@@ -7,7 +7,7 @@ import {
   espPartitionTypeName,
   type EspPartition,
 } from "./espPartitionTable.js";
-import { decodeEspOtaRecord, selectEspOtaSlot } from "./espOtaData.js";
+import { decodeEspOtaRecord, selectEspBootPartition } from "./espOtaData.js";
 import {
   espBootloaderProbeOffsets,
   espImageSegmentsEnd,
@@ -184,6 +184,18 @@ describe("ESP partition tables", () => {
 const partitions = (): readonly EspPartition[] =>
   table(partitionTable(TWO_OTA_PARTITIONS)).partitions;
 
+const select = (
+  first: Buffer,
+  second: Buffer,
+  parts = partitions(),
+  otadataSize = 0x2000,
+) =>
+  selectEspBootPartition(espBootPartitions(parts), {
+    records: [decodeEspOtaRecord(first, 0), decodeEspOtaRecord(second, 1)],
+    size: otadataSize,
+  });
+const erased = Buffer.alloc(32, 0xff);
+
 describe("ESP otadata selection", () => {
   it("decodes records and checks the CRC the bootloader computes", () => {
     expect(
@@ -210,19 +222,6 @@ describe("ESP otadata selection", () => {
       valid: false,
     });
   });
-
-  const select = (
-    first: Buffer,
-    second: Buffer,
-    parts = partitions(),
-    otadataSize = 0x2000,
-  ) =>
-    selectEspOtaSlot(
-      [decodeEspOtaRecord(first, 0), decodeEspOtaRecord(second, 1)],
-      espBootPartitions(parts),
-      otadataSize,
-    );
-  const erased = Buffer.alloc(32, 0xff);
 
   it("selects the higher valid sequence and maps it onto the OTA slots", () => {
     expect(select(otaRecord({ seq: 4 }), otaRecord({ seq: 5 }))).toMatchObject({
@@ -272,25 +271,10 @@ describe("ESP otadata selection", () => {
     expect(
       select(otaRecord({ seq: 2, crc: 1 }), erased, noFactory),
     ).toMatchObject({ basis: "factory-fallback", partition_index: null });
-    expect(select(otaRecord({ seq: 2 }), erased)?.assumptions).toHaveLength(4);
-  });
-
-  it("selects nothing from a short otadata partition and nothing known from one record", () => {
-    expect(
-      select(
-        otaRecord({ seq: 1 }),
-        otaRecord({ seq: 2 }),
-        partitions(),
-        0x1000,
-      ),
-    ).toMatchObject({ basis: "none", slot: null, partition_index: null });
-    expect(
-      selectEspOtaSlot(
-        [decodeEspOtaRecord(otaRecord({ seq: 1 }), 0)],
-        espBootPartitions(partitions()),
-        0x2000,
-      ),
-    ).toBeNull();
+    expect(select(otaRecord({ seq: 2 }), erased)).toMatchObject({
+      running_partition: "unknown",
+    });
+    expect(select(otaRecord({ seq: 2 }), erased).assumptions).toHaveLength(4);
   });
 
   it("indexes OTA slots by subtype, so a missing subtype selects no partition", () => {
@@ -304,6 +288,70 @@ describe("ESP otadata selection", () => {
       slot: 0,
       partition_index: null,
       basis: "otadata",
+    });
+  });
+});
+
+describe("ESP boot selection without a derivable slot", () => {
+  it("selects the factory index for a table without otadata", () => {
+    const withoutOtadata = partitions().filter(
+      ({ label }) => label !== "otadata",
+    );
+    const selection = selectEspBootPartition(
+      espBootPartitions(withoutOtadata),
+      undefined,
+    );
+    expect(selection).toMatchObject({
+      basis: "no-otadata",
+      active_record: null,
+      slot: null,
+      partition_index: 3,
+      running_partition: "unknown",
+    });
+    // No record is read, so the records assumption does not apply.
+    expect(selection.assumptions).toHaveLength(3);
+    const factoryOnly = withoutOtadata.filter(
+      ({ label }) => !label?.startsWith("ota_"),
+    );
+    expect(
+      selectEspBootPartition(espBootPartitions(factoryOnly), undefined),
+    ).toMatchObject({ basis: "no-otadata", partition_index: 3 });
+    // Without a factory app the bootloader still selects the factory index.
+    expect(
+      selectEspBootPartition(
+        espBootPartitions(
+          withoutOtadata.filter(({ label }) => label !== "factory"),
+        ),
+        undefined,
+      ),
+    ).toMatchObject({ basis: "no-otadata", partition_index: null });
+  });
+
+  it("selects nothing from a short otadata partition and nothing known from one record", () => {
+    expect(
+      select(
+        otaRecord({ seq: 1 }),
+        otaRecord({ seq: 2 }),
+        partitions(),
+        0x1000,
+      ),
+    ).toEqual({
+      basis: "none",
+      active_record: null,
+      slot: null,
+      partition_index: null,
+      assumptions: [],
+      running_partition: "unknown",
+    });
+    expect(
+      selectEspBootPartition(espBootPartitions(partitions()), {
+        records: [decodeEspOtaRecord(otaRecord({ seq: 1 }), 0)],
+        size: 0x2000,
+      }),
+    ).toMatchObject({
+      basis: "unknown",
+      partition_index: null,
+      assumptions: [],
     });
   });
 });
