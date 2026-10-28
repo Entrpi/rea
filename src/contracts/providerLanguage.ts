@@ -30,9 +30,7 @@ export const ghidraCompilerSpecIdSchema = z
 export const providerLanguageInputSchema = z.strictObject({
   provider: z
     .literal("ghidra")
-    .describe(
-      "Provider whose language catalog defines the language. provider_id must select the same provider.",
-    ),
+    .describe("Provider whose language catalog defines the language."),
   language_id: ghidraLanguageIdSchema.describe(
     "Ghidra language ID from an .ldefs file of the installation, such as SuperH4:LE:32:default.",
   ),

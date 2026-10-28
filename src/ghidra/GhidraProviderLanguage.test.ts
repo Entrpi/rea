@@ -174,30 +174,30 @@ describe("Ghidra provider language catalog resolution", () => {
   });
 });
 
-describe("Ghidra provider language profile", () => {
-  const provider = (environment: Record<string, string> = {}) => {
-    const parsed = parseConfig({
-      GHIDRA_INSTALL_DIR: installDir,
-      ...environment,
-    });
-    if (!parsed.ok) throw parsed.error;
-    return new GhidraProvider(parsed.value, silentLogger, {}, host);
-  };
-  const target = (
-    languageId: string,
-    selection: { entryPoint: string; baseAddress?: string; fileBytes?: number },
-  ) =>
-    providerLanguageRawTarget(
-      { provider: "ghidra", languageId, compilerSpecId: "default" },
-      selection,
-    );
-  const profile = async (subject: ReturnType<typeof target>) => {
-    const resolved = await provider().resolveAnalysisProfile(subject);
-    if (!resolved.ok) throw resolved.error;
-    if (resolved.value.profile === null) throw new Error("expected a profile");
-    return resolved.value.profile;
-  };
+const provider = (environment: Record<string, string> = {}) => {
+  const parsed = parseConfig({
+    GHIDRA_INSTALL_DIR: installDir,
+    ...environment,
+  });
+  if (!parsed.ok) throw parsed.error;
+  return new GhidraProvider(parsed.value, silentLogger, {}, host);
+};
+const target = (
+  languageId: string,
+  selection: { entryPoint: string; baseAddress?: string; fileBytes?: number },
+) =>
+  providerLanguageRawTarget(
+    { provider: "ghidra", languageId, compilerSpecId: "default" },
+    selection,
+  );
+const profile = async (subject: ReturnType<typeof target>) => {
+  const resolved = await provider().resolveAnalysisProfile(subject);
+  if (!resolved.ok) throw resolved.error;
+  if (resolved.value.profile === null) throw new Error("expected a profile");
+  return resolved.value.profile;
+};
 
+describe("Ghidra provider language profile", () => {
   it("commits the caller's language, its definition and no family", async () => {
     const committed = await profile(
       target("F5SH:LE:32:community", {
@@ -219,8 +219,6 @@ describe("Ghidra provider language profile", () => {
         address_bits: 32,
         files: { sla: { sha256: sha256(FILES["f5.sla"]) } },
       },
-      entry_point: "0x8c000010",
-      base_address: "0x8c000000",
       raw_load: {
         version: 1,
         base_address: "0x8c000000",
@@ -235,6 +233,9 @@ describe("Ghidra provider language profile", () => {
       entry_seed: "external-entry-and-function-before-analysis-v1",
     });
     expect(committed.parameters).not.toHaveProperty("entry_context");
+    // raw_load holds the base and entry; flat copies would only repeat it.
+    expect(committed.parameters).not.toHaveProperty("entry_point");
+    expect(committed.parameters).not.toHaveProperty("base_address");
   });
 
   it.each([
@@ -258,10 +259,12 @@ describe("Ghidra provider language profile", () => {
         return;
       }
       if (resolved.ok) throw new Error("expected a refusal");
-      expect(projectAnalysisError(resolved.error)).toMatchObject({
+      const projected = projectAnalysisError(resolved.error);
+      expect(projected).toMatchObject({
         code: "invalid_request",
         details: { reason, constraint: "load_selection_rejected" },
       });
+      expect(projected.details).not.toHaveProperty("field");
     },
   );
 
@@ -276,6 +279,7 @@ describe("Ghidra provider language profile", () => {
         reason:
           "Absent:LE:32:default is not a language defined by Ghidra 12.1.4",
         constraint: "load_selection_rejected",
+        field: "provider_language",
       },
     });
   });
@@ -316,4 +320,21 @@ describe("Ghidra provider language profile", () => {
       expect((await profile(subject)).digest).toBe(before.digest);
     },
   );
+});
+
+describe("Ghidra provider language coordinates", () => {
+  it("keys coordinates by the base, not the entry", async () => {
+    const at = (entryPoint: string, baseAddress = "0x8c000000") =>
+      profile(target("F5SH:LE:32:community", { baseAddress, entryPoint }));
+    const first = await at("0x8c000010");
+    const coordinates = (committed: typeof first) =>
+      committed.parameters.function_coordinate_context;
+    // Session identity covers the entry; coordinates do not.
+    const other = await at("0x8c000014");
+    expect(other.digest).not.toBe(first.digest);
+    expect(coordinates(other)).toEqual(coordinates(first));
+    expect(coordinates(await at("0x8d000010", "0x8d000000"))).not.toEqual(
+      coordinates(first),
+    );
+  });
 });

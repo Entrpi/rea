@@ -60,7 +60,7 @@ import {
   ghidraRawBinaryLanguage,
   ghidraRawProcessorLabels,
 } from "./GhidraRawBinaryLanguage.js";
-import { rawLoadIdentity } from "../domain/rawBinary.js";
+import { isLegacyRawLoad, rawLoadIdentity } from "../domain/rawBinary.js";
 import {
   GHIDRA_GAMECUBE_DOL_LANGUAGE,
   ghidraDolLanguage,
@@ -310,10 +310,13 @@ export const resolveGhidraAnalysisProfile = async (
                 language_selection: "caller-provider-language-v1",
                 language_definition: definition,
               }),
-          entry_point: rawLoad.entryPoint,
+          // A legacy load commits its entry, which is also its base; any other
+          // load commits raw_load, which holds both.
           ...(identity === undefined
-            ? {}
-            : { base_address: rawLoad.baseAddress, raw_load: identity }),
+            ? { entry_point: rawLoad.entryPoint }
+            : { raw_load: identity }),
+          // How Ghidra seeds the entry's instruction set; raw_load records only
+          // the mode.
           ...(rawLoad.entryIsaMode === undefined
             ? {}
             : {
@@ -510,14 +513,16 @@ const resolveProviderLanguageDefinition = async (
       }),
     );
   }
-  const refused = (reason: string) =>
+  const refused = (reason: string, field?: "provider_language") =>
     err(
       new BinaryTargetError(target.path, reason, {
         constraint: "load_selection_rejected",
+        ...(field === undefined ? {} : { field }),
       }),
     );
-  if (!resolved.ok) return refused(resolved.error);
+  if (!resolved.ok) return refused(resolved.error, "provider_language");
   const bits = resolved.value.address_bits;
+  // The language or the base may be the wrong one, so neither is named.
   if (BigInt(lastAddress) >> BigInt(bits) !== 0n)
     return refused(
       `raw-binary mapping from ${baseAddress} to ${lastAddress} must fit in the ${String(bits)}-bit address size that ${providerLanguage.languageId} declares`,
@@ -599,12 +604,14 @@ const createGhidraProfile = (
             compiler_spec_id: parameters.compiler_spec_id ?? null,
             load_segment: parameters.load_segment ?? null,
             address_coordinates: parameters.address_coordinates ?? null,
-            entry_point: parameters.entry_point ?? null,
-            // Resolved values only: the base and the entry's decode context
-            // move coordinates; how the entry was chosen does not.
-            ...(parameters.base_address === undefined
-              ? {}
-              : { base_address: parameters.base_address }),
+            // Resolved values only. A legacy raw load maps file offset 0 at its
+            // entry, so its entry is its base. Any other raw load maps at
+            // base_address, and its entry address and how it was chosen move
+            // no coordinates.
+            ...(target.format === "raw-binary" &&
+            !isLegacyRawLoad(target.rawLoad)
+              ? { base_address: target.rawLoad.baseAddress }
+              : { entry_point: parameters.entry_point ?? null }),
             ...(parameters.entry_context === undefined
               ? {}
               : { entry_context: parameters.entry_context }),

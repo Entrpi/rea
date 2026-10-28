@@ -65,19 +65,19 @@ export const architectureSelectionOption = binaryArchitectureSchema
 export const entryPointSelectionOption = rawBinaryEntryPointSchema
   .optional()
   .describe(
-    "Caller-supplied code entry address (0xhex), also the load address without --base-address; required with --target-format raw-binary unless --architecture-variant and --base-address are given, optional with gamecube-dol (must equal the DOL header entry)",
+    "Caller-supplied code entry address (0xhex), also the load address without --base-address; required with --target-format raw-binary unless --architecture-variant is given, optional with gamecube-dol (must equal the DOL header entry)",
   );
 
 export const baseAddressSelectionOption = rawBinaryBaseAddressSchema
   .optional()
   .describe(
-    "Address of raw file offset 0 (0xhex) for an --architecture-variant image, separate from --entry-point; defaults to it",
+    "Address of raw file offset 0 (0xhex), separate from --entry-point; only with --architecture-variant or --ghidra-language-id",
   );
 
 export const architectureVariantSelectionOption = architectureVariantSchema
   .optional()
   .describe(
-    "ARM M-profile variant of a raw image, decoded in Thumb state; requires --architecture arm",
+    "ARM M-profile variant of a raw image, decoded in Thumb state; requires --architecture arm and --base-address",
   );
 
 export const vectorTableAddressSelectionOption =
@@ -94,7 +94,7 @@ export const vectorTableAddressSelectionOption =
 export const ghidraLanguageIdSelectionOption = ghidraLanguageIdSchema
   .optional()
   .describe(
-    "Expert override for a raw image no --architecture describes: a Ghidra language ID from the installation's catalog, such as SuperH4:LE:32:default; needs --ghidra-compiler-spec-id, --entry-point and --provider ghidra, and replaces --architecture",
+    "Expert override for a raw image no --architecture describes: a Ghidra language ID from the installation's catalog, such as SuperH4:LE:32:default; needs --ghidra-compiler-spec-id and --provider ghidra, and replaces --architecture",
   );
 
 export const ghidraCompilerSpecIdSelectionOption = ghidraCompilerSpecIdSchema
