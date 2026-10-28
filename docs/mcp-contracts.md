@@ -1277,8 +1277,8 @@ when both are omitted, storage is not compared.
 of UnityFS members (`unityfs-entry`), PyInstaller entries
 (`pyinstaller-entry`), Node SEA members
 (`node-sea-entry`), ESP image segments (`esp-image-segment`), ESP flash
-partitions (`esp-flash-partition`) and Intel HEX/S-record regions
-(`hex-record-region`); each format's
+partitions (`esp-flash-partition`), DfuSe elements (`dfuse-element`) and Intel
+HEX/S-record regions (`hex-record-region`); each format's
 guide names the compared fields. A changed declaration is a metadata change,
 including when content is unavailable. A declaration that only one side
 records, or that the other side records as another kind, is unknown and adds a

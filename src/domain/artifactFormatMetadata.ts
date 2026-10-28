@@ -227,14 +227,6 @@ export const dfuSeElementMetadataSchema = z.strictObject({
   length: offset,
 });
 
-/** The device memory an element targets, which its path and bytes do not show. */
-export const dfuSeElementDeclaration = (
-  metadata: z.infer<typeof dfuSeElementMetadataSchema>,
-) => ({
-  alternate_setting: metadata.alternate_setting,
-  target_name: metadata.target_name,
-});
-
 /**
  * Intel HEX or Motorola S-record facts derived from every record. Start
  * addresses are declared values, not proven entry points.
@@ -782,6 +774,25 @@ const declarationsByKind: {
       encrypted: metadata.encrypted,
       readonly: metadata.readonly,
       unknown_flags: metadata.unknown_flags,
+    }),
+  },
+  uf2: {
+    notCompared:
+      "Its fields come from the file's own blocks, which content comparison covers.",
+  },
+  "uf2-region": {
+    notCompared:
+      "Its familyID and addresses are in its path, and content comparison covers its bytes.",
+  },
+  dfuse: {
+    notCompared:
+      "Its fields come from the file's own prefix, target headers and suffix, which content comparison covers.",
+  },
+  /** The device memory an element targets, which its path and bytes do not show. */
+  "dfuse-element": {
+    declaration: (metadata) => ({
+      alternate_setting: metadata.alternate_setting,
+      target_name: metadata.target_name,
     }),
   },
 };
