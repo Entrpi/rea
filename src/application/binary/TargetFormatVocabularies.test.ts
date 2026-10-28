@@ -124,6 +124,7 @@ const TARGETS: TargetFixtures = {
   pkg: { ...archive, format: "pkg" },
   "intel-hex": { ...archive, format: "intel-hex" },
   srec: { ...archive, format: "srec" },
+  "esp-image": { ...archive, format: "esp-image" },
   plist: { ...artifact, format: "plist" },
   javascript: { ...artifact, format: "javascript" },
   "source-map": { ...artifact, format: "source-map" },
