@@ -210,7 +210,11 @@ changing a callback solely to satisfy its declared `void` return type.
 Ordinary Knip remains. `check`, `check:pr`, and `check:ci:deep` run reachability
 then typed lint sequentially after cached work. Typed lint builds the project
 type graph and stays separate from fast feedback. Its default Go settings are
-`GOMAXPROCS=2` and `GOMEMLIMIT=1024MiB`; caller-selected settings take precedence.
+`GOMAXPROCS=1` and `GOMEMLIMIT=1024MiB`; caller-selected settings take precedence.
+One Go worker reuses checker caches across the file queue without changing the
+file inventory or TypeScript project scope. The Go memory target is soft and
+does not cap the complete process family's memory; measure the full invocation
+when enforcing a host budget.
 
 Routine iterations and rebases need focused regressions and relevant checks.
 Before handing off a PR, run `npm run check` and generated-document checks when
@@ -1630,6 +1634,11 @@ results after a failure. Available failed-shard reports remain diagnostic only:
 failed, cancelled, skipped, or missing selected shards cannot pass the gate or
 publish successful timing history. This deliberately avoids relying on an
 import graph for generated files, filesystem inputs, subprocesses, or bridges.
+The portable report rejects an entirely skipped module inventory and lists
+fully skipped modules in its summary. A mixed passed/skipped inventory is
+allowed: Vitest's skip state does not establish whether a skipped module was
+required on that runner. Review the listed skips against platform and provider
+prerequisites; the inventory alone does not prove every required case ran.
 
 Scheduled qualification is admitted hourly at minute 23. A forced full run at
 03:23 UTC refreshes runner and dependency drift every day. Other hourly runs
@@ -1940,6 +1949,19 @@ unknown chunks, depth limits and extracted child digests. The optional
 `REA_FIRMWARE_VERIFY_GHIDRA=1` lane checks a selected host ELF through real Ghidra.
 Neither optional toolchain is a base-lane prerequisite. See
 [firmware analysis](firmware-analysis.md) for limits and unverified formats.
+
+`npm run verify:esp-images` requires a Clang with the RISC-V target and
+`ld.lld` (`REA_RISCV_CLANG`, `REA_RISCV_LLD`) and a Python that runs esptool
+and espsecure (`REA_ESPTOOL_PYTHON`). It builds ESP32-C3 app and bootloader
+ELF files from `tests/conformance/esp/`, converts them with `esptool
+elf2image`, including `--secure-pad-v2`, `--ram-only-header` and
+`--pad-to-size`, signs one with RSA, ECDSA P-256 and P-384 keys, and compares
+REA's facts with `esptool image-info` and `espsecure signature-info-v2`. It
+compares extracted segments and signature blocks with the producer's bytes,
+and derives malformed images and ESP8266 v1 and v3 images. It checks each
+tool before building and warns when esptool is not the pinned v5.6.0.
+`REA_XTENSA_ESP32_GCC` adds an ESP32 Xtensa build. See
+[ESP images](esp-image.md).
 
 ### JavaScript source recovery
 
