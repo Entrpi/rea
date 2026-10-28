@@ -803,3 +803,58 @@ posix(
     expect(probeCount).toBe(2);
   },
 );
+
+posix(
+  "probes again under a later call's deadline after a probe timed out",
+  async () => {
+    const { executable, path } = await fixture();
+    const probeDeadlines: (number | null)[] = [];
+    const runOwned = vi.fn(
+      async (
+        request: { readonly arguments: readonly string[] },
+        limits: { readonly timeoutMs: number | null },
+      ) => {
+        if (request.arguments[0] !== "-v") return providerSnapshot();
+        probeDeadlines.push(limits.timeoutMs);
+        // The first call's deadline stops the probe, which exits by its stop signal.
+        if (probeDeadlines.length === 1)
+          throw new OwnedCommandFailure(
+            "timeout",
+            "Command deadline elapsed.",
+            providerSnapshot({ exitCode: null, signal: "SIGTERM" }),
+          );
+        return providerSnapshot({
+          stdout: {
+            text: "rizin 0.9.1 @ linux-x86-64",
+            bytes: 26,
+            observedBytes: 26,
+          },
+        });
+      },
+    );
+    const service = new TestReverseEngineeringService({
+      runOwned,
+      lookup: lookupExecutable,
+      environment: { REA_RIZIN_COMMAND: executable },
+    });
+    const short = await service.executeRizinCommand({
+      path,
+      command: "iI",
+      command_timeout_ms: 100,
+    });
+    if (!short.ok) throw short.error;
+    expect(short.value.provider.version).toBeNull();
+    expect(short.value.parameters.provider_version_probe).toMatchObject({
+      error_code: "ETIMEDOUT",
+      signal: "SIGTERM",
+    });
+    const long = await service.executeRizinCommand({
+      path,
+      command: "iI",
+      command_timeout_ms: 5_000,
+    });
+    if (!long.ok) throw long.error;
+    expect(long.value.provider.version).toBe("0.9.1");
+    expect(probeDeadlines).toEqual([100, 5_000]);
+  },
+);
