@@ -18,8 +18,9 @@ export interface GhidraRawBinaryLanguage {
 /**
  * Ghidra decoder for each caller-named variant. `ARM:LE:32:Cortex` (the ARMv7
  * decoder with Thumb as the default state) has no ARMv8-M encodings such as
- * the MSPLIM and PSPLIM system registers, so v8-M variants use
- * `ARM:LE:32:v8-m`. Both languages share `ARMCortex.pspec`.
+ * the MSPLIM and PSPLIM system registers, so v8-M and v8.1-M variants use
+ * `ARM:LE:32:v8-m`, which Ghidra 12.1.4's `ARM.ldefs` also lists for
+ * `armv8.1-m.main`. Both languages share `ARMCortex.pspec`.
  */
 export const GHIDRA_RAW_VARIANT_LANGUAGES = {
   "armv6-m": "ARM:LE:32:Cortex",
@@ -27,6 +28,7 @@ export const GHIDRA_RAW_VARIANT_LANGUAGES = {
   "armv7e-m": "ARM:LE:32:Cortex",
   "armv8-m.base": "ARM:LE:32:v8-m",
   "armv8-m.main": "ARM:LE:32:v8-m",
+  "armv8.1-m.main": "ARM:LE:32:v8-m",
 } as const satisfies Record<RawArchitectureVariant, string>;
 
 /**

@@ -62,7 +62,8 @@ describe.each(RAW_ARCHITECTURE_VARIANT_NAMES)(
 );
 
 describe("architecture variant vocabulary", () => {
-  it.each(["cortex-m", "ARMv7-M", "armv7m", "armv8-m", "armv8.1-m.main", ""])(
+  // armv8.1m.main is the LLVM triple's spelling of armv8.1-m.main.
+  it.each(["cortex-m", "ARMv7-M", "armv7m", "armv8-m", "armv8.1m.main", ""])(
     "accepts no spelling outside the table: %j",
     (spelling) => {
       expect(rawArchitectureVariantSchema.safeParse(spelling).success).toBe(
@@ -76,13 +77,17 @@ describe("architecture variant vocabulary", () => {
 describe("persisted architecture variant names", () => {
   // Saved segments Evidence and snapshots carry these names. Retiring one from
   // the input table must not make that Evidence unreadable.
-  it.each(["armv6-m", "armv7-m", "armv7e-m", "armv8-m.base", "armv8-m.main"])(
-    "keeps %s readable in segments Evidence",
-    (name) => {
-      expect(
-        nativeSegmentsLoadImageSchema.shape.architecture_variant.safeParse(name)
-          .success,
-      ).toBe(true);
-    },
-  );
+  it.each([
+    "armv6-m",
+    "armv7-m",
+    "armv7e-m",
+    "armv8-m.base",
+    "armv8-m.main",
+    "armv8.1-m.main",
+  ])("keeps %s readable in segments Evidence", (name) => {
+    expect(
+      nativeSegmentsLoadImageSchema.shape.architecture_variant.safeParse(name)
+        .success,
+    ).toBe(true);
+  });
 });

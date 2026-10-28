@@ -834,15 +834,18 @@ describe("raw load identity", () => {
     });
   });
 
-  it.each(["armv6-m", "armv7-m", "armv7e-m", "armv8-m.base", "armv8-m.main"])(
-    "keeps the persisted variant name %s readable in snapshots",
-    (name) => {
-      expect(
-        rawLoadIdentitySchema.shape.architecture_variant.safeParse(name)
-          .success,
-      ).toBe(true);
-    },
-  );
+  it.each([
+    "armv6-m",
+    "armv7-m",
+    "armv7e-m",
+    "armv8-m.base",
+    "armv8-m.main",
+    "armv8.1-m.main",
+  ])("keeps the persisted variant name %s readable in snapshots", (name) => {
+    expect(
+      rawLoadIdentitySchema.shape.architecture_variant.safeParse(name).success,
+    ).toBe(true);
+  });
 
   // Session identity covers the reported basis; coordinate identity does not
   // (see GhidraRawProfileDigest.test.ts).

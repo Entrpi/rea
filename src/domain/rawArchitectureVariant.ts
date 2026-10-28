@@ -35,6 +35,11 @@ export const RAW_ARCHITECTURE_VARIANTS = {
     label: "ARMv8-M Mainline",
     isaMode: "thumb",
   },
+  "armv8.1-m.main": {
+    architecture: "arm",
+    label: "ARMv8.1-M Mainline",
+    isaMode: "thumb",
+  },
 } as const satisfies Record<
   string,
   {
