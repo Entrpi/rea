@@ -20,27 +20,38 @@ export interface EvidenceFileReadOptions {
   readonly resources?: ArtifactResourceScope;
 }
 
-const selectionError = (message: string): AnalysisInputError =>
-  new AnalysisInputError(
-    INSPECT_ANALYSIS_VIEW_OPERATION,
-    { userMessage: message },
-    [
-      {
-        path: ["source", "evidence_id"],
-        reason: "invalid_value",
-        message,
-      },
-    ],
-  );
+/** The operation reading the file and the caller's path to its evidence-file source. */
+export interface EvidenceFileSourceSite {
+  readonly operation: string;
+  readonly path: readonly (string | number)[];
+}
+
+const ANALYSIS_VIEW_SOURCE: EvidenceFileSourceSite = {
+  operation: INSPECT_ANALYSIS_VIEW_OPERATION,
+  path: ["source"],
+};
+
+const selectionError = (
+  site: EvidenceFileSourceSite,
+  message: string,
+): AnalysisInputError =>
+  new AnalysisInputError(site.operation, { userMessage: message }, [
+    {
+      path: [...site.path, "evidence_id"],
+      reason: "invalid_value",
+      message,
+    },
+  ]);
 
 /** Listed identities stay bounded so a large bundle cannot grow the error itself. */
 const RECORD_REFERENCE_PREVIEW_BYTES = 2048;
 
-/** Select the one record a view projects from an authenticated bundle. */
+/** Select the one record a source names from an authenticated bundle. */
 const selectBundleRecord = (
   records: readonly Evidence[],
   path: string,
   evidenceId: string | undefined,
+  site: EvidenceFileSourceSite,
 ): Result<Evidence, AnalysisError> => {
   if (evidenceId !== undefined) {
     const selected = records.find(
@@ -49,6 +60,7 @@ const selectBundleRecord = (
     return selected === undefined
       ? err(
           selectionError(
+            site,
             `Evidence bundle ${path} holds no record ${evidenceId}. It holds ${listRecordIds(records)}.`,
           ),
         )
@@ -56,11 +68,14 @@ const selectBundleRecord = (
   }
   const only = records[0];
   if (only === undefined)
-    return err(selectionError(`Evidence bundle ${path} holds no records.`));
+    return err(
+      selectionError(site, `Evidence bundle ${path} holds no records.`),
+    );
   if (records.length > 1)
     return err(
       selectionError(
-        `Evidence bundle ${path} holds ${String(records.length)} records; select one with source.evidence_id. It holds ${listRecordIds(records)}.`,
+        site,
+        `Evidence bundle ${path} holds ${String(records.length)} records; select one with ${[...site.path, "evidence_id"].join(".")}. It holds ${listRecordIds(records)}.`,
       ),
     );
   return ok(only);
@@ -101,9 +116,10 @@ export const readEvidenceFileSource = async (
   path: string,
   options: EvidenceFileReadOptions = {},
   evidenceId?: string,
+  site: EvidenceFileSourceSite = ANALYSIS_VIEW_SOURCE,
 ): Promise<Result<Evidence, AnalysisError>> => {
   const { signal, resources } = options;
-  const operation = INSPECT_ANALYSIS_VIEW_OPERATION;
+  const { operation } = site;
   if (signal?.aborted)
     return err(new AnalysisCancelledError(operation, { cause: signal.reason }));
   const loaded = await readJsonFile(path, signal, resources, operation);
@@ -119,7 +135,7 @@ export const readEvidenceFileSource = async (
   ) {
     const bundle = authenticateEvidenceBundleValue(value, path, { operation });
     return bundle.ok
-      ? selectBundleRecord(bundle.value.records, path, evidenceId)
+      ? selectBundleRecord(bundle.value.records, path, evidenceId, site)
       : bundle;
   }
   const headroom = requireAuthenticationHeadroom(value, {
@@ -142,6 +158,7 @@ export const readEvidenceFileSource = async (
   if (evidenceId !== undefined && parsed.value.evidence_id !== evidenceId)
     return err(
       selectionError(
+        site,
         `Evidence file ${path} holds ${parsed.value.evidence_id}, not selected record ${evidenceId}.`,
       ),
     );
