@@ -554,7 +554,7 @@ posix.each([
   ["ASCII", "x", 2_021],
   ["astral", "\u{1F600}", 505],
 ] as const)(
-  "keeps at most 2,048 UTF-8 bytes of a banner of %s characters, cut between code points",
+  "keeps at most 2,048 UTF-8 bytes of a banner of %s characters, cut between code points, and identifies nothing from it",
   async (_kind, filler, kept) => {
     const { executable, path } = await fixture();
     // 27 bytes; with it, 2,021 ASCII characters or 505 four-byte ones fit.
@@ -567,10 +567,12 @@ posix.each([
     });
     const result = await service.executeRizinCommand({ path, command: "iI" });
     if (!result.ok) throw result.error;
-    expect(result.value.provider.version).toBe("0.9.1");
+    expect(result.value.provider.version).toBeNull();
     expect(result.value.parameters).toMatchObject({
       provider_version_banner: prefix + filler.repeat(kept),
       provider_version_banner_truncated: true,
+      provider_identity: "assumed",
+      provider_version_probe: { exit_code: 0, output_truncated: true },
     });
   },
 );
@@ -915,5 +917,81 @@ posix.each([
     } finally {
       cwd.mockRestore();
     }
+  },
+);
+
+posix.each([
+  [
+    "an empty first line",
+    "\nrizin 0.9.1 @ linux-x86-64\n",
+    "warning: the banner moved to the second line\n",
+    "",
+  ],
+  [
+    "a Usage: banner",
+    "Usage: rizin [-ACdfLMnNqStuvwzX]\n -v  show version information\n",
+    "",
+    "Usage: rizin [-ACdfLMnNqStuvwzX]",
+  ],
+] as const)(
+  "keeps the probe's diagnostics beside %s that identifies no tool",
+  async (_case, stdout, stderr, banner) => {
+    const { executable, path } = await fixture();
+    const run = vi.fn(
+      async (
+        _command: string,
+        args: readonly string[],
+        _options?: ExecFileOutputOptions,
+      ) =>
+        args[0] === "-v"
+          ? { stdout, stderr }
+          : { stdout: "command output", stderr: "" },
+    );
+    const service = new TestReverseEngineeringService({
+      run,
+      lookup: lookupExecutable,
+      environment: { REA_RIZIN_COMMAND: executable },
+    });
+    const result = await service.executeRizinCommand({ path, command: "iI" });
+    if (!result.ok) throw result.error;
+    expect(result.value.provider.version).toBeNull();
+    expect(result.value.parameters).toMatchObject({
+      provider_identity: "assumed",
+      provider_version_banner: banner,
+      provider_version_probe: {
+        exit_code: 0,
+        stdout,
+        stderr,
+        output_truncated: false,
+      },
+    });
+  },
+);
+
+posix(
+  "reports no version from a banner cut inside its version token",
+  async () => {
+    const { executable, path } = await fixture();
+    // The version token runs past the 2,048-byte cut.
+    const line = `rizin ${"1".repeat(3_000)} @ linux-x86-64`;
+    const run = runner(() => line);
+    const service = new TestReverseEngineeringService({
+      run,
+      lookup: lookupExecutable,
+      environment: { REA_RIZIN_COMMAND: executable },
+    });
+    const result = await service.executeRizinCommand({ path, command: "iI" });
+    if (!result.ok) throw result.error;
+    expect(result.value.provider).toEqual({
+      id: "rizin",
+      name: "Rizin",
+      version: null,
+    });
+    expect(result.value.parameters).toMatchObject({
+      provider_version_banner: line.slice(0, 2_048),
+      provider_version_banner_truncated: true,
+      provider_identity: "assumed",
+      provider_version_probe: { exit_code: 0, output_truncated: true },
+    });
   },
 );
