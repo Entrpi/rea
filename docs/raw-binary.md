@@ -352,6 +352,10 @@ request unless all of these are true:
   installation.
 - The mapped image fits in the address size that the entry declares (`size`).
 
+These are `load_selection_rejected` refusals. A catalog refusal names
+`provider_language` in `details.field`; an image that does not fit names no
+field, because the language or the base may be the wrong one.
+
 Ghidra starts with the first analysis call. After it imports the file and
 before analysis, REA's preparation script refuses the import unless all of
 these are true, and a refused import fails that call:

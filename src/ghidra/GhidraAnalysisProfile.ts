@@ -473,14 +473,16 @@ const resolveProviderLanguageDefinition = async (
       }),
     );
   }
-  const refused = (reason: string) =>
+  const refused = (reason: string, field?: "provider_language") =>
     err(
       new BinaryTargetError(target.path, reason, {
         constraint: "load_selection_rejected",
+        ...(field === undefined ? {} : { field }),
       }),
     );
-  if (!resolved.ok) return refused(resolved.error);
+  if (!resolved.ok) return refused(resolved.error, "provider_language");
   const bits = resolved.value.address_bits;
+  // The language or the base may be the wrong one, so neither is named.
   if (BigInt(lastAddress) >> BigInt(bits) !== 0n)
     return refused(
       `raw-binary mapping from ${baseAddress} to ${lastAddress} must fit in the ${String(bits)}-bit address size that ${providerLanguage.languageId} declares`,

@@ -259,10 +259,12 @@ describe("Ghidra provider language profile", () => {
         return;
       }
       if (resolved.ok) throw new Error("expected a refusal");
-      expect(projectAnalysisError(resolved.error)).toMatchObject({
+      const projected = projectAnalysisError(resolved.error);
+      expect(projected).toMatchObject({
         code: "invalid_request",
         details: { reason, constraint: "load_selection_rejected" },
       });
+      expect(projected.details).not.toHaveProperty("field");
     },
   );
 
@@ -277,6 +279,7 @@ describe("Ghidra provider language profile", () => {
         reason:
           "Absent:LE:32:default is not a language defined by Ghidra 12.1.4",
         constraint: "load_selection_rejected",
+        field: "provider_language",
       },
     });
   });
