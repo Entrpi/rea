@@ -360,6 +360,7 @@ export const createGhidraProviderClient = (input: {
   const armProfileMismatch = ghidraArmProfileMismatchReason(
     target,
     committedProfile.parameters,
+    parameterLanguage,
   );
   if (armProfileMismatch !== null)
     return err(

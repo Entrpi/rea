@@ -1,4 +1,7 @@
-import type { GhidraLanguageOverride } from "../config/ghidraLanguageOverride.js";
+import {
+  ghidraLanguageOverrideMatches,
+  type GhidraLanguageOverride,
+} from "../config/ghidraLanguageOverride.js";
 import {
   EF_ARM_BE8,
   EF_ARM_EABI_MASK,
@@ -16,14 +19,15 @@ import type { JsonValue } from "../domain/jsonValue.js";
 import type { ArchitectureVariant } from "../domain/architectureVariant.js";
 import {
   GHIDRA_VARIANT_LANGUAGES,
-  ghidraVariantDecoderLimitations,
+  GHIDRA_VARIANT_LIMITATIONS,
   ghidraVariantProcessorLabels,
 } from "./GhidraRawBinaryLanguage.js";
 
 /**
  * One versioned lane per M profile for little-endian EABI5 ARM ELF
  * executables. The decoder of each lane is its variant's in
- * `GHIDRA_VARIANT_LANGUAGES`, and its label policy is
+ * `GHIDRA_VARIANT_LANGUAGES`, with the limitations in
+ * `GHIDRA_VARIANT_LIMITATIONS`, and its label policy is
  * `ghidraVariantProcessorLabels`; this table only names the lanes.
  */
 export const GHIDRA_ARM_ELF_LANES = {
@@ -170,10 +174,18 @@ const DWARF_PROTOTYPES: Partial<
 /** The prototype DWARF signatures use for this image's float ABI, if not the default. */
 const dwarfPrototype = (arm: ArmElfMetadata) => DWARF_PROTOTYPES[floatAbi(arm)];
 
+/** Profile parameters that bind a committed lane to the target. */
+const LANE_COMMITMENTS = [
+  "arm_support_lane",
+  "processor_labels",
+  "arm_float_prototype",
+] as const;
+
 /**
- * Commit the lane and the ELF facts that selected it. A caller-selected
- * language wins over the pin, and the profile then stays the one that
- * the override produced before this lane existed.
+ * Commit the lane and the ELF facts that selected it, also for a
+ * caller-selected language that names the pin. A different one wins over the
+ * pin without changing the import, so the profile then stays the one that the
+ * override produced before this lane existed.
  */
 export const ghidraArmProfileParameters = (
   target: BinaryTarget,
@@ -182,7 +194,8 @@ export const ghidraArmProfileParameters = (
   const lane = ghidraArmElfLane(target);
   if (
     lane?.kind !== "pinned" ||
-    languageOverride !== undefined ||
+    (languageOverride !== undefined &&
+      !ghidraLanguageOverrideMatches(languageOverride, lane.language)) ||
     target.kind !== "executable" ||
     target.format !== "elf" ||
     target.architecture !== "arm"
@@ -213,34 +226,22 @@ export const ghidraArmProfileParameters = (
 
 /**
  * Whether a committed profile carries the lane, label policy and DWARF
- * prototype that this target selects.
+ * prototype that this target selects with the committed language, which
+ * `ghidraProfileLanguageOverride` reads from the profile.
  */
 export const ghidraArmProfileMismatchReason = (
   target: BinaryTarget,
   parameters: Readonly<Record<string, unknown>>,
+  committedLanguage: GhidraLanguageOverride | undefined,
 ): string | null => {
-  const lane = ghidraArmElfLane(target);
-  if (
-    lane === undefined ||
-    target.kind !== "executable" ||
-    target.format !== "elf" ||
-    target.architecture !== "arm"
-  )
-    return null;
-  const pinned =
-    lane.kind === "pinned" &&
-    parameters.language_selection === "provider-pinned-v1"
-      ? lane
-      : undefined;
-  return parameters.arm_support_lane === pinned?.lane &&
-    parameters.processor_labels ===
-      (pinned === undefined
-        ? undefined
-        : ghidraVariantProcessorLabels(pinned.profile.variant)) &&
-    parameters.arm_float_prototype ===
-      (pinned === undefined
-        ? undefined
-        : dwarfPrototype(target.arm)?.commitment)
+  if (ghidraArmElfLane(target) === undefined) return null;
+  const expected = ghidraArmProfileParameters(
+    target,
+    parameters.language_selection === "configured-v1"
+      ? committedLanguage
+      : undefined,
+  );
+  return LANE_COMMITMENTS.every((key) => parameters[key] === expected[key])
     ? null
     : "Resolve the M-profile ARM ELF lane for this target into a fresh analysis profile before opening the session.";
 };
@@ -321,13 +322,16 @@ export const ghidraArmLimitations = (
           `ARM ELF: REA did not select an M-profile decoder because ${lane.reason}. Ghidra selects the language from the ELF header; its default instruction state is ARM, so code that no entry or symbol marks as Thumb decodes in ARM state.`,
         ];
   const { architecture, variant } = lane.profile;
-  if (configured)
-    return [
-      `ARM ELF: the configured language ${String(parameters.language_id)} replaces ${lane.language.languageId}, which REA pins for the ${variant} profile that .ARM.attributes declares.`,
-    ];
+  // A caller-selected language that names the pin keeps the lane.
+  if (parameters.arm_support_lane !== lane.lane)
+    return configured
+      ? [
+          `ARM ELF: the configured language ${String(parameters.language_id)} replaces ${lane.language.languageId}, which REA pins for the ${variant} profile that .ARM.attributes declares.`,
+        ]
+      : [];
   return [
     `ARM ELF: .ARM.attributes declares ${architecture.label} (Tag_CPU_arch ${architecture.cpuArch}), so REA pins ${lane.language.languageId} for the ${variant} profile instead of Ghidra's header-based selection, whose default instruction state is ARM. The decoder does not refuse instructions that this profile lacks, and floating-point, TrustZone and memory-protection state are not modelled.`,
-    ...ghidraVariantDecoderLimitations(variant),
+    ...GHIDRA_VARIANT_LIMITATIONS[variant],
     "Ghidra's processor-defined vector labels are not applied, so only the ELF's own symbols name vector-table slots and handlers. In a stripped image, a handler that only the vector table references can stay without a function; an analysis seed (REA_GHIDRA_SEED_FILE) can name it.",
     ...floatAbiLimitation(target.arm),
   ];

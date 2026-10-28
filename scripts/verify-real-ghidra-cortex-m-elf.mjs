@@ -25,10 +25,13 @@ import addFormats from "ajv-formats";
 import { parseBinaryTarget } from "../dist/application/BinaryTargetResolver.js";
 import { parseAnalysisSnapshot } from "../dist/domain/analysisSnapshot.js";
 import { parseEvidence } from "../dist/domain/evidence.js";
-import { GHIDRA_ARM_ELF_LANES } from "../dist/ghidra/GhidraArmProfile.js";
+import {
+  GHIDRA_ARM_ELF_DWARF_PROTOTYPES,
+  GHIDRA_ARM_ELF_LANES,
+} from "../dist/ghidra/GhidraArmProfile.js";
 import {
   GHIDRA_VARIANT_LANGUAGES,
-  ghidraVariantDecoderLimitations,
+  GHIDRA_VARIANT_LIMITATIONS,
 } from "../dist/ghidra/GhidraRawBinaryLanguage.js";
 import {
   buildCortexMElfFixtures,
@@ -189,6 +192,9 @@ try {
   const hard = built.fixtures.find(({ name }) => name === "armv7e-m-hard");
   const identity = {
     ...(await verifyIdentity(hard)),
+    ...(await verifyMatchingOverride(
+      built.fixtures.find(({ name }) => name === "armv7e-m-soft"),
+    )),
     ...(await verifySeededHandler(
       built.fixtures.find(({ name }) => name === "armv6-m-base0"),
     )),
@@ -311,7 +317,7 @@ async function verifyImage(fixture, stripped) {
     assert.equal(lanes.length, 1);
     assert.match(lanes[0], PINNED);
     // What the variant's decoder gets wrong, as raw images of it state.
-    for (const line of ghidraVariantDecoderLimitations(fixture.variant))
+    for (const line of GHIDRA_VARIANT_LIMITATIONS[fixture.variant])
       assert.ok(procedures.limitations.includes(line), line);
     // soft and softfp both declare the base standard.
     assert.equal(
@@ -455,7 +461,7 @@ async function verifyLoopBranches(fixture, expected, listed) {
       { address },
       expected,
     );
-    for (const line of ghidraVariantDecoderLimitations(fixture.variant))
+    for (const line of GHIDRA_VARIANT_LIMITATIONS[fixture.variant])
       assert.ok(evidence.limitations.includes(line), line);
     const { raw_disassembly: disassembly, flow } = evidence.normalized_result;
     if (mnemonic === "le")
@@ -573,7 +579,7 @@ async function verifySeededHandler(fixture) {
   return { seeded_vector_handler_decodes_in_thumb: true };
 }
 
-/** Snapshot reuse, the override that wins over the pin, and CLI parity. */
+/** Snapshot reuse, an override that wins over the pin, and CLI parity. */
 async function verifyIdentity(fixture) {
   const expectedLanguage = GHIDRA_VARIANT_LANGUAGES[fixture.variant];
   const snapshotPath = join(workspace, "armv7e-m.snapshot.json");
@@ -600,39 +606,18 @@ async function verifyIdentity(fixture) {
   );
   await call("close_binary", {});
 
-  const cli = async (environment) =>
-    parseEvidence(
-      JSON.parse(
-        (
-          await execute(
-            process.execPath,
-            [
-              entrypoint,
-              "inspect-native-instruction",
-              fixture.path,
-              fixture.symbols.rea_cm_primask,
-              "--provider",
-              "ghidra",
-              "--json",
-            ],
-            {
-              env: { ...env, ...environment },
-              timeout: 240000,
-              maxBuffer: 16 * 1024 * 1024,
-            },
-          )
-        ).stdout,
-      ),
-    );
-  const pinned = await cli({});
+  const pinned = await primaskThroughCli(fixture, {});
   assert.equal(
     pinned.analysis_profile.digest,
     procedures.analysis_profile.digest,
   );
   assert.equal(pinned.normalized_result.mnemonic, "mrs");
-  // A caller-selected language wins over the pin, and the session says so.
+  // A caller-selected language other than the pin wins over it, and the
+  // session says so.
   const override = "ARM:LE:32:v8-m";
-  const configured = await cli({ REA_GHIDRA_LANGUAGE_ID: override });
+  const configured = await primaskThroughCli(fixture, {
+    REA_GHIDRA_LANGUAGE_ID: override,
+  });
   assert.equal(configured.analysis_profile.parameters.language_id, override);
   assert.equal(
     configured.analysis_profile.parameters.language_selection,
@@ -650,6 +635,66 @@ async function verifyIdentity(fixture) {
   return {
     snapshot_replays_with_lane: true,
     cli_matches_mcp: true,
-    override_wins: true,
+    different_override_wins: true,
   };
+}
+
+/** The primask read through the CLI, with extra REA settings. */
+async function primaskThroughCli(fixture, environment) {
+  return parseEvidence(
+    JSON.parse(
+      (
+        await execute(
+          process.execPath,
+          [
+            entrypoint,
+            "inspect-native-instruction",
+            fixture.path,
+            fixture.symbols.rea_cm_primask,
+            "--provider",
+            "ghidra",
+            "--json",
+          ],
+          {
+            env: { ...env, ...environment },
+            timeout: 240000,
+            maxBuffer: 16 * 1024 * 1024,
+          },
+        )
+      ).stdout,
+    ),
+  );
+}
+
+/**
+ * A caller-selected language that names the pin keeps the lane, so a
+ * base-standard image still gets the DWARF prototype; the session opens only
+ * if the pre-script reports it.
+ */
+async function verifyMatchingOverride(fixture) {
+  const language = GHIDRA_VARIANT_LANGUAGES[fixture.variant];
+  const evidence = await primaskThroughCli(fixture, {
+    REA_GHIDRA_LANGUAGE_ID: language,
+  });
+  const { parameters } = evidence.analysis_profile;
+  assert.equal(parameters.language_id, language);
+  assert.equal(parameters.language_selection, "configured-v1");
+  assert.equal(
+    parameters.arm_support_lane,
+    GHIDRA_ARM_ELF_LANES[fixture.variant],
+  );
+  assert.equal(
+    parameters.arm_float_prototype,
+    GHIDRA_ARM_ELF_DWARF_PROTOTYPES.base.commitment,
+  );
+  assert.equal(evidence.normalized_result.mnemonic, "mrs");
+  assert.ok(evidence.limitations.some((line) => PINNED.test(line)));
+  assert.ok(evidence.limitations.some((line) => BASE_STANDARD.test(line)));
+  assert.ok(
+    !evidence.limitations.some((line) =>
+      line.startsWith("ARM ELF: the configured language"),
+    ),
+    JSON.stringify(evidence.limitations),
+  );
+  return { matching_override_keeps_lane: true };
 }

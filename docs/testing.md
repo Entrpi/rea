@@ -1546,8 +1546,9 @@ lane checks:
   soft-float and softfp images;
 - that the vector table is not a function, and that a seeded vector-only handler
   of a stripped image decodes in Thumb state;
-- snapshot reuse with the lane, CLI/MCP parity, and a caller-selected language
-  winning over the pin;
+- snapshot reuse with the lane, CLI/MCP parity, a caller-selected language
+  that names the pin keeping the lane and its DWARF prototype, and a different
+  one winning over the pin;
 - unchanged source bytes and owned cleanup.
 
 It records, without asserting, the prototypes that Ghidra infers for stripped

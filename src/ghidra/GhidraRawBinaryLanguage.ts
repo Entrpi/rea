@@ -37,10 +37,11 @@ export const GHIDRA_VARIANT_LANGUAGES = {
 } as const satisfies Record<ArchitectureVariant, string>;
 
 /**
- * Observed with Ghidra 12.1.4 on the verifier's Cortex-M55 image: WLS and LE
- * decode with LLVM's mnemonics, but WLS branched 2 bytes short, LE branched 4
- * bytes past the loop start, and LE had no fall-through, so the code after the
- * loop was not disassembled.
+ * Observed with Ghidra 12.1.4, where WLS and LE decode with LLVM's mnemonics.
+ * In the raw verifier's Cortex-M55 image, WLS branched 2 bytes short, LE
+ * branched 4 bytes past the loop start, and LE had no fall-through, so the code
+ * after the loop was not disassembled. In the ELF verifier's, WLS branched to
+ * its target and LE 2 bytes past the loop start, again without a fall-through.
  */
 const GHIDRA_LOW_OVERHEAD_LOOPS =
   "Ghidra 12.1.4 decodes the ARMv8.1-M low-overhead-loop branches WLS and LE, but their targets can be wrong and LE has no fall-through, so code after such a loop may be left undisassembled.";
@@ -175,15 +176,6 @@ const callerLanguageLimitation = (
 ): string =>
   `The caller selected the Ghidra language ${selection.languageId} with compiler spec ${selection.compilerSpecId} (verification: unverified). REA checked that the installation defines it, that the image fits its declared address size, and that its default address space is byte-addressed and its only loaded space, but not that it decodes this image. Entry alignment is left to the language's decoder.`;
 
-/**
- * What a variant's decoder gets wrong, for every lane that decodes the
- * variant. `GHIDRA_VARIANT_LIMITATIONS` owns the texts.
- */
-export const ghidraVariantDecoderLimitations = (
-  variant: ArchitectureVariant | undefined,
-): readonly string[] =>
-  variant === undefined ? [] : GHIDRA_VARIANT_LIMITATIONS[variant];
-
 /** Limitations that every result from a raw-binary session carries. */
 export const ghidraRawBinaryLimitations = (
   load: RawBinaryLoad,
@@ -202,7 +194,9 @@ export const ghidraRawBinaryLimitations = (
           : load.architectureVariant === undefined
             ? GENERIC_RAW_LANGUAGES
             : `The caller-named ${load.architectureVariant} variant is decoded with ${language.languageId} in Thumb state. The decoder does not refuse instructions that this profile lacks, and floating-point and TrustZone state are not modeled.`,
-        ...ghidraVariantDecoderLimitations(load.architectureVariant),
+        ...(load.architectureVariant === undefined
+          ? []
+          : GHIDRA_VARIANT_LIMITATIONS[load.architectureVariant]),
         ...(load.entrySource.kind === "vector-table"
           ? [
               `The entry is the Reset vector ${load.entrySource.resetVector} read from the vector table at ${load.entrySource.address}, with bit 0 cleared. The initial stack pointer ${load.entrySource.initialStackPointer} is recorded and not validated.`,

@@ -42,7 +42,7 @@ import type { GhidraProviderClientFactory } from "./GhidraProviderClient.js";
 import { GHIDRA_SESSION_CAPABILITIES } from "./GhidraSessionValues.js";
 import {
   GHIDRA_VARIANT_LANGUAGES,
-  ghidraVariantDecoderLimitations,
+  GHIDRA_VARIANT_LIMITATIONS,
   ghidraVariantProcessorLabels,
 } from "./GhidraRawBinaryLanguage.js";
 
@@ -132,6 +132,27 @@ const armElf = (
 });
 const SOFT = 0x05000200;
 const HARD = 0x05000400;
+const A = 0x41;
+
+/** The client's binding check, with the language it reads from the profile. */
+const mismatch = (
+  target: BinaryTarget,
+  parameters: Readonly<Record<string, unknown>>,
+) =>
+  ghidraArmProfileMismatchReason(
+    target,
+    parameters,
+    ghidraProfileLanguageOverride(parameters),
+  );
+
+/** Profile parameters without the named ones. */
+const omit = (
+  parameters: Readonly<Record<string, unknown>>,
+  keys: readonly string[],
+) =>
+  Object.fromEntries(
+    Object.entries(parameters).filter(([key]) => !keys.includes(key)),
+  );
 
 const profile = async (
   target: BinaryTarget,
@@ -207,22 +228,59 @@ describe.each(ARM_ELF_M_PROFILE_ARCHITECTURES)(
           ghidraPinnedLanguage(target),
         ),
       ).toBe(true);
-      expect(ghidraArmProfileMismatchReason(target, committed.parameters)).toBe(
-        null,
-      );
+      expect(mismatch(target, committed.parameters)).toBe(null);
     });
 
-    it("keeps the profile a caller-selected language produced before the lane", async () => {
-      const committed = await profile(target, {
-        REA_GHIDRA_LANGUAGE_ID: "ARM:LE:32:Cortex",
-      });
-      expect(committed.digest).toBe(CORTEX_OVERRIDE_DIGEST);
+    it("keeps the lane for a caller-selected language that names the pin", async () => {
+      const language = GHIDRA_VARIANT_LANGUAGES[row.variant];
+      const pinned = await profile(target);
+      for (const [environment, selection] of [
+        [
+          {
+            REA_GHIDRA_LANGUAGE_ID: language,
+            REA_GHIDRA_COMPILER_SPEC_ID: "default",
+          },
+          ["language_selection"],
+        ],
+        // Without a compiler specification the profile records the language
+        // default, which the coordinate digest covers.
+        [
+          { REA_GHIDRA_LANGUAGE_ID: language },
+          [
+            "language_selection",
+            "compiler_spec_id",
+            "function_coordinate_context",
+          ],
+        ],
+      ] as const) {
+        const committed = await profile(target, environment);
+        // The selection is the caller's; the import and its lane are the pin's.
+        expect(committed.parameters.language_selection).toBe("configured-v1");
+        expect(omit(committed.parameters, selection)).toEqual(
+          omit(pinned.parameters, selection),
+        );
+        expect(mismatch(target, committed.parameters)).toBe(null);
+        expect(ghidraArmLimitations(target, committed.parameters)).toEqual(
+          ghidraArmLimitations(target, pinned.parameters),
+        );
+      }
+    });
+
+    it("keeps the profile from before the lane for a different caller-selected language", async () => {
+      const language = GHIDRA_VARIANT_LANGUAGES[row.variant];
+      const other =
+        language === "ARM:LE:32:Cortex" ? "ARM:LE:32:v8-m" : "ARM:LE:32:Cortex";
+      const environment = { REA_GHIDRA_LANGUAGE_ID: other };
+      const committed = await profile(target, environment);
+      // An image outside the lane has the profile from before the lane.
+      const outside = await profile(armElf(declared(10, A, 1)), environment);
+      expect(committed.digest).toBe(outside.digest);
+      if (other === "ARM:LE:32:Cortex")
+        expect(committed.digest).toBe(CORTEX_OVERRIDE_DIGEST);
       expect(committed.parameters).not.toHaveProperty("arm_support_lane");
-      expect(ghidraArmProfileMismatchReason(target, committed.parameters)).toBe(
-        null,
-      );
+      expect(mismatch(target, committed.parameters)).toBe(null);
       expect(ghidraArmLimitations(target, committed.parameters)).toEqual([
-        `ARM ELF: the configured language ARM:LE:32:Cortex replaces ${GHIDRA_VARIANT_LANGUAGES[row.variant]}, which REA pins for the ${row.variant} profile that .ARM.attributes declares.`,
+        `ARM ELF: the configured language ${other} replaces ${language}, which REA pins for the ${row.variant} profile that .ARM.attributes declares.`,
       ]);
     });
   },
@@ -230,7 +288,7 @@ describe.each(ARM_ELF_M_PROFILE_ARCHITECTURES)(
 
 describe("ARM ELF images outside the M-profile lane", () => {
   it.each([
-    ["an A-profile declaration", armElf(declared(10, 0x41, 1)), undefined],
+    ["an A-profile declaration", armElf(declared(10, A, 1)), undefined],
     [
       "uninspected attributes of a big-endian image",
       armElf(undefined, { byteOrder: "big" }),
@@ -290,9 +348,7 @@ describe("ARM ELF images outside the M-profile lane", () => {
       expect(ghidraPinnedLanguage(target)).toBeUndefined();
       const committed = await profile(target);
       expect(committed.digest).toBe(AUTO_DIGEST);
-      expect(ghidraArmProfileMismatchReason(target, committed.parameters)).toBe(
-        null,
-      );
+      expect(mismatch(target, committed.parameters)).toBe(null);
       expect(ghidraArmLimitations(target, committed.parameters)).toEqual(
         reason === undefined
           ? []
@@ -308,6 +364,20 @@ describe("ARM ELF images outside the M-profile lane", () => {
       expect(ghidraArmLimitations(target, configured.parameters)).toEqual([]);
     },
   );
+
+  it("keeps the profile from before the lane for the pinned language with another compiler specification", async () => {
+    const target = armElf(declared(13, M));
+    const environment = {
+      REA_GHIDRA_LANGUAGE_ID: "ARM:LE:32:Cortex",
+      REA_GHIDRA_COMPILER_SPEC_ID: "apcs",
+    };
+    const committed = await profile(target, environment);
+    expect(committed.parameters).not.toHaveProperty("arm_support_lane");
+    expect(committed.digest).toBe(
+      (await profile(armElf(declared(10, A, 1)), environment)).digest,
+    );
+    expect(mismatch(target, committed.parameters)).toBe(null);
+  });
 
   it("accepts a caller-selected language that differs from the pin", async () => {
     const target = armElf(declared(13, M));
@@ -339,7 +409,7 @@ describe("M-profile ARM ELF session limitations", () => {
   });
 
   it("states the loop flow that the ARMv8.1-M decoder gets wrong", async () => {
-    const loops = ghidraVariantDecoderLimitations("armv8.1-m.main");
+    const loops = GHIDRA_VARIANT_LIMITATIONS["armv8.1-m.main"];
     expect(loops).toEqual([expect.stringContaining("WLS and LE")]);
     expect(await pinned(armElf(declared(21, M, 1), { flags: HARD }))).toEqual([
       "ARM ELF: .ARM.attributes declares ARMv8.1-M Mainline (Tag_CPU_arch 21), so REA pins ARM:LE:32:v8-m for the armv8.1-m.main profile instead of Ghidra's header-based selection, whose default instruction state is ARM. The decoder does not refuse instructions that this profile lacks, and floating-point, TrustZone and memory-protection state are not modelled.",
@@ -381,23 +451,27 @@ describe("M-profile ARM ELF session binding", () => {
     const target = armElf(declared(13, M));
     const outside = await profile(armElf({ status: "absent" }));
     expect(
-      ghidraArmProfileMismatchReason(target, {
+      mismatch(target, {
         ...outside.parameters,
         language_selection: "provider-pinned-v1",
       }),
     ).toMatch(/M-profile ARM ELF lane/u);
     const committed = await profile(target);
+    expect(mismatch(armElf(declared(16, M)), committed.parameters)).toMatch(
+      /M-profile ARM ELF lane/u,
+    );
+    // A caller-selected language that names the pin commits the lane too.
     expect(
-      ghidraArmProfileMismatchReason(
-        armElf(declared(16, M)),
-        committed.parameters,
-      ),
+      mismatch(target, {
+        ...outside.parameters,
+        language_id: "ARM:LE:32:Cortex",
+        compiler_spec_id: "language-default",
+        language_selection: "configured-v1",
+      }),
     ).toMatch(/M-profile ARM ELF lane/u);
     // The label policy is bound with the lane.
     const { processor_labels: _labels, ...unlabelled } = committed.parameters;
-    expect(ghidraArmProfileMismatchReason(target, unlabelled)).toMatch(
-      /M-profile ARM ELF lane/u,
-    );
+    expect(mismatch(target, unlabelled)).toMatch(/M-profile ARM ELF lane/u);
   });
 
   it("imports with the pinned language, without processor labels, and checks it", async () => {
@@ -418,6 +492,12 @@ describe("M-profile ARM ELF session binding", () => {
         { REA_GHIDRA_LANGUAGE_ID: "ARM:LE:32:Cortex" },
         undefined,
         undefined,
+      ],
+      [
+        armElf(declared(13, M), { flags: SOFT }),
+        { REA_GHIDRA_LANGUAGE_ID: "ARM:LE:32:Cortex" },
+        false,
+        "__stdcall_softfp",
       ],
     ] as const) {
       const provider = ghidra(environment, clientFactory);
@@ -452,26 +532,29 @@ describe("soft-float DWARF prototype", () => {
       "__stdcall_softfp",
     );
     expect(ghidraArmDwarfCallingConvention(vfp.parameters)).toBeUndefined();
-    // A caller-selected language keeps the pre-lane profile, without a prototype.
-    const configured = await profile(armElf(declared(13, M), { flags: SOFT }), {
+    // A caller-selected language that names the pin keeps the prototype; a
+    // different one keeps the pre-lane profile, without it.
+    const matching = await profile(armElf(declared(13, M), { flags: SOFT }), {
       REA_GHIDRA_LANGUAGE_ID: "ARM:LE:32:Cortex",
     });
-    expect(configured.parameters).not.toHaveProperty("arm_float_prototype");
+    expect(matching.parameters.arm_float_prototype).toBe(
+      GHIDRA_ARM_ELF_DWARF_PROTOTYPES.base.commitment,
+    );
+    const different = await profile(armElf(declared(13, M), { flags: SOFT }), {
+      REA_GHIDRA_LANGUAGE_ID: "ARM:LE:32:v8-m",
+    });
+    expect(different.parameters).not.toHaveProperty("arm_float_prototype");
   });
 
   it("binds the committed prototype to the target's float ABI", async () => {
     const soft = armElf(declared(13, M), { flags: SOFT });
     const hard = armElf(declared(13, M, 1), { flags: HARD });
     const base = await profile(soft);
-    expect(ghidraArmProfileMismatchReason(soft, base.parameters)).toBeNull();
-    expect(ghidraArmProfileMismatchReason(hard, base.parameters)).toMatch(
-      /M-profile ARM ELF lane/u,
-    );
+    expect(mismatch(soft, base.parameters)).toBeNull();
+    expect(mismatch(hard, base.parameters)).toMatch(/M-profile ARM ELF lane/u);
     const { arm_float_prototype: _prototype, ...withoutPrototype } =
       base.parameters;
-    expect(ghidraArmProfileMismatchReason(soft, withoutPrototype)).toMatch(
-      /M-profile ARM ELF lane/u,
-    );
+    expect(mismatch(soft, withoutPrototype)).toMatch(/M-profile ARM ELF lane/u);
   });
 
   it.each([

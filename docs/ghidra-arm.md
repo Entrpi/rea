@@ -70,14 +70,16 @@ ARM ELF that loaded before this lane is refused.
 
 ### Language override
 
-The M-profile pin only replaces Ghidra's header-based default, so a
-`REA_GHIDRA_LANGUAGE_ID` or `REA_GHIDRA_COMPILER_SPEC_ID` that you set still
-wins over it, as for the other pins that the
-[Ghidra provider](ghidra-provider.md) lists. The profile then
-records `language_selection: configured-v1` and is the same profile that the
-override produced before this lane. The session states which language REA would
-have pinned. The override is process-wide: unset it to let REA select the
-decoder for each image.
+The M-profile pin only replaces Ghidra's header-based default, as the
+[Ghidra provider](ghidra-provider.md) describes for such pins. A
+`REA_GHIDRA_LANGUAGE_ID` that names the pinned language, without
+`REA_GHIDRA_COMPILER_SPEC_ID` or with `default`, keeps the lane: the profile
+records `language_selection: configured-v1` with the lane's parameters, and the
+session states the lane as it does without the override. A different language
+or compiler specification wins over the pin. The profile is then the same
+profile that the override produced before this lane, and the session states
+which language REA would have pinned. The override is process-wide: unset it to
+let REA select the decoder for each image.
 
 ## Floating-point calling convention
 
@@ -125,7 +127,9 @@ A pinned lane adds these analysis-profile parameters:
 These parameters change the profile identity of M-profile ARM ELF images. Their
 earlier sessions and snapshots no longer match and are not reused; the saved
 Evidence stays readable. Every other ARM ELF keeps its profile, so its sessions
-and snapshots are reused as before.
+and snapshots are reused as before. So does an M-profile image opened with a
+caller-selected language other than the pinned one, because the lane does not
+change that import.
 
 ## Verification and limits
 
@@ -157,15 +161,19 @@ This is decision D2 of the embedded-target work, raised on
   Ghidra's default prototype. For `base` images, the DWARF analyzer gives the
   signatures it imports Ghidra's own `__stdcall_softfp`, which the lane
   verifies. Other declarations carry a limitation. All other ARM ELFs keep
-  header-based selection and their profile. A caller-selected language still
-  wins over the pin.
+  header-based selection and their profile. A caller-selected language that
+  names the pin keeps the lane; a different one wins over it, and the profile
+  stays the one that language produced before the lane.
 - **Alternatives.** Refusing M-profile or soft-float EABI images, as #1922 does
   for its A-profile lane, would turn STM32 ELFs that load today into refusals.
   Keeping automatic `ARM:LE:32:v8` keeps its ARM-state default and A-profile
   vector labels; the rows would become automatic with an expected language.
   Refusing an override that differs from the pin, as the RISC-V lane does, would
   refuse configurations that work today; switching costs one condition, and
-  doing it after a release narrows the contract. Folding ARMv8.1-M Mainline
+  doing it after a release narrows the contract. Dropping the lane for a
+  caller-selected language that names the pin would keep those sessions'
+  earlier profile, but the same import would lose the lane's DWARF prototype.
+  Folding ARMv8.1-M Mainline
   into the `armv8-m.main` lane would drop the declared architecture, and
   splitting it out later would change identity again. Leaving `base` images on
   the default prototype gives their DWARF signatures VFP storage, so decompiled
@@ -177,8 +185,9 @@ This is decision D2 of the embedded-target work, raised on
 - **Owner and consumers.** `src/domain/armBuildAttributes.ts` owns the tags
   REA reads, their mapping to variants and the float-ABI reading.
   `src/domain/architectureVariant.ts` owns the variant names, and
-  `GHIDRA_VARIANT_LANGUAGES` and `ghidraVariantProcessorLabels` own the
-  decoders and label policy. `GHIDRA_ARM_ELF_LANES`,
+  `GHIDRA_VARIANT_LANGUAGES`, `GHIDRA_VARIANT_LIMITATIONS` and
+  `ghidraVariantProcessorLabels` own the decoders, their limitations and the
+  label policy. `GHIDRA_ARM_ELF_LANES`,
   `GHIDRA_ARM_ELF_DWARF_PROTOTYPES` and `GHIDRA_ARM_ELF_VERIFIED_FLOAT_ABIS` own
   the lanes. The target resolver reads the attributes. Consumers are the Ghidra
   profile, the provider client, its launcher and bridge, session limitations,

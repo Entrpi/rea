@@ -6,7 +6,10 @@ import type {
 import { createFunctionCoordinateContext } from "../domain/native/functionCoordinateContext.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { createAnalysisProfile } from "../domain/analysisProfile.js";
-import type { GhidraLanguageOverride } from "../config/ghidraLanguageOverride.js";
+import {
+  ghidraLanguageOverrideMatches,
+  type GhidraLanguageOverride,
+} from "../config/ghidraLanguageOverride.js";
 import type {
   BinaryTarget,
   ProviderLanguageRawBinaryTarget,
@@ -341,9 +344,7 @@ export const resolveGhidraAnalysisProfile = async (
     pinnedLanguage !== undefined &&
     !callerMaySelectLanguage &&
     languageOverride !== undefined &&
-    (languageOverride.languageId !== pinnedLanguage.languageId ||
-      (languageOverride.compilerSpecId !== undefined &&
-        languageOverride.compilerSpecId !== pinnedLanguage.compilerSpecId))
+    !ghidraLanguageOverrideMatches(languageOverride, pinnedLanguage)
   )
     return err(
       languageOverrideConflict(
