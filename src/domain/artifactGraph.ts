@@ -6,6 +6,7 @@ import {
 import { artifactFormatMetadataSchema } from "./artifactFormatMetadata.js";
 import { z } from "zod";
 import { prefixedDigestSchema } from "./../domain/digests.js";
+import { inPublishedOrder, targetFormatIds } from "./targetFormats.js";
 
 /** Entry kinds or subtrees deliberately excluded by an artifact traversal. */
 export const artifactTraversalOmissionKindSchema = z.enum([
@@ -54,8 +55,8 @@ const artifactKindSchema = z.enum([
   "unknown",
 ]);
 
-/** Recognized storage or application formats; unknown bytes remain explicit. */
-const artifactFormatSchema = z.enum([
+/** Orders published before the format table; later formats follow in table order. */
+const PUBLISHED_ARTIFACT_FORMATS = [
   "dmg",
   "zip",
   "pkg",
@@ -91,10 +92,8 @@ const artifactFormatSchema = z.enum([
   "intel-hex",
   "srec",
   "unknown",
-]);
-
-/** Formats established from bytes or a virtual directory tree, independent of path roles. */
-const artifactContentFormatSchema = artifactFormatSchema.extract([
+] as const;
+const PUBLISHED_ARTIFACT_CONTENT_FORMATS = [
   "zip",
   "godot-pck",
   "unityfs",
@@ -110,7 +109,23 @@ const artifactContentFormatSchema = artifactFormatSchema.extract([
   "directory",
   "file",
   "unknown",
-]);
+] as const;
+
+/** Recognized storage or application formats; unknown bytes remain explicit. */
+const artifactFormatSchema = z.enum(
+  inPublishedOrder(
+    targetFormatIds("artifactGraph", "node", "occurrence"),
+    PUBLISHED_ARTIFACT_FORMATS,
+  ),
+);
+
+/** Formats established from bytes or a virtual directory tree, independent of path roles. */
+const artifactContentFormatSchema = artifactFormatSchema.extract(
+  inPublishedOrder(
+    targetFormatIds("artifactGraph", "node"),
+    PUBLISHED_ARTIFACT_CONTENT_FORMATS,
+  ),
+);
 
 /** File byte interval for an artifact derived without writing it to disk. */
 const artifactByteRangeSchema = z.object({

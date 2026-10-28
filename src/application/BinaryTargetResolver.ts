@@ -79,9 +79,12 @@ import { hasUImageMagic } from "../domain/uimageFormat.js";
 import { hasUnityFsHeader } from "../domain/unityfsFormat.js";
 import { detectHexRecordEncoding } from "../domain/firmware/hexRecords.js";
 import {
+  isTargetFormatOfKind,
+  type TargetFormatOfKind,
+} from "../domain/targetFormats.js";
+import {
   hasZipSignature,
   locateTrailingZipArchive,
-  isZipPackageFormat,
   zipRootPackageFormat,
 } from "../domain/zipPackageFormat.js";
 
@@ -402,7 +405,7 @@ const readOpenedBinaryTarget = async (
       artifactSelectedPath: selectedPath,
       sha256: await sha256Handle(handle, path, metadata, signal),
     };
-    return isArchiveFormat(artifactFormat)
+    return isTargetFormatOfKind(artifactFormat, "archive")
       ? ok({ ...identity, kind: "archive", format: artifactFormat })
       : ok({ ...identity, kind: "artifact", format: artifactFormat });
   }
@@ -637,21 +640,7 @@ const detectArtifactFormat = async (
   path: string,
   source: StableRegularFileDescriptor,
   signal?: AbortSignal,
-): Promise<
-  | Exclude<
-      BinaryTarget["format"],
-      | "analysis-database"
-      | "mach-o"
-      | "mach-o-universal"
-      | "elf"
-      | "pe"
-      | "dos-mz"
-      | "dos-com"
-      | "raw-binary"
-      | "gamecube-dol"
-    >
-  | undefined
-> => {
+): Promise<TargetFormatOfKind<"archive" | "artifact"> | undefined> => {
   const { handle, initial } = source;
   throwIfTargetResolutionCancelled(signal);
   const lower = path.toLowerCase();
@@ -723,32 +712,6 @@ const detectArtifactFormat = async (
   }
   return undefined;
 };
-
-const isArchiveFormat = (
-  format: Exclude<
-    BinaryTarget["format"],
-    | "analysis-database"
-    | "mach-o"
-    | "mach-o-universal"
-    | "elf"
-    | "pe"
-    | "dos-mz"
-    | "dos-com"
-    | "raw-binary"
-    | "gamecube-dol"
-  >,
-): format is Extract<BinaryTarget, { kind: "archive" }>["format"] =>
-  isZipPackageFormat(format) ||
-  [
-    "asar",
-    "godot-pck",
-    "unityfs",
-    "uimage",
-    "dmg",
-    "pkg",
-    "intel-hex",
-    "srec",
-  ].includes(format);
 
 /** Whether the leading bytes begin any executable header family, valid or not. */
 const claimsLeadingExecutableHeader = async (

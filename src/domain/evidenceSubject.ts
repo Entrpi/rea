@@ -4,64 +4,33 @@ import {
   BINARY_ARCHITECTURES,
   RAW_ONLY_ARCHITECTURES,
 } from "./binaryTargetTypes.js";
+import {
+  DECLARED_ARCHITECTURE_ROWS,
+  TARGET_FORMAT_IDS,
+} from "./targetFormats.js";
 
-export const evidenceSubjectFormatSchema = z.enum([
-  "hopper",
-  "analysis-database",
-  "mach-o",
-  "elf",
-  "pe",
-  "dos-mz",
-  "dos-com",
-  "raw-binary",
-  "gamecube-dol",
-  "zip",
-  "ipa",
-  "apk",
-  "msix",
-  "appx",
-  "hap",
-  "hsp",
-  "app-pack",
-  "asar",
-  "godot-pck",
-  "unityfs",
-  "uimage",
-  "dmg",
-  "pkg",
-  "plist",
-  "javascript",
-  "source-map",
-  "directory",
-  "file",
-  "unknown",
-  "mach-o-universal",
-  "javascript-bundle",
-  "entitlements",
-  "pyinstaller",
-  "node-sea",
-  "intel-hex",
-  "srec",
-]);
+export const evidenceSubjectFormatSchema = z.enum(TARGET_FORMAT_IDS);
 
 /** Format-owned architecture declarations shared by Evidence and persisted executions. */
 const detectedEvidenceSubjectDeclaration = {
-  format: evidenceSubjectFormatSchema.exclude(["raw-binary", "gamecube-dol"]),
+  format: evidenceSubjectFormatSchema.exclude(
+    DECLARED_ARCHITECTURE_ROWS.map((row) => row.id),
+  ),
   architecture: z
     .enum(BINARY_ARCHITECTURES)
     .exclude([...RAW_ONLY_ARCHITECTURES])
     .nullable(),
 };
 
-const rawEvidenceSubjectDeclaration = {
-  format: z.literal("raw-binary"),
-  architecture: z.enum(BINARY_ARCHITECTURES).nullable(),
-};
-
-const gamecubeEvidenceSubjectDeclaration = {
-  format: z.literal("gamecube-dol"),
-  architecture: z.literal("powerpc"),
-};
+const declaredEvidenceSubjectDeclarations = DECLARED_ARCHITECTURE_ROWS.map(
+  (row) => ({
+    format: z.literal(row.id),
+    architecture:
+      row.architecture === "caller-selected"
+        ? z.enum(BINARY_ARCHITECTURES).nullable()
+        : z.literal(row.architecture.fixed),
+  }),
+);
 
 /** Add the complete format-owned declaration to a persistence envelope. */
 export const withEvidenceSubjectDeclaration = <
@@ -72,6 +41,7 @@ export const withEvidenceSubjectDeclaration = <
 ) =>
   z.discriminatedUnion("format", [
     base.extend(detectedEvidenceSubjectDeclaration),
-    base.extend(rawEvidenceSubjectDeclaration),
-    base.extend(gamecubeEvidenceSubjectDeclaration),
+    ...declaredEvidenceSubjectDeclarations.map((declaration) =>
+      base.extend(declaration),
+    ),
   ]);

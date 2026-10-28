@@ -24,6 +24,11 @@ import {
   type BinaryTarget,
 } from "./binaryTargetTypes.js";
 import {
+  ENTRY_POINT_ROWS,
+  TARGET_KINDS,
+  targetFormatIds,
+} from "./targetFormats.js";
+import {
   evidenceBundleForTarget,
   evidenceBundleSchema,
   parseEvidenceBundle,
@@ -54,37 +59,8 @@ import {
 } from "./relationshipCoverage.js";
 
 const architectureSchema = z.enum(BINARY_ARCHITECTURES);
-const formatSchema = z.enum([
-  "analysis-database",
-  "mach-o",
-  "mach-o-universal",
-  "elf",
-  "pe",
-  "dos-mz",
-  "dos-com",
-  "raw-binary",
-  "gamecube-dol",
-  "zip",
-  "ipa",
-  "apk",
-  "msix",
-  "appx",
-  "hap",
-  "hsp",
-  "app-pack",
-  "asar",
-  "godot-pck",
-  "unityfs",
-  "dmg",
-  "pkg",
-  "intel-hex",
-  "srec",
-  "plist",
-  "javascript",
-  "source-map",
-  "uimage",
-]);
-const kindSchema = z.enum(["executable", "database", "archive", "artifact"]);
+const formatSchema = z.enum(targetFormatIds("target", ...TARGET_KINDS));
+const kindSchema = z.enum(TARGET_KINDS);
 const subjectBaseSchema = z.object({
   path: localPathStringSchema,
   sha256: digestSchema,
@@ -95,29 +71,27 @@ const targetIdentitySchema = z.object({
   kind: kindSchema,
   architecture: architectureSchema.nullable(),
 });
+const detectedArchitectureSchema = architectureSchema
+  .exclude([...RAW_ONLY_ARCHITECTURES])
+  .nullable();
 const targetSchema = z.discriminatedUnion("format", [
   targetIdentitySchema.extend({
-    format: z.enum(
-      formatSchema.options.filter(
-        (format) => format !== "raw-binary" && format !== "gamecube-dol",
-      ),
-    ),
-    architecture: architectureSchema
-      .exclude([...RAW_ONLY_ARCHITECTURES])
-      .nullable(),
+    format: formatSchema.exclude(ENTRY_POINT_ROWS.map((row) => row.id)),
+    architecture: detectedArchitectureSchema,
   }),
-  targetIdentitySchema.extend({
-    format: z.literal("raw-binary"),
-    kind: z.literal("executable"),
-    architecture: binaryArchitectureSchema,
-    entry_point: rawBinaryEntryPointSchema,
-  }),
-  targetIdentitySchema.extend({
-    format: z.literal("gamecube-dol"),
-    kind: z.literal("executable"),
-    architecture: z.literal("powerpc"),
-    entry_point: rawBinaryEntryPointSchema,
-  }),
+  ...ENTRY_POINT_ROWS.map((row) =>
+    targetIdentitySchema.extend({
+      format: z.literal(row.id),
+      kind: z.literal(row.target),
+      architecture:
+        row.architecture === "caller-selected"
+          ? binaryArchitectureSchema
+          : typeof row.architecture === "object"
+            ? z.literal(row.architecture.fixed)
+            : detectedArchitectureSchema,
+      entry_point: rawBinaryEntryPointSchema,
+    }),
+  ),
 ]);
 const bindingSchema = z
   .object({
@@ -370,7 +344,7 @@ const canonicalJson = (value: unknown): string => {
 
 /** Project a binary into the path-free identity used for cache invalidation. */
 export const snapshotTarget = (target: BinaryTarget): AnalysisSnapshotTarget =>
-  target.format === "raw-binary"
+  "entryPoint" in target
     ? {
         sha256: target.sha256,
         kind: target.kind,
@@ -378,20 +352,12 @@ export const snapshotTarget = (target: BinaryTarget): AnalysisSnapshotTarget =>
         format: target.format,
         entry_point: target.entryPoint,
       }
-    : target.format === "gamecube-dol"
-      ? {
-          sha256: target.sha256,
-          kind: target.kind,
-          architecture: target.architecture,
-          format: target.format,
-          entry_point: target.entryPoint,
-        }
-      : {
-          sha256: target.sha256,
-          kind: target.kind,
-          architecture: target.architecture ?? null,
-          format: target.format,
-        };
+    : {
+        sha256: target.sha256,
+        kind: target.kind,
+        architecture: target.architecture ?? null,
+        format: target.format,
+      };
 
 /** Build the immutable provider/profile binding used by a cached snapshot. */
 export const snapshotBinding = (
@@ -411,12 +377,8 @@ export const snapshotMatchesTarget = (
   snapshot.kind === target.kind &&
   snapshot.format === target.format &&
   snapshot.architecture === (target.architecture ?? null) &&
-  (snapshot.format !== "raw-binary" ||
-    (target.format === "raw-binary" &&
-      snapshot.entry_point === target.entryPoint)) &&
-  (snapshot.format !== "gamecube-dol" ||
-    (target.format === "gamecube-dol" &&
-      snapshot.entry_point === target.entryPoint));
+  ("entry_point" in snapshot ? snapshot.entry_point : undefined) ===
+    ("entryPoint" in target ? target.entryPoint : undefined);
 
 /** Compare a snapshot binding with the selected concrete analysis profile. */
 export const snapshotMatchesProfile = (

@@ -1,3 +1,4 @@
+import { targetFormatIds } from "./targetFormats.js";
 import {
   zipEndOfCentralDirectoryCandidates,
   ZIP_EOCD_BYTES,
@@ -5,16 +6,7 @@ import {
 } from "./zipEndOfCentralDirectory.js";
 
 /** ZIP-backed application package families that share the hardened archive reader. */
-export const ZIP_PACKAGE_FORMATS = [
-  "zip",
-  "ipa",
-  "apk",
-  "msix",
-  "appx",
-  "hap",
-  "hsp",
-  "app-pack",
-] as const;
+export const ZIP_PACKAGE_FORMATS = targetFormatIds("zipPackage", true);
 export type ZipPackageFormat = (typeof ZIP_PACKAGE_FORMATS)[number];
 
 /** All ZIP package families share archive ownership and inventory coverage. */

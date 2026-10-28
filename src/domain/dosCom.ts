@@ -1,15 +1,14 @@
 import { z } from "zod";
 import { err, ok, type Result } from "./result.js";
+import { targetFormatIds } from "./targetFormats.js";
 
 /**
  * Executable interpretation explicitly selected by the caller. DOL has no magic,
  * so `gamecube-dol` is never auto-detected.
  */
-export const executableFormatHintSchema = z.enum([
-  "dos-com",
-  "raw-binary",
-  "gamecube-dol",
-]);
+export const executableFormatHintSchema = z.enum(
+  targetFormatIds("selectable", true),
+);
 /** Explicit executable interpretation for formats with no identifying header. */
 export type ExecutableFormatHint = z.infer<typeof executableFormatHintSchema>;
 

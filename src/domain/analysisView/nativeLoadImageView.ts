@@ -1,13 +1,12 @@
 import { z } from "zod";
 import {
+  NATIVE_LOAD_IMAGE_VARIANTS,
   nativeLoadImageCheckSchema,
   nativeLoadImageObservationSchema,
   nativeLoadImageSchema,
   nativeUnsupportedLoadImageSchema,
-  nativeDosLoadImageSchema,
-  nativeRawLoadImageSchema,
-  nativeDolLoadImageSchema,
 } from "../native/nativeLoadImage.js";
+import type { TargetLoadImageVariant } from "../targetFormats.js";
 import { nativeAddressObservationSchema } from "../native/nativeAddress.js";
 import { jsonValueSchema } from "../jsonValue.js";
 import { err, ok, type Result } from "../result.js";
@@ -33,7 +32,7 @@ const rows = {
   entry_points: z.strictObject({ address: nativeAddressObservationSchema }),
   entry_context: observation.entry_context.element,
   checks: nativeLoadImageCheckSchema,
-  sections: nativeDolLoadImageSchema.shape.sections.element,
+  sections: NATIVE_LOAD_IMAGE_VARIANTS.dol.shape.sections.element,
 };
 const defaultFields: Partial<Record<keyof typeof rows, readonly string[]>> = {
   relocations: rows.relocations
@@ -111,6 +110,26 @@ export const nativeLoadImageViewItemsSchema = z.discriminatedUnion(
   ],
 );
 
+/** Each lane's small verification facts, without the collections views page. */
+const summaryVerification = {
+  dos: NATIVE_LOAD_IMAGE_VARIANTS.dos.omit({
+    observations: true,
+    limitations: true,
+    checks: true,
+  }),
+  raw: NATIVE_LOAD_IMAGE_VARIANTS.raw.omit({
+    observations: true,
+    limitations: true,
+    checks: true,
+  }),
+  dol: NATIVE_LOAD_IMAGE_VARIANTS.dol.omit({
+    observations: true,
+    limitations: true,
+    checks: true,
+    sections: true,
+  }),
+} satisfies Record<TargetLoadImageVariant, z.ZodObject>;
+
 // Keep the format owner's verification states and small identity facts. A
 // measured unsupported format must never become a verified empty check set.
 export const nativeLoadImageSummarySchema = z.strictObject({
@@ -119,22 +138,7 @@ export const nativeLoadImageSummarySchema = z.strictObject({
       observations: true,
       limitations: true,
     }),
-    nativeDosLoadImageSchema.omit({
-      observations: true,
-      limitations: true,
-      checks: true,
-    }),
-    nativeRawLoadImageSchema.omit({
-      observations: true,
-      limitations: true,
-      checks: true,
-    }),
-    nativeDolLoadImageSchema.omit({
-      observations: true,
-      limitations: true,
-      checks: true,
-      sections: true,
-    }),
+    ...Object.values(summaryVerification),
   ]),
   observation: nativeLoadImageObservationSchema.pick({
     executable_format: true,

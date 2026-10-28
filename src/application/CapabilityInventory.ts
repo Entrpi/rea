@@ -34,6 +34,7 @@ import {
 import type { ToolKind } from "../contracts/toolContractTypes.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { isMachOFormat } from "../domain/binaryTargetTypes.js";
+import { TARGET_KINDS } from "../domain/targetFormats.js";
 import type {
   AnalysisOperation,
   ProviderAvailability,
@@ -49,7 +50,7 @@ const FRIDA_OPERATION_NAMES: ReadonlySet<string> = new Set(
 
 const statusSchema = z.object({
   open: z.boolean(),
-  kind: z.enum(["executable", "database", "archive", "artifact"]).optional(),
+  kind: z.enum(TARGET_KINDS).optional(),
   format: z.string().optional(),
   capabilities: z
     .array(providerCapabilitySet)

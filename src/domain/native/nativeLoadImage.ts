@@ -3,6 +3,12 @@ import { nativeMetadataRecoverySummarySchema } from "./nativeMetadataRecovery.js
 import { jsonValueSchema } from "../jsonValue.js";
 import { binaryArchitectureSchema } from "../rawBinary.js";
 import { nativeAddressObservationSchema } from "./nativeAddress.js";
+import {
+  targetFormatIds,
+  targetFormatRow,
+  targetFormatSchema,
+  type TargetLoadImageVariant,
+} from "../targetFormats.js";
 
 const integer = z.int().min(0).max(Number.MAX_SAFE_INTEGER);
 const digest = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -91,9 +97,9 @@ export const nativeUnsupportedLoadImageSchema = z.strictObject({
   observations: nativeLoadImageObservationSchema,
   limitations: z.array(z.string().min(1)),
 });
-export const nativeDosLoadImageSchema = z.strictObject({
+const nativeDosLoadImageSchema = z.strictObject({
   status: z.enum(["verified", "mismatch"]),
-  format: z.enum(["dos-mz", "dos-com"]),
+  format: targetFormatSchema(targetFormatIds("loadImage", "dos")),
   target_sha256: digest,
   load_segment: integer.max(0xffff),
   header_bytes: integer,
@@ -108,9 +114,9 @@ export const nativeDosLoadImageSchema = z.strictObject({
   checks: z.array(nativeLoadImageCheckSchema),
   limitations: z.array(z.string().min(1)),
 });
-export const nativeRawLoadImageSchema = z.strictObject({
+const nativeRawLoadImageSchema = z.strictObject({
   status: z.enum(["verified", "mismatch"]),
-  format: z.literal("raw-binary"),
+  format: targetFormatSchema(targetFormatIds("loadImage", "raw")),
   target_sha256: digest,
   architecture: binaryArchitectureSchema,
   language_id: z.string().min(1),
@@ -125,9 +131,9 @@ export const nativeRawLoadImageSchema = z.strictObject({
   checks: z.array(nativeLoadImageCheckSchema),
   limitations: z.array(z.string().min(1)),
 });
-export const nativeDolLoadImageSchema = z.strictObject({
+const nativeDolLoadImageSchema = z.strictObject({
   status: z.enum(["verified", "mismatch"]),
-  format: z.literal("gamecube-dol"),
+  format: targetFormatSchema(targetFormatIds("loadImage", "dol")),
   target_sha256: digest,
   architecture: z.literal("powerpc"),
   language_id: z.string().min(1),
@@ -152,12 +158,22 @@ export const nativeDolLoadImageSchema = z.strictObject({
   limitations: z.array(z.string().min(1)),
 });
 
+/** One verification variant per load-image lane that a format row names. */
+export const NATIVE_LOAD_IMAGE_VARIANTS = {
+  dos: nativeDosLoadImageSchema,
+  raw: nativeRawLoadImageSchema,
+  dol: nativeDolLoadImageSchema,
+} satisfies Record<TargetLoadImageVariant, z.ZodObject>;
+
+/** The variant that verifies a target format, or undefined when none does. */
+export const nativeLoadImageVariantFor = (
+  format: string,
+): TargetLoadImageVariant | undefined => targetFormatRow(format)?.loadImage;
+
 /** Read-only native image verification; verified applies only to declared coverage. */
 export const nativeLoadImageSchema = z.union([
   nativeUnsupportedLoadImageSchema,
-  nativeDosLoadImageSchema,
-  nativeRawLoadImageSchema,
-  nativeDolLoadImageSchema,
+  ...Object.values(NATIVE_LOAD_IMAGE_VARIANTS),
 ]);
 
 /** Provider-neutral native load-image result. */

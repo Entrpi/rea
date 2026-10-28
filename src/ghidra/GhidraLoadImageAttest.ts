@@ -5,6 +5,7 @@ import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import {
   nativeLoadImageSchema,
+  nativeLoadImageVariantFor,
   type NativeLoadImage,
   type NativeLoadImageObservation,
 } from "../domain/native/nativeLoadImage.js";
@@ -90,7 +91,7 @@ const compareLoadImage = async (
   // These formats have no additional source work; retain already-derived PE facts.
   if (
     target.format === "pe" ||
-    !["dos-mz", "dos-com", "raw-binary", "gamecube-dol"].includes(target.format)
+    nativeLoadImageVariantFor(target.format) === undefined
   ) {
     if (target.format === "pe" && nativeAotResult === undefined)
       return err(

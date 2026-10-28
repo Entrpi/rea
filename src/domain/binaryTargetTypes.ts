@@ -1,5 +1,5 @@
 import type { DolHeader } from "./gamecubeDol.js";
-import type { ZipPackageFormat } from "./zipPackageFormat.js";
+import type { TargetFormatOfKind } from "./targetFormats.js";
 
 /** Provider-neutral CPU families detected from headers or explicitly selected raw loads. */
 export const BINARY_ARCHITECTURES = [
@@ -249,26 +249,17 @@ export type BinaryTarget =
   | (BinaryTargetIdentity &
       NonExecutableMetadata & {
         readonly kind: "database";
-        readonly format: "analysis-database";
+        readonly format: TargetFormatOfKind<"database">;
       })
   | (BinaryTargetIdentity &
       NonExecutableMetadata & {
         readonly kind: "archive";
-        readonly format:
-          | ZipPackageFormat
-          | "asar"
-          | "godot-pck"
-          | "unityfs"
-          | "uimage"
-          | "dmg"
-          | "pkg"
-          | "intel-hex"
-          | "srec";
+        readonly format: TargetFormatOfKind<"archive">;
       })
   | (BinaryTargetIdentity &
       NonExecutableMetadata & {
         readonly kind: "artifact";
-        readonly format: "plist" | "javascript" | "source-map";
+        readonly format: TargetFormatOfKind<"artifact">;
       });
 
 /** Whether an executable target contains a thin or universal Mach-O image. */
