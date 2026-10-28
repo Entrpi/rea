@@ -104,6 +104,7 @@ export const liveBinaryTargetSummaryVariants = [
       "asar",
       "godot-pck",
       "unityfs",
+      "uimage",
       "dmg",
       "pkg",
       "intel-hex",

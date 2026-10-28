@@ -591,6 +591,7 @@ const requireExtractableFormat = async (
     format !== "asar" &&
     format !== "godot-pck" &&
     format !== "unityfs" &&
+    format !== "uimage" &&
     format !== "intel-hex" &&
     format !== "srec" &&
     format !== "esp-image" &&

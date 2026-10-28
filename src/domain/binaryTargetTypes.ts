@@ -444,6 +444,7 @@ export type BinaryTarget =
           | "asar"
           | "godot-pck"
           | "unityfs"
+          | "uimage"
           | "dmg"
           | "pkg"
           | "intel-hex"

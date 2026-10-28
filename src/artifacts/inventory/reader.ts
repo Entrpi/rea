@@ -91,6 +91,11 @@ export const inventoryCoverage = (
               "ESP image inventory reads the header-declared segments, checksum, appended SHA-256, descriptor and Secure Boot v2 signature blocks. Segment classification follows ESP-IDF v6.1 should_map and should_load for a cold boot and does not check RAM ranges; signatures are not cryptographically verified, and code is not disassembled.",
             ]
           : []),
+        ...(reader.format === "uimage"
+          ? [
+              "uImage inventory establishes the 64-byte legacy header facts and stored payload bytes. Compressed payloads are not decompressed, and the image is not executed.",
+            ]
+          : []),
         ...traversal.limitations,
       ],
     };
@@ -115,6 +120,7 @@ export const inventoryCoverage = (
     format === "asar" ||
     format === "godot-pck" ||
     format === "unityfs" ||
+    format === "uimage" ||
     format === "node-sea" ||
     format === "intel-hex" ||
     format === "srec" ||
