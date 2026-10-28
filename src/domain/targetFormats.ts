@@ -201,6 +201,7 @@ export const TARGET_FORMATS = [
   { id: "node-sea", artifactGraph: "occurrence" },
   { id: "intel-hex", target: "archive", artifactGraph: "node" },
   { id: "srec", target: "archive", artifactGraph: "node" },
+  { id: "esp-image", target: "archive", artifactGraph: "node" },
 ] as const satisfies readonly TargetFormatRow[];
 
 type Row = (typeof TARGET_FORMATS)[number];

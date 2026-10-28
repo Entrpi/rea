@@ -79,6 +79,10 @@ import { hasUImageMagic } from "../domain/uimageFormat.js";
 import { hasUnityFsHeader } from "../domain/unityfsFormat.js";
 import { detectHexRecordEncoding } from "../domain/firmware/hexRecords.js";
 import {
+  ESP8266_REFUSAL,
+  recognizeEspImage,
+} from "../domain/firmware/espImage.js";
+import {
   isTargetFormatOfKind,
   type TargetFormatOfKind,
 } from "../domain/targetFormats.js";
@@ -661,6 +665,12 @@ const detectArtifactFormat = async (
   if (hasUImageMagic(magic)) return "uimage";
   const hexRecords = detectHexRecordEncoding(magic);
   if (hexRecords !== undefined) return hexRecords;
+  const esp = recognizeEspImage(magic, initial.size);
+  if (esp === "esp8266")
+    throw new BinaryTargetError(path, ESP8266_REFUSAL, {
+      constraint: "file_format_rejected",
+    });
+  if (esp === "esp-image") return "esp-image";
   // Binary plists, including keyed archives, often use other extensions.
   if (hasBinaryPlistSignature(magic)) return "plist";
   const named = namedArtifactFormat(lower);

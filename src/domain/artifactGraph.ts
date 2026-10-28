@@ -91,6 +91,7 @@ const PUBLISHED_ARTIFACT_FORMATS = [
   "node-sea",
   "intel-hex",
   "srec",
+  "esp-image",
   "unknown",
 ] as const;
 const PUBLISHED_ARTIFACT_CONTENT_FORMATS = [
@@ -100,6 +101,7 @@ const PUBLISHED_ARTIFACT_CONTENT_FORMATS = [
   "uimage",
   "intel-hex",
   "srec",
+  "esp-image",
   "mach-o-universal",
   "mach-o",
   "elf",
