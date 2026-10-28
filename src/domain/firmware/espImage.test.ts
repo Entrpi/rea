@@ -838,6 +838,27 @@ describe("Secure Boot v2 block layouts and sector bounds", () => {
     });
   });
 
+  it("reports a block whose image digest does not match as a limitation", () => {
+    const decoded = image(
+      Buffer.concat([
+        PADDED,
+        sector([
+          signatureBlock("rsa", PADDED, { imageDigest: Buffer.alloc(32) }),
+        ]),
+      ]),
+    );
+    expect(decoded.signatureBlocks[0]?.metadata).toMatchObject({
+      image_digest_matches: false,
+      signature_status: "unverified",
+    });
+    // An integrity contradiction leaves coverage complete, as a checksum
+    // mismatch does.
+    expect(decoded.coverage).toBe("complete");
+    expect(decoded.limitations).toEqual([
+      ESP_IMAGE_LIMITATIONS.signatureDigestMismatch(0, 4096),
+    ]);
+  });
+
   it("reports a digest that does not match and bytes in the sector slack", () => {
     const slack = sector([
       signatureBlock("rsa", PADDED, { imageDigest: Buffer.alloc(32) }),
