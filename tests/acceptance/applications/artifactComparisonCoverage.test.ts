@@ -9,7 +9,6 @@ import {
   artifactInventoryResultSchema,
   type ArtifactInventoryResult,
 } from "../../../src/domain/artifactGraph.js";
-import { artifactInspectionResultSchema } from "../../../src/domain/artifactInspection.js";
 import { artifactIdForContent } from "../../../src/domain/artifactIdentity.js";
 import {
   createEvidence,
@@ -17,6 +16,10 @@ import {
   type Evidence,
 } from "../../../src/domain/evidence.js";
 
+import {
+  connectArtifactComparisonMcp,
+  inventoryEvidence,
+} from "../../fixtures/artifactComparisonMcp.js";
 import { connectLocalToolsMcp } from "../../fixtures/localToolsMcp.js";
 import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
@@ -24,17 +27,6 @@ import { cliTest, type TestCli } from "../../support/cli/cliFixture.js";
 
 const plist = (message: string) =>
   `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>message</key><string>${message}</string></dict></plist>\n`;
-
-const inventoryEvidence = (input: unknown): Evidence => {
-  const inspection = parseEvidence(input);
-  const inventory = artifactInspectionResultSchema
-    .parse(inspection.normalized_result)
-    .substeps.find(
-      ({ evidence }) => evidence.operation === "inventory_artifact",
-    )?.evidence;
-  if (inventory === undefined) throw new Error("Expected inventory Evidence");
-  return parseEvidence(inventory);
-};
 
 const inspectPair = async (
   cli: TestCli,
@@ -46,12 +38,8 @@ const inspectPair = async (
   });
   expect(result.exitCode, `${result.stderr}\n${result.stdout}`).toBe(0);
   const left = inventoryEvidence(result.json);
-  const { call } = await connectLocalToolsMcp();
-  const opened = await call("open_binary", { path: rightPath });
-  expect(opened.isError, JSON.stringify(opened)).not.toBe(true);
-  const inspected = await call("inspect_artifact", {});
-  expect(inspected.isError, JSON.stringify(inspected)).not.toBe(true);
-  return { left, right: inventoryEvidence(inspected.structuredContent), call };
+  const { call, inspect } = await connectArtifactComparisonMcp();
+  return { left, right: await inspect(rightPath), call };
 };
 
 const assertCoverageControls = async ({
@@ -360,14 +348,7 @@ cliTest(
     });
     expect(leftResult.exitCode, leftResult.stderr).toBe(0);
     const left = inventoryEvidence(leftResult.json);
-    const { call } = await connectLocalToolsMcp();
-    const inspect = async (path: string) => {
-      const opened = await call("open_binary", { path });
-      expect(opened.isError, JSON.stringify(opened)).not.toBe(true);
-      const result = await call("inspect_artifact", {});
-      expect(result.isError, JSON.stringify(result)).not.toBe(true);
-      return inventoryEvidence(result.structuredContent);
-    };
+    const { call, inspect } = await connectArtifactComparisonMcp();
     const compare = async (left: Evidence, right: Evidence) => {
       const result = await call("compare_artifacts", { left, right });
       expect(result.isError, JSON.stringify(result)).not.toBe(true);
@@ -466,12 +447,8 @@ cliTest.skipIf(process.platform === "win32")(
     });
     expect(result.exitCode, result.stderr).toBe(0);
     const left = inventoryEvidence(result.json);
-    const { call } = await connectLocalToolsMcp();
-    const opened = await call("open_binary", { path: rightPath });
-    expect(opened.isError, JSON.stringify(opened)).not.toBe(true);
-    const inspected = await call("inspect_artifact", {});
-    expect(inspected.isError, JSON.stringify(inspected)).not.toBe(true);
-    const right = inventoryEvidence(inspected.structuredContent);
+    const { call, inspect } = await connectArtifactComparisonMcp();
+    const right = await inspect(rightPath);
     expect(right.subject?.digest.sha256).toBe(left.subject?.digest.sha256);
     const comparison = await call("compare_artifacts", { left, right });
     expect(comparison.isError, JSON.stringify(comparison)).not.toBe(true);
