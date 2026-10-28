@@ -13,6 +13,7 @@ import {
   snapshotEvidenceForQuery,
   snapshotMatchesBinding,
   snapshotMatchesTarget,
+  snapshotTarget,
 } from "../../../src/domain/analysisSnapshot.js";
 import type { BinaryTarget } from "../../../src/domain/binaryTargetTypes.js";
 import { createEvidence } from "../../../src/domain/evidence.js";
@@ -23,9 +24,15 @@ import {
 import {
   nativeLoadImageSchema,
   nativeRawLoadImageSchema,
+  nativeSegmentsLoadImageSchema,
 } from "../../../src/domain/native/nativeLoadImage.js";
 import {
+  binaryArchitectureSchema,
+  rawLoadIdentitySchema,
+} from "../../../src/domain/rawBinary.js";
+import {
   admittedRawLoad,
+  providerLanguageRawTarget,
   vectorTableWords,
 } from "../../../src/domain/rawBinary.fixture.js";
 import { ghidraProfileInstallationHost as host } from "../../../src/ghidra/GhidraInstallation.fixture.js";
@@ -240,6 +247,123 @@ describe("open_binary inputs from before base_address", () => {
       expect(validate({ ...legacy, architecture_variant: "cortex-m" })).toBe(
         false,
       );
+    },
+  );
+});
+
+const providerLanguageImage = () => {
+  const f = fixtureRawBinaryLoadImage();
+  const target = providerLanguageRawTarget(
+    {
+      provider: "ghidra",
+      languageId: "6809:BE:16:default",
+      compilerSpecId: "default",
+    },
+    {
+      baseAddress: "0xe000",
+      entryPoint: "0xe000",
+      fileBytes: f.snapshot.bytes,
+      sha256: f.target.sha256,
+    },
+  );
+  const mapping = f.observation.mappings[0];
+  if (mapping === undefined) throw new Error("Missing source mapping fixture");
+  mapping.start = "0xe000";
+  mapping.end = "0xe003";
+  f.observation.language_id = "6809:BE:16:default";
+  f.observation.entry_points = ["0xe000"];
+  const image = attestGhidraRawBinaryLoadImage(
+    f.snapshot,
+    target,
+    f.observation,
+  );
+  if (!image.ok) throw new Error(image.error);
+  return { target, image: image.value };
+};
+
+describe("provider-language shapes beside earlier readers", () => {
+  it("are refused by the segments and raw_load readers that predate them", () => {
+    // Readers before provider_language required a family in segments images
+    // and admitted no other raw_load key; they refuse these instead of
+    // misreading them.
+    const { target, image } = providerLanguageImage();
+    expect(nativeLoadImageSchema.safeParse(image).success).toBe(true);
+    expect(
+      nativeSegmentsLoadImageSchema
+        .extend({ architecture: binaryArchitectureSchema })
+        .safeParse(image).success,
+    ).toBe(false);
+    const identity = snapshotTarget(target);
+    if (identity.format !== "raw-binary" || identity.raw_load === undefined)
+      throw new Error("expected a raw load identity");
+    expect(
+      rawLoadIdentitySchema
+        .omit({ provider_language: true })
+        .safeParse(identity.raw_load).success,
+    ).toBe(false);
+  });
+
+  mcpTest(
+    "are advertised to MCP clients as input and output",
+    async ({ mcp }) => {
+      const server = new McpServer({ name: "provider-language", version: "1" });
+      for (const name of [
+        "open_binary",
+        "inspect_native_load_image",
+      ] as const) {
+        const contract = toolContract(name);
+        server.registerTool(
+          contract.name,
+          toolRegistrationOptions(contract),
+          async () => ({ content: [] }),
+        );
+      }
+      const client = await mcp.connect(server);
+      const tools = (await client.listTools()).tools;
+      const ajv = new Ajv2020({ strict: false, validateFormats: false });
+      const schema = (name: string, key: "inputSchema" | "outputSchema") =>
+        ajv.compile(
+          z
+            .record(z.string(), z.unknown())
+            .parse(tools.find((tool) => tool.name === name)?.[key]),
+        );
+      const input = schema("open_binary", "inputSchema");
+      const selection = {
+        path: "/tmp/firmware.bin",
+        format: "raw-binary",
+        provider_language: {
+          provider: "ghidra",
+          language_id: "SuperH4:LE:32:default",
+          compiler_spec_id: "default",
+        },
+        base_address: "0x8c000000",
+        entry_point: "0x8c000010",
+        provider_id: "ghidra",
+      };
+      expect(input(selection)).toBe(true);
+      expect(
+        input({
+          ...selection,
+          provider_language: {
+            ...selection.provider_language,
+            provider: "ida",
+          },
+        }),
+      ).toBe(false);
+      const output = schema("inspect_native_load_image", "outputSchema");
+      expect(
+        output(
+          createEvidence(
+            undefined,
+            { id: "ghidra", name: "Ghidra", version: "12.1.4" },
+            {
+              operation: "inspect_native_load_image",
+              parameters: {},
+              result: providerLanguageImage().image,
+            },
+          ),
+        ),
+      ).toBe(true);
     },
   );
 });
