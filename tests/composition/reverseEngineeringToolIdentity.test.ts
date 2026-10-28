@@ -927,3 +927,79 @@ posix.each([
     });
   },
 );
+
+posix.each(["cancelled", "cleanup-incomplete"] as const)(
+  "keeps invalid UTF-8 flags in a %s probe's captured output",
+  async (outcome) => {
+    const { executable, path } = await fixture();
+    const caller = new AbortController();
+    let stopped = false;
+    const owner = {
+      stop: async () =>
+        stopped
+          ? { status: "stopped" as const }
+          : { status: "incomplete" as const, reason: "probe still running" },
+    } as unknown as ProviderProcessSupervisor;
+    const snapshot = providerSnapshot({
+      exitCode: null,
+      signal: "SIGTERM",
+      stdout: {
+        text: "rizin �",
+        bytes: 7,
+        observedBytes: 7,
+        invalidUtf8: true,
+      },
+      stderr: {
+        text: "warning �",
+        bytes: 9,
+        observedBytes: 9,
+        invalidUtf8: true,
+      },
+    });
+    const runOwned = vi.fn(
+      async (request: { readonly arguments: readonly string[] }) => {
+        if (request.arguments[0] !== "-v") return providerSnapshot();
+        if (outcome === "cancelled") {
+          caller.abort("stop the probe");
+          throw new OwnedCommandFailure(
+            "cancelled",
+            "Command cancelled.",
+            snapshot,
+            null,
+            { cancellation: { reason: "stop the probe" } },
+          );
+        }
+        throw new OwnedCommandFailure(
+          "process",
+          "probe cleanup failed",
+          snapshot,
+          "probe still running",
+          undefined,
+          ["pid:9"],
+          owner,
+        );
+      },
+    );
+    const service = new TestReverseEngineeringService({
+      runOwned,
+      lookup: lookupExecutable,
+      environment: { REA_RIZIN_COMMAND: executable },
+    });
+    const result = await service.executeRizinCommand(
+      { path, command: "iI" },
+      { signal: caller.signal },
+    );
+    if (result.ok) throw new Error("Expected the probe to end the call");
+    expect(result.error._tag).toBe(
+      outcome === "cancelled"
+        ? "AnalysisCancelledError"
+        : "AnalysisOutputError",
+    );
+    expect(result.error.capturedOutput).toMatchObject({
+      stdout_invalid_utf8: true,
+      stderr_invalid_utf8: true,
+    });
+    stopped = true;
+    expect(await service.retryCleanup()).toEqual({ ok: true, value: null });
+  },
+);

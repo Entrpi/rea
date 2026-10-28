@@ -39,6 +39,7 @@ import type {
   ReverseEngineeringProviderCommand,
 } from "./ReverseEngineeringCommandPort.js";
 import {
+  capturedInvalidUtf8,
   execFileFailureCapturedOutput,
   execFileOutput,
   execFileOutputFailure,
@@ -638,6 +639,7 @@ export class ReverseEngineeringService {
               ? capture.code
               : null,
           signal: capture.signal,
+          ...capturedInvalidUtf8(capture),
         };
         if (commandCancelled(signal, cause, code))
           failure = new AnalysisCancelledError(operation, {
@@ -731,6 +733,7 @@ export class ReverseEngineeringService {
           stderr_bytes: stderrBytes,
           exit_code: typeof exitCode === "number" ? exitCode : null,
           signal: signalName,
+          ...capturedInvalidUtf8({ stdoutInvalidUtf8, stderrInvalidUtf8 }),
         },
       });
       exitCode = null;
