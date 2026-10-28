@@ -145,7 +145,10 @@ const espAppDescriptorSchema = z.strictObject({
   app_elf_sha256: sha256Hex,
   min_efuse_blk_rev_full: uint16,
   max_efuse_blk_rev_full: uint16,
-  /** Stored as log2; 0 in images built before ESP-IDF v5.4. */
+  /**
+   * ESP-IDF's value: the MMU page size as a base-2 logarithm (16 is 64 KiB);
+   * 0 in images built before ESP-IDF v5.4.
+   */
   mmu_page_size: uint8,
 });
 
