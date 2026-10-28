@@ -2,7 +2,6 @@ import { workflowUnknownInput } from "../../application/investigation/WorkflowUn
 import type { EvidenceMcpServer } from "../EvidenceMcpServer.js";
 import { runAdmittedToolOperation } from "../admittedToolOperation.js";
 import { recordEvidenceSources } from "../../application/investigation/recordEvidenceSources.js";
-import { resolveEvidenceSources } from "../../application/EvidenceInputResolver.js";
 
 import { executeManagedMemberComparison } from "../../application/managed/ManagedMemberComparisonService.js";
 import { logToolExecution } from "../toolLogging.js";
@@ -33,21 +32,11 @@ export const registerCompareManagedMembers = (
           const result = await logToolExecution(
             options.logger,
             compareContract.name,
-            async () => {
-              const resolved = await resolveEvidenceSources(
-                input,
-                ["left", "right"],
-                evidenceById,
-                {
-                  operation: compareContract.name,
-                  signal: context.mcpReq.signal,
-                  resources: options.artifactResources,
-                },
-              );
-              return resolved.ok
-                ? executeManagedMemberComparison(resolved.value)
-                : resolved;
-            },
+            () =>
+              executeManagedMemberComparison(input, evidenceById, {
+                signal: context.mcpReq.signal,
+                resources: options.artifactResources,
+              }),
           );
           if (!result.ok)
             return server.delivery.toCallToolResult(result, compareContract);

@@ -1,4 +1,9 @@
 import { parseAnalysisInput } from "../AnalysisInput.js";
+import {
+  resolveEvidenceSources,
+  type EvidenceLookup,
+} from "../EvidenceInputResolver.js";
+import type { EvidenceFileReadOptions } from "../EvidenceFileSource.js";
 import { z } from "zod";
 
 import {
@@ -42,10 +47,15 @@ export interface ManagedMemberComparisonExecution {
   readonly sources: readonly [Evidence, Evidence];
 }
 
-/** Authenticate both source records, then compare their parsed observations. */
-export const executeManagedMemberComparison = (
+/**
+ * Resolve and authenticate both source records, then compare their parsed
+ * observations. Two sides are the same record only once both are resolved.
+ */
+export const executeManagedMemberComparison = async (
   input: unknown,
-): Result<ManagedMemberComparisonExecution, AnalysisError> => {
+  lookup?: EvidenceLookup,
+  options: EvidenceFileReadOptions = {},
+): Promise<Result<ManagedMemberComparisonExecution, AnalysisError>> => {
   const operation = "compare_managed_members";
   const request = parseAnalysisInput(
     operation,
@@ -53,9 +63,16 @@ export const executeManagedMemberComparison = (
     managedMemberComparisonRequestSchema,
   );
   if (!request.ok) return request;
-  const left = readManagedMemberEvidence(request.value.left, "left");
+  const resolved = await resolveEvidenceSources(
+    request.value,
+    ["left", "right"],
+    lookup,
+    { ...options, operation },
+  );
+  if (!resolved.ok) return resolved;
+  const left = readManagedMemberEvidence(resolved.value.left, "left");
   if (!left.ok) return left;
-  const right = readManagedMemberEvidence(request.value.right, "right");
+  const right = readManagedMemberEvidence(resolved.value.right, "right");
   if (!right.ok) return right;
   if (left.value.evidence.evidence_id === right.value.evidence.evidence_id)
     return err(
