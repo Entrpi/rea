@@ -1045,6 +1045,19 @@ it.each([
     },
     "stdout and stderr",
   ],
+  [
+    "stdout of a nonzero exit",
+    {
+      exitCode: 2,
+      stdout: {
+        text: "captured � output",
+        bytes: 17,
+        observedBytes: 17,
+        invalidUtf8: true,
+      },
+    },
+    "stdout",
+  ],
 ] as const)(
   "records invalid UTF-8 loss for %s",
   async (_label, overrides, streams) => {

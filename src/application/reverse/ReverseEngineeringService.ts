@@ -159,7 +159,7 @@ export class ReverseEngineeringService {
    */
   readonly #versionProbes = new Map<
     string,
-    { readonly sha256: string; readonly completed: CompletedVersionProbe }
+    { readonly sha256: string; readonly completed: KeptVersionProbe }
   >();
   #closing = false;
   #closePromise: Promise<void> | undefined;
@@ -695,10 +695,8 @@ export class ReverseEngineeringService {
           exitCode = null;
           completionStatus = "unknown";
         }
-        if (cause instanceof OwnedOutputFailure) {
-          stdoutInvalidUtf8 = cause.stdoutInvalidUtf8;
-          stderrInvalidUtf8 = cause.stderrInvalidUtf8;
-        }
+        stdoutInvalidUtf8 = capture.stdoutInvalidUtf8 === true;
+        stderrInvalidUtf8 = capture.stderrInvalidUtf8 === true;
       }
     }
     if (earlyFailure !== undefined)
@@ -944,7 +942,8 @@ export class ReverseEngineeringService {
       provider_executable_sha256: sha256,
     };
     const kept = this.#versionProbes.get(lookup.path);
-    let completed = kept?.sha256 === sha256 ? kept.completed : undefined;
+    let completed: VersionProbeOutcome | undefined =
+      kept?.sha256 === sha256 ? kept.completed : undefined;
     if (completed === undefined) {
       const outcome = await this.#runVersionProbe(
         operation,
@@ -956,8 +955,7 @@ export class ReverseEngineeringService {
       );
       if (!outcome.ok) return outcome;
       completed = outcome.value;
-      if (completed.status !== "unfinished")
-        this.#rememberVersionProbe(lookup.path, sha256, completed);
+      this.#rememberVersionProbe(lookup.path, sha256, completed);
     }
     if (completed.status !== "read")
       return ok(
@@ -987,24 +985,26 @@ export class ReverseEngineeringService {
   }
 
   /**
-   * Keep the latest completed probe for a launch path; a new digest replaces
-   * it. Concurrent first calls can each probe the same digest, so a later
-   * failure never replaces a successful reading of it; a success replaces an
-   * earlier failure.
+   * Keep an outcome scoped to the executable as its launch path's latest probe;
+   * a new digest replaces it. Concurrent first calls can each probe the same
+   * digest, so a later failure never replaces a successful reading of it; a
+   * success replaces an earlier failure. Outcomes scoped to one call are not
+   * kept.
    */
   #rememberVersionProbe(
     path: string,
     sha256: string,
-    completed: CompletedVersionProbe,
+    outcome: VersionProbeOutcome,
   ): void {
+    if (outcome.scope !== "executable") return;
     const kept = this.#versionProbes.get(path);
     if (
-      completed.status !== "read" &&
+      outcome.status !== "read" &&
       kept?.sha256 === sha256 &&
       kept.completed.status === "read"
     )
       return;
-    this.#versionProbes.set(path, { sha256, completed });
+    this.#versionProbes.set(path, { sha256, completed: outcome });
   }
 
   /**
@@ -1032,12 +1032,14 @@ export class ReverseEngineeringService {
       // identifies nothing.
       if (output.stdoutInvalidUtf8 === true)
         return ok({
+          scope: "executable",
           status: "undecodable",
           diagnostics: versionProbeDiagnostics(0, output),
         });
       const line = output.stdout.split(/\r?\n/u, 1)[0]?.trim() ?? "";
       const banner = line.slice(0, VERSION_PROBE_TEXT_CHARS);
       return ok({
+        scope: "executable",
         status: "read",
         identification: probe.identify(banner),
         banner,
@@ -1085,12 +1087,12 @@ export class ReverseEngineeringService {
       // this executable, whatever its exit status.
       return ok(
         capture?.collectionFailure === true
-          ? { status: "unfinished", diagnostics }
+          ? { scope: "call", status: "unfinished", diagnostics }
           : code === "ETIMEDOUT"
-            ? { status: "timed-out", diagnostics }
+            ? { scope: "call", status: "timed-out", diagnostics }
             : typeof code === "number" || capture?.signal != null
-              ? { status: "failed", diagnostics }
-              : { status: "unfinished", diagnostics },
+              ? { scope: "executable", status: "failed", diagnostics }
+              : { scope: "call", status: "unfinished", diagnostics },
       );
     }
   }
@@ -1113,9 +1115,15 @@ interface ProviderIdentification {
   readonly parameters: Readonly<Record<string, JsonValue>>;
 }
 
-/** One version probe's outcome; only completed ones are reused. */
+/**
+ * One version probe's outcome. An outcome scoped to the executable is a fact
+ * about that file and is kept for its launch path and digest. One scoped to
+ * the call is not kept: a timeout reflects that call's command_timeout_ms, and
+ * unfinished output was not read.
+ */
 type VersionProbeOutcome =
   | {
+      readonly scope: "executable";
       readonly status: "read";
       readonly identification: ProviderToolIdentification;
       /** The first stdout line, trimmed and bounded. */
@@ -1123,12 +1131,18 @@ type VersionProbeOutcome =
       readonly bannerTruncated: boolean;
     }
   | {
-      readonly status: "failed" | "timed-out" | "undecodable" | "unfinished";
+      readonly scope: "executable";
+      readonly status: "failed" | "undecodable";
+      readonly diagnostics: Readonly<Record<string, JsonValue>>;
+    }
+  | {
+      readonly scope: "call";
+      readonly status: "timed-out" | "unfinished";
       readonly diagnostics: Readonly<Record<string, JsonValue>>;
     };
-type CompletedVersionProbe = Exclude<
+type KeptVersionProbe = Extract<
   VersionProbeOutcome,
-  { readonly status: "unfinished" }
+  { readonly scope: "executable" }
 >;
 
 /** Why a probe that read no usable banner leaves the version unknown. */
@@ -1156,6 +1170,8 @@ const versionProbeDiagnostics = (
         readonly signal?: string | null;
         readonly outputTruncated?: boolean;
         readonly collectionFailure?: boolean;
+        readonly stdoutInvalidUtf8?: boolean;
+        readonly stderrInvalidUtf8?: boolean;
       }
     | undefined,
 ): Readonly<Record<string, JsonValue>> => {
@@ -1179,6 +1195,9 @@ const versionProbeDiagnostics = (
       output?.outputTruncated === true ||
       stdout.length > VERSION_PROBE_TEXT_CHARS ||
       stderr.length > VERSION_PROBE_TEXT_CHARS,
+    // Invalid UTF-8 is decoded as replacement characters; these mark it.
+    stdout_invalid_utf8: output?.stdoutInvalidUtf8 === true,
+    stderr_invalid_utf8: output?.stderrInvalidUtf8 === true,
   };
 };
 

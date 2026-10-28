@@ -101,15 +101,19 @@ before the launch. A different tool that accepts the same arguments, such as
 radare2, still runs: its Evidence names that tool and adds a limitation. A probe
 that fails, times out, prints output that is not valid UTF-8 or prints an
 unrecognized banner leaves the version unknown, and the command still runs; the
-probe's exit status and bounded output are recorded in `provider_version_probe`.
+probe's exit status and bounded output are recorded in `provider_version_probe`,
+where `stdout_invalid_utf8` and `stderr_invalid_utf8` mark output that was not
+valid UTF-8 and so holds replacement characters.
 Each call's lookup, hash and probe use that call's `command_timeout_ms` budget
 and cancellation; a lookup or hash that reaches the deadline ends the call
 without running the command. For each resolved path, REA keeps the latest
-completed probe (a banner, a non-zero exit, a timeout or output that is not
-valid UTF-8) for the life of the server process and reuses it while the SHA-256
-matches. A new SHA-256 replaces it, and a later failure never replaces a
-successful reading of the same file. A cancelled probe, or one whose output was
-not fully collected, is not reused.
+probe whose outcome describes the file (a banner, a non-zero exit, termination
+by a signal, or output that is not valid UTF-8) for the life of the server
+process and reuses it while the SHA-256 matches. A new SHA-256 replaces it, and
+a later failure never replaces a successful reading of the same file. A probe
+that timed out is not reused, because its timeout reflects only that call's
+deadline; neither is a cancelled probe or one whose output was not fully
+collected.
 
 Captured stdout and stderr are retained up to a 16 MiB combined limit; `output_truncated` marks output beyond that limit. One-shot commands use the `command_timeout_ms` budget described above. That 16 MiB cap has no runtime override.
 
