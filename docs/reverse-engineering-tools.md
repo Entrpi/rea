@@ -101,14 +101,20 @@ it. REA passes each one to Rizin before the artifact path:
 | `asm_arch`     | `--asm-arch`     | `-a`           | `arm`, `x86`, `6502` |
 | `asm_bits`     | `--asm-bits`     | `-b`           | `16` for Thumb       |
 | `asm_cpu`      | `--asm-cpu`      | `-e asm.cpu=`  | `cortexm`            |
-| `base_address` | `--base-address` | `-m`           | `0x08000000`         |
+| `base_address` | `--base-address` | `-n -m`        | `0x08000000`         |
 
 Rizin 0.9.1 refuses `-e asm.arch=` and `-e asm.bits=` at startup, and Rizin
 0.7.4 accepts them, so REA uses `-a` and `-b`, which both accept. Rizin applies
-`-e` settings after `-a` and `-b`, so `asm_cpu` applies to the selected arch. `base_address` is the address of file offset 0,
-as in REA's raw-binary inputs: Rizin maps a raw image there. For a format that
-Rizin loads from its headers, such as ELF, Rizin's loader decides how the map
-address applies. Evidence records each input and the complete argument list.
+`-e` settings after `-a` and `-b`, so `asm_cpu` applies to the selected arch.
+
+`base_address` is the address of file offset 0, as in REA's raw-binary inputs.
+REA passes it as `-m` together with `-n`, so Rizin maps the whole file there as
+a raw image and loads no format information, such as sections, symbols or an
+entry point, even from an ELF file. Without `-n`, a Rizin format loader can
+claim a raw image and give wrong reads with no error. In Rizin 0.9.1 the AVR
+loader turns `io.va` off, so every read at the mapped address returns `0xff`.
+In Rizin 0.7.4 and 0.9.1 the BIOS loader maps the file at another address.
+Evidence records each input and the complete argument list.
 
 REA checks only the spelling. Arch and CPU names contain letters, digits, `_`,
 `.`, `+` and `-`, and start with a letter or a digit. `asm_bits` is an integer
@@ -122,8 +128,8 @@ another value and exits with status 0. Rizin 0.9.1 keeps its default and
 reports the value on stderr. Rizin 0.7.4 reports an unknown arch on stderr, but
 for `arm` it used 16 bits instead of 8 without a message. Both accept any
 `asm.cpu` value. Evidence therefore states that REA does not confirm the
-decoder or the map that Rizin used. To check them, start the command with
-`e asm.arch; e asm.bits; e asm.cpu; oml`.
+decoder that Rizin used. To check the decoder and the map, start the command
+with `e asm.arch; e asm.bits; e asm.cpu; oml`.
 
 This call reads a Cortex-M flash dump at its address, in Thumb state:
 
@@ -167,11 +173,13 @@ segment, in the same command:
    column is the offset of the 8-byte segment header, so the data starts 8
    bytes later. A padding segment carries no code or data, and you can skip
    it.
-2. Rizin opens the image as file descriptor 3, which `ol` shows. For each
+2. Start the command with `e io.va=true`. Reads use the maps only while
+   `io.va` is on, and a Rizin format loader can turn it off.
+3. Rizin opens the image as file descriptor 3, which `ol` shows. For each
    segment, add this map, with `r-x` for code and `r--` for data:
    `om 3 <load address> <length> <data offset> <permissions> <name>`. A map
    cannot have more permissions than the opened file, which is read-only.
-3. Select the decoder with `asm_arch` and set `asm_bits` to 32. ESP32, ESP32-S2
+4. Select the decoder with `asm_arch` and set `asm_bits` to 32. ESP32, ESP32-S2
    and ESP32-S3 use Xtensa. The ESP32-C and ESP32-H series and ESP32-P4 use
    RISC-V. Use the plugin name that `e asm.arch=?` lists for the installed
    Rizin.
@@ -180,11 +188,12 @@ For example, for an image with an IRAM segment of 8 bytes at `0x40080000` and
 a DRAM segment of 16 bytes at `0x3ffb0000`:
 
 ```sh
-rea execute-rizin-command ./app.bin "om-*; om 3 0x40080000 0x8 0x20 r-x iram0; om 3 0x3ffb0000 0x10 0x30 r-- dram0; oml; pd 4 @ 0x40080000" --asm-arch xtensa --asm-bits 32
+rea execute-rizin-command ./app.bin "e io.va=true; om-*; om 3 0x40080000 0x8 0x20 r-x iram0; om 3 0x3ffb0000 0x10 0x30 r-- dram0; oml; pd 4 @ 0x40080000" --asm-arch xtensa --asm-bits 32
 ```
 
-`om-*` removes the default map, which maps the whole file at address 0. The
-entry address is the 32-bit little-endian value at file offset 4.
+`om-*` removes the maps that Rizin made when it opened the file, such as the
+default map of the whole file at address 0. The entry address is the 32-bit
+little-endian value at file offset 4.
 
 ## Cutter bridge
 

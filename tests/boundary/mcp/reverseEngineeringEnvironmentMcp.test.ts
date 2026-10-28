@@ -167,6 +167,7 @@ it("passes Rizin decoder and map inputs as flags before the artifact", async () 
     "16",
     "-e",
     "asm.cpu=cortexm",
+    "-n",
     "-m",
     "0x08000000",
     "-c",

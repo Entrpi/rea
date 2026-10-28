@@ -22,6 +22,21 @@ const CORTEX_M_IMAGE = Buffer.from([
 ]);
 // 6502 `nop; rts`; no host decodes 6502 by default.
 const MOS_6502_IMAGE = Buffer.from([0xea, 0x60]);
+// Raw images that Rizin's loaders claim unless REA passes -n. Rizin 0.9.1's
+// AVR loader (bytes 1 and 3 look like rjmp) turns io.va off, so reads at the
+// -m map return 0xff. The BIOS loader (a jmp 16 bytes from the end of a 64 KiB
+// file) maps the file at another address in 0.7.4 and 0.9.1.
+const AVR_LIKE_IMAGE = Buffer.from(
+  Array.from({ length: 64 }, (_, index) =>
+    index === 1 || index === 3 ? 0xc0 : index,
+  ),
+);
+const BIOS_LIKE_IMAGE = Buffer.alloc(0x10000);
+BIOS_LIKE_IMAGE.set([0x11, 0x22, 0x33, 0x44], 0);
+BIOS_LIKE_IMAGE[0xfff0] = 0xea;
+BIOS_LIKE_IMAGE[0xffff] = 0x5a;
+
+const hex = (value: number): string => `0x${value.toString(16)}`;
 
 const runRizin = async (
   input: Readonly<Record<string, string | number>>,
@@ -72,7 +87,7 @@ it.skipIf(rizin === undefined)(
     const { lines } = await runRizin(
       {
         command:
-          "e asm.arch; e asm.bits; e asm.cpu; omlj; p8 1 @ 0x07ffffff; p8 12 @ 0x08000000; pi 1 @ 0x08000008",
+          "e asm.arch; e asm.bits; e asm.cpu; omlj; p8 1 @ 0x07ffffff; p8 12 @ 0x08000000; p8 1 @ 0x0800000c; pi 1 @ 0x08000008",
         asm_arch: "arm",
         asm_bits: 16,
         asm_cpu: "cortexm",
@@ -81,15 +96,46 @@ it.skipIf(rizin === undefined)(
       CORTEX_M_IMAGE,
     );
     expect(lines.slice(0, 3)).toEqual(["arm", "16", "cortexm"]);
-    // One map: file offset 0 at the base address, nothing mapped below it.
+    // One map: file offset 0 at the base address, and nothing mapped below
+    // it or past its end.
     expect(mapsOf(lines[3])).toEqual([
       expect.objectContaining({ delta: 0, from: 0x08000000 }),
     ]);
     expect(lines.slice(4)).toEqual([
       "ff",
       CORTEX_M_IMAGE.toString("hex"),
+      "ff",
       "bx lr",
     ]);
+  },
+);
+
+it.skipIf(rizin === undefined)(
+  `reads the file at base_address when a Rizin loader would claim it (${banner})`,
+  async () => {
+    const base = 0x08000000;
+    for (const image of [AVR_LIKE_IMAGE, BIOS_LIKE_IMAGE]) {
+      const last = base + image.length - 1;
+      const { lines } = await runRizin(
+        {
+          command: `e io.va; omlj; p8 1 @ ${hex(base - 1)}; p8 4 @ ${hex(base)}; p8 1 @ ${hex(last)}; p8 1 @ ${hex(last + 1)}`,
+          asm_arch: "arm",
+          asm_bits: 16,
+          base_address: hex(base),
+        },
+        image,
+      );
+      expect(lines[0]).toBe("true");
+      expect(mapsOf(lines[1])).toEqual([
+        expect.objectContaining({ delta: 0, from: base }),
+      ]);
+      expect(lines.slice(2)).toEqual([
+        "ff",
+        image.subarray(0, 4).toString("hex"),
+        image.subarray(-1).toString("hex"),
+        "ff",
+      ]);
+    }
   },
 );
 

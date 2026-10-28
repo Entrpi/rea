@@ -118,7 +118,7 @@ export const rizinInputSchema = z
       })
       .exactOptional()
       .describe(
-        "Address of file offset 0, passed as -m: Rizin maps a raw image there. For formats it loads from headers, its loader decides placement.",
+        "Address of file offset 0. REA passes -n and -m, so Rizin maps the file there as a raw image and reads no format headers.",
       ),
     ...commandTimeoutMsField,
   })
