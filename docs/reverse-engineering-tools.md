@@ -94,8 +94,8 @@ hashes it, runs it with `-v` and reads the tool and version from its banner,
 the first line of that output. The command then runs the same path. Evidence
 records the tool and version as the provider name and version, and records the
 executable path, its SHA-256 and the banner in its parameters; a banner longer
-than 2,048 characters is cut there and marked by
-`provider_version_banner_truncated`. These describe the file at that path when
+than 2,048 UTF-8 bytes is cut within that budget, between characters, and
+marked by `provider_version_banner_truncated`. These describe the file at that path when
 REA checked it; they cannot prove the exact bytes executed if the file changes
 before the launch. A different tool that accepts the same arguments, such as
 radare2, still runs: its Evidence names that tool and adds a limitation. A probe
@@ -104,7 +104,8 @@ unrecognized banner leaves the version unknown, and the command still runs.
 Evidence then keeps the provider name Rizin with `provider_identity: "assumed"`
 and a limitation saying the tool itself was not identified; an identified tool
 has `provider_identity: "banner"`. The
-probe's exit status and bounded output are recorded in `provider_version_probe`,
+probe's exit status and output, each stream cut to 2,048 UTF-8 bytes in the
+same way, are recorded in `provider_version_probe`,
 where `stdout_invalid_utf8` and `stderr_invalid_utf8` mark output that was not
 valid UTF-8 and so holds replacement characters.
 Each call's lookup, hash and probe use that call's `command_timeout_ms` budget

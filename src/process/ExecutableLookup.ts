@@ -19,6 +19,8 @@ export type ExecutableLookup =
       readonly cause: unknown;
     }
   | { readonly status: "missing"; readonly checked: readonly string[] }
+  /** A relative command or PATH entry needed the working directory, which could not be read. */
+  | { readonly status: "no-working-directory"; readonly cause: unknown }
   /** The caller's signal or deadline ended the lookup before it finished. */
   | {
       readonly status: "interrupted";
@@ -37,32 +39,43 @@ export interface ExecutableLookupBounds {
  * Resolve a command the way process spawning searches for it. A command that
  * contains a path separator is the selected path; PATH search continues past
  * denied directories, and an existing file without execute permission is not
- * a match. A file-system call cannot itself be cancelled, so an interrupted
- * lookup stops waiting for it and lets it settle unobserved.
+ * a match. The working directory is read only for a relative command or PATH
+ * entry, since it may have been removed. A file-system call cannot itself be
+ * cancelled, so an interrupted lookup stops waiting for it and lets it settle
+ * unobserved.
  */
 export const lookupExecutable = async (
   command: string,
-  workingDirectory: string,
+  workingDirectory: () => string,
   searchPath: string | undefined,
   bounds: ExecutableLookupBounds = {},
 ): Promise<ExecutableLookup> => {
   const { signal, timeoutMs, stat = statPath } = bounds;
-  // Match Node's Unix default search path when PATH is absent. An empty
-  // PATH is different: its empty component selects the working directory.
-  const directories = (searchPath ?? "/usr/bin:/bin")
-    .split(delimiter)
-    .map((directory) =>
-      directory === ""
-        ? workingDirectory
-        : absoluteCallerPath(directory, { cwd: workingDirectory }),
-    );
+  let cwd: string | undefined;
+  const readCwd = (): string => (cwd ??= workingDirectory());
+  // An empty PATH component selects the working directory. Windows resolves
+  // even an absolute path against the working directory's drive.
+  const located = (path: string): string =>
+    path === ""
+      ? readCwd()
+      : process.platform !== "win32" && isAbsolute(path)
+        ? absoluteCallerPath(path)
+        : absoluteCallerPath(path, { cwd: readCwd() });
   const explicit =
     isAbsolute(command) ||
     command.includes("/") ||
     (sep === "\\" && command.includes("\\"));
-  const candidates = explicit
-    ? [absoluteCallerPath(command, { cwd: workingDirectory })]
-    : directories.map((directory) => appendCallerPath(directory, command));
+  let candidates: string[];
+  try {
+    // Match Node's Unix default search path when PATH is absent.
+    candidates = explicit
+      ? [located(command)]
+      : (searchPath ?? "/usr/bin:/bin")
+          .split(delimiter)
+          .map((directory) => appendCallerPath(located(directory), command));
+  } catch (cause) {
+    return { status: "no-working-directory", cause };
+  }
   const interruption = lookupInterruption(signal, timeoutMs);
   try {
     const checked: string[] = [];
