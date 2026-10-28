@@ -39,9 +39,42 @@ export const evidenceInputSchema = z.union([
 ]);
 export type EvidenceInput = z.output<typeof evidenceInputSchema>;
 
-/** Each Evidence source of a paired comparison or application workflow: inline, retained, or in a local Evidence file. */
-export const evidenceSourceInputSchema = z.union([
-  evidenceSchema,
+/** The references a source can name, in their union order after inline Evidence. */
+const SOURCE_REFERENCES = [
   retainedEvidenceReferenceSchema,
   evidenceFileReferenceSchema,
-]);
+] as const;
+const SOURCE_REFERENCE_KINDS = SOURCE_REFERENCES.map(
+  (reference) => reference.shape.kind.value,
+);
+
+const formatSourceIssue = ({ path, message }: z.core.$ZodIssue): string =>
+  path.length === 0 ? message : `${path.map(String).join(".")}: ${message}`;
+
+/**
+ * Standard Schema clients, such as the MCP SDK, show a failed union's message
+ * but not its branch issues. Evidence has no kind and each reference has one,
+ * so report the issues of the form that the source's own kind selects.
+ */
+const sourceFormIssues = (issue: z.core.$ZodRawIssue): string | undefined => {
+  if (issue.code !== "invalid_union") return undefined;
+  const { input } = issue;
+  const named =
+    typeof input === "object" && input !== null && Object.hasOwn(input, "kind");
+  // Form 0 is inline Evidence; each reference follows in its union order.
+  const form = named
+    ? SOURCE_REFERENCE_KINDS.indexOf(Reflect.get(input, "kind")) + 1
+    : 0;
+  if (named && form === 0)
+    return `kind: Invalid input: expected ${SOURCE_REFERENCE_KINDS.map((kind) => JSON.stringify(kind)).join(" or ")}; complete Evidence has no kind`;
+  const issues = issue.errors[form];
+  return issues === undefined || issues.length === 0
+    ? undefined
+    : issues.map(formatSourceIssue).join(", ");
+};
+
+/** Each Evidence source of a paired comparison or application workflow: inline, retained, or in a local Evidence file. */
+export const evidenceSourceInputSchema = z.union(
+  [evidenceSchema, ...SOURCE_REFERENCES],
+  { error: sourceFormIssues },
+);

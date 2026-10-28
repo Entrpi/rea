@@ -7,13 +7,18 @@ import { AnalysisProviderRegistry } from "../../../src/application/binary/Analys
 import { inspectAnalysisView } from "../../../src/application/analysisView/AnalysisViewService.js";
 import { ManagedStaticProvider } from "../../../src/dotnet/ManagedStaticProvider.js";
 import { buildManagedPeFixture } from "../../../src/dotnet/ManagedPe.fixture.js";
-import { createEvidence, parseEvidence } from "../../../src/domain/evidence.js";
+import {
+  createEvidence,
+  parseEvidence,
+  type Evidence,
+} from "../../../src/domain/evidence.js";
 import {
   analysisViewResultSchema,
   managedMemberSummaryViewResultSchema,
 } from "../../../src/domain/analysisView/analysisView.js";
 import { managedMemberInspectionSchema } from "../../../src/domain/managed/managedArtifact.js";
 import { createApplicationMcpHarness } from "../../fixtures/applicationMcpHarness.js";
+import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 const COLLECTIONS = [
@@ -241,3 +246,59 @@ it("keeps collections that historical member Evidence never examined unknown", a
     }),
   ).toMatchObject({ ok: false, error: { _tag: "AnalysisInputError" } });
 }, 30000);
+
+it("compares the complete member inspections retained behind two summaries", async () => {
+  const directory = await createTestTempDirectory(
+    "rea-member-summary-compare-",
+  );
+  const leftPath = join(directory, "left.dll");
+  const rightPath = join(directory, "right.dll");
+  await writeFile(leftPath, buildManagedPeFixture());
+  await writeFile(rightPath, buildManagedPeFixture({ methodName: "Renamed" }));
+  const { client, session } = await createHarness();
+  const summarize = async (path: string): Promise<Evidence> => {
+    const reply = await client.callTool({
+      name: "inspect_managed_members",
+      arguments: { path, detail: "summary" },
+    });
+    expect(reply.isError, JSON.stringify(reply)).not.toBe(true);
+    return parseEvidence(reply.structuredContent);
+  };
+  const summaries = [await summarize(leftPath), await summarize(rightPath)];
+  const [left, right] = summaries.map(
+    (summary) =>
+      managedMemberSummaryViewResultSchema.parse(summary.normalized_result)
+        .parent_evidence_id,
+  );
+  if (left === undefined || right === undefined)
+    throw new Error("Expected two member summaries");
+  const compare = (input: Record<string, unknown>) =>
+    client.callTool({ name: "compare_managed_members", arguments: input });
+
+  // The summaries name their complete parents, so neither is sent back.
+  const retained = await compare({
+    left: { kind: "retained-evidence", evidence_id: left },
+    right: { kind: "retained-evidence", evidence_id: right },
+  });
+  expect(retained.isError, JSON.stringify(retained)).not.toBe(true);
+  const inline = await compare({
+    left: session.evidenceById(left),
+    right: session.evidenceById(right),
+  });
+  expect(parseEvidence(retained.structuredContent).evidence_id).toBe(
+    parseEvidence(inline.structuredContent).evidence_id,
+  );
+
+  // A summary is a view of the inspection, not the inspection itself.
+  const summary = await compare({
+    left: { kind: "retained-evidence", evidence_id: summaries[0]?.evidence_id },
+    right: { kind: "retained-evidence", evidence_id: right },
+  });
+  expect(parseMcpToolError(summary).error).toMatchObject({
+    code: "invalid_request",
+    details: {
+      operation: "compare_managed_members",
+      issues: [expect.objectContaining({ path: ["left"] })],
+    },
+  });
+});
