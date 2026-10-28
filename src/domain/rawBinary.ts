@@ -155,9 +155,10 @@ export const rawEntryRoleAndBasis = (
  * read from, and the entry's address, instruction set, role and basis. Every
  * load fact that summaries and Evidence report is here, provenance included,
  * so a reused session never reports what the current request did not choose.
- * Spellings are excluded; Evidence parameters keep the caller's. Coordinate
- * identity is narrower and leaves provenance out. Change `version` whenever the
- * meaning of these values changes.
+ * Spellings are excluded, and no result retains them yet: summaries, Evidence
+ * and snapshots report canonical values only. Coordinate identity is narrower
+ * and leaves provenance out. Change `version` whenever the meaning of these
+ * values changes.
  */
 export const rawLoadIdentitySchema = z.strictObject({
   version: z.literal(1),

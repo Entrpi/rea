@@ -212,7 +212,8 @@ Identity has two levels:
 
 Neither level covers spellings: `0x08000000` and `0x8000000` are the same base,
 an omitted `vector_table_address` equals an explicit one at the base, and REA
-reports canonical addresses only.
+reports canonical addresses only. No result retains the spelling a caller used
+yet; the decision record describes that gap.
 
 Saved `raw-binary` load images and raw snapshots stay readable and replay as
 before. REA versions without these inputs cannot replay a snapshot of a load
@@ -273,6 +274,12 @@ This is decision D1 of the embedded-target work, raised in
   legacy loads are not affected. Verification: rerun
   `npm run verify:ghidra:cortex-m`, which needs Ghidra 12.1.4, JDK 21 and LLVM
   with Thumb targets.
+- **Known gap.** Results report the canonical `entry_point`, `base_address` and
+  `vector_table_address`; none retains the spelling the caller passed, as
+  legacy `entry_point` did not before these inputs. Direct CLI requests keep
+  the caller's path as Evidence `caller_input_path`, outside semantic identity;
+  recording a load selection's spellings the same way is a later, additive
+  change.
 
 ## NMOS 6502
 
