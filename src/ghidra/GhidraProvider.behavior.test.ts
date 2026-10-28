@@ -62,7 +62,10 @@ import { createAnalysisExecution } from "../application/AnalysisProvider.js";
 import { AnalysisSnapshotCache } from "../application/binary/AnalysisSnapshotCache.js";
 import { createEvidence } from "../domain/evidence.js";
 import { createEvidenceBundle } from "../domain/evidenceBundle.js";
-import { rawLoadAtEntry } from "../domain/rawBinary.fixture.js";
+import {
+  admittedRawLoad,
+  rawLoadAtEntry,
+} from "../domain/rawBinary.fixture.js";
 
 const INSTALL = "/opt/ghidra_12.1.4_PUBLIC";
 afterEach(() => vi.restoreAllMocks());
@@ -3559,6 +3562,47 @@ describe("Ghidra disabled analyzer options", () => {
       if (!failed.ok) expect(failed.error._tag).toBe("ProviderAdapterError");
       expect(starts).toBe(0);
     }
+  });
+});
+
+describe("Ghidra raw-binary launch", () => {
+  it("hands the committed label policy to the launcher", async () => {
+    const launchers: GhidraHeadlessLauncher[] = [];
+    const ghidra = configuredProvider({}, (options) => {
+      launchers.push(options.launcher as GhidraHeadlessLauncher);
+      return {
+        start: () => Promise.resolve(ok(sessionInfo())),
+        callTool: () => Promise.resolve(ok(null)),
+        close: () => Promise.resolve(ok(null)),
+      };
+    });
+    const target: BinaryTarget = {
+      path: "/tmp/flash.bin",
+      sha256: "a".repeat(64),
+      kind: "executable",
+      format: "raw-binary",
+      architecture: "arm",
+      availableArchitectures: ["arm"],
+      rawLoad: admittedRawLoad({
+        architecture: "arm",
+        architectureVariant: "armv7-m",
+        baseAddress: "0x8000000",
+        entryPoint: "0x8000000",
+        fileBytes: 4,
+      }),
+    };
+    const resolved = await ghidra.resolveAnalysisProfile(target);
+    if (!resolved.ok || resolved.value.profile === null)
+      throw new Error("expected a bound raw-binary profile");
+    expect(resolved.value.profile.parameters.processor_labels).toBe(
+      "not-applied-v1",
+    );
+    const client = ghidra.createClient(target, resolved.value.profile);
+    expect((await client.execute("health", {})).ok).toBe(true);
+    expect(launchers[0]?.options.rawBinary).toMatchObject({
+      applyProcessorLabels: false,
+    });
+    await client.close();
   });
 });
 

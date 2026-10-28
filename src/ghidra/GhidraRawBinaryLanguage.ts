@@ -73,6 +73,9 @@ export const GHIDRA_RAW_ENTRY_CONTEXT = {
   }
 >;
 
+/** Profile `processor_labels` value: the import does not apply the language's labels. */
+export const GHIDRA_PROCESSOR_LABELS_NOT_APPLIED = "not-applied-v1";
+
 /**
  * Profile commitment that a variant load is imported without the language's
  * default labels. `ARMCortex.pspec` names the vector table at `ram:0x0`-`0x40`
@@ -82,8 +85,8 @@ export const GHIDRA_RAW_ENTRY_CONTEXT = {
  */
 export const ghidraVariantProcessorLabels = (
   variant: ArchitectureVariant | undefined,
-): "not-applied-v1" | undefined =>
-  variant === undefined ? undefined : "not-applied-v1";
+): typeof GHIDRA_PROCESSOR_LABELS_NOT_APPLIED | undefined =>
+  variant === undefined ? undefined : GHIDRA_PROCESSOR_LABELS_NOT_APPLIED;
 
 /**
  * Map caller-visible CPU families to generic Ghidra languages with a

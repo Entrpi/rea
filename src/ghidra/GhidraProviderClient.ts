@@ -117,7 +117,7 @@ import {
   GHIDRA_RAW_ENTRY_CONTEXT,
   ghidraRawBinaryLanguage,
   ghidraRawBinaryLimitations,
-  ghidraVariantProcessorLabels,
+  GHIDRA_PROCESSOR_LABELS_NOT_APPLIED,
 } from "./GhidraRawBinaryLanguage.js";
 import { ghidraDolLanguage, ghidraDolSectionFile } from "./GhidraDolProfile.js";
 
@@ -458,12 +458,11 @@ export const createGhidraProviderClient = (input: {
                     entryContext:
                       GHIDRA_RAW_ENTRY_CONTEXT[target.rawLoad.entryIsaMode],
                   }),
-              // The profile commits the same label policy.
-              ...(ghidraVariantProcessorLabels(
-                target.rawLoad.architectureVariant,
-              ) === undefined
-                ? {}
-                : { applyProcessorLabels: false as const }),
+              // The committed profile owns the label policy.
+              ...(committedProfile.parameters.processor_labels ===
+              GHIDRA_PROCESSOR_LABELS_NOT_APPLIED
+                ? { applyProcessorLabels: false as const }
+                : {}),
             },
           }),
       ...(target.format === "gamecube-dol"
