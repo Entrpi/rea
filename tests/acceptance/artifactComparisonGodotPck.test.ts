@@ -3,42 +3,24 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 
-import { artifactComparisonResultSchema } from "../../src/domain/artifactComparison.js";
-import { artifactInspectionResultSchema } from "../../src/domain/artifactInspection.js";
 import { artifactInventoryResultSchema } from "../../src/domain/artifactGraph.js";
-import { parseEvidence, type Evidence } from "../../src/domain/evidence.js";
+import type { Evidence } from "../../src/domain/evidence.js";
+import { connectArtifactComparisonMcp } from "../fixtures/artifactComparisonMcp.js";
 import { buildGodotPck, type GodotPckMember } from "../fixtures/godotPck.js";
-import { connectLocalToolsMcp } from "../fixtures/localToolsMcp.js";
 import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
 
 /** Inspect one-member packs and compare their inventories through MCP. */
 const connectPackComparison = async () => {
   const root = await createTestTempDirectory("rea-pck-comparison-");
-  const { call } = await connectLocalToolsMcp();
+  const { inspect: inspectFile, compare } =
+    await connectArtifactComparisonMcp();
   const inspect = async (
     name: string,
     packMember: GodotPckMember,
   ): Promise<Evidence> => {
     const file = join(root, name);
     await writeFile(file, buildGodotPck(2, [packMember]));
-    const opened = await call("open_binary", { path: file });
-    expect(opened.isError, JSON.stringify(opened)).not.toBe(true);
-    const response = await call("inspect_artifact", {});
-    expect(response.isError, JSON.stringify(response)).not.toBe(true);
-    const inventory = artifactInspectionResultSchema
-      .parse(parseEvidence(response.structuredContent).normalized_result)
-      .substeps.find(
-        ({ operation }) => operation === "inventory_artifact",
-      )?.evidence;
-    if (inventory === undefined) throw new Error("Missing inventory Evidence");
-    return parseEvidence(inventory);
-  };
-  const compare = async (left: Evidence, right: Evidence) => {
-    const response = await call("compare_artifacts", { left, right });
-    expect(response.isError, JSON.stringify(response)).not.toBe(true);
-    return artifactComparisonResultSchema.parse(
-      parseEvidence(response.structuredContent).normalized_result,
-    );
+    return inspectFile(file);
   };
   return { inspect, compare };
 };

@@ -3,14 +3,10 @@ import { join } from "node:path";
 import { TextReader, Uint8ArrayWriter, ZipWriter } from "@zip.js/zip.js";
 import { expect, it } from "vitest";
 
-import {
-  artifactComparisonResultSchema,
-  type ArtifactComparisonResult,
-} from "../../src/domain/artifactComparison.js";
-import { artifactInspectionResultSchema } from "../../src/domain/artifactInspection.js";
+import type { ArtifactComparisonResult } from "../../src/domain/artifactComparison.js";
 import { artifactInventoryResultSchema } from "../../src/domain/artifactGraph.js";
-import { parseEvidence, type Evidence } from "../../src/domain/evidence.js";
-import { connectLocalToolsMcp } from "../fixtures/localToolsMcp.js";
+import type { Evidence } from "../../src/domain/evidence.js";
+import { connectArtifactComparisonMcp } from "../fixtures/artifactComparisonMcp.js";
 import { createTestTempDirectory } from "../fixtures/temporaryDirectory.js";
 
 /** A ZIP member with the Unix mode its external attributes declare. */
@@ -24,7 +20,8 @@ interface ZipMember {
 /** Inspect ZIP archives and compare their inventories through MCP. */
 const connectZipComparison = async () => {
   const root = await createTestTempDirectory("rea-zip-comparison-");
-  const { call } = await connectLocalToolsMcp();
+  const { inspect: inspectFile, compare } =
+    await connectArtifactComparisonMcp();
   const inspect = async (
     name: string,
     members: readonly ZipMember[],
@@ -39,24 +36,7 @@ const connectZipComparison = async () => {
       });
     const file = join(root, name);
     await writeFile(file, await writer.close());
-    const opened = await call("open_binary", { path: file });
-    expect(opened.isError, JSON.stringify(opened)).not.toBe(true);
-    const response = await call("inspect_artifact", {});
-    expect(response.isError, JSON.stringify(response)).not.toBe(true);
-    const inventory = artifactInspectionResultSchema
-      .parse(parseEvidence(response.structuredContent).normalized_result)
-      .substeps.find(
-        ({ operation }) => operation === "inventory_artifact",
-      )?.evidence;
-    if (inventory === undefined) throw new Error("Missing inventory Evidence");
-    return parseEvidence(inventory);
-  };
-  const compare = async (left: Evidence, right: Evidence) => {
-    const response = await call("compare_artifacts", { left, right });
-    expect(response.isError, JSON.stringify(response)).not.toBe(true);
-    return artifactComparisonResultSchema.parse(
-      parseEvidence(response.structuredContent).normalized_result,
-    );
+    return inspectFile(file);
   };
   return { inspect, compare };
 };
