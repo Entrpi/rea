@@ -1106,3 +1106,51 @@ it.each(["objdump", "rizin"] as const)(
     }
   },
 );
+
+it.each(["during", "after"] as const)(
+  "keeps invalid UTF-8 flags when cancellation ends a command %s its run",
+  async (when) => {
+    const { directory, path } = await createArtifact();
+    const controller = new AbortController();
+    const snapshot = providerSnapshot({
+      stdout: {
+        text: "captured � output",
+        bytes: 17,
+        observedBytes: 17,
+        invalidUtf8: true,
+      },
+    });
+    const service = new ReverseEngineeringService({
+      runOwned: async () => {
+        controller.abort("stop the command");
+        if (when === "during")
+          throw new OwnedCommandFailure(
+            "cancelled",
+            "Command cancelled.",
+            snapshot,
+            null,
+            { cancellation: { reason: "stop the command" } },
+          );
+        return snapshot;
+      },
+    });
+
+    try {
+      const result = await service.executeRizinCommand(
+        { path, command: "iI" },
+        { signal: controller.signal },
+      );
+      if (result.ok) throw new Error("Expected cancellation to end the call");
+      expect(result.error._tag).toBe("AnalysisCancelledError");
+      expect(result.error.capturedOutput).toMatchObject({
+        stdout: "captured � output",
+        stdout_invalid_utf8: true,
+      });
+      expect(result.error.capturedOutput).not.toHaveProperty(
+        "stderr_invalid_utf8",
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);

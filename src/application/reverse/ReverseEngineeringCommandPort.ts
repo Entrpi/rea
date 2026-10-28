@@ -13,8 +13,13 @@ export interface ProviderToolIdentification {
 /** Arguments that print a version banner, and the provider's reading of it. */
 export interface ProviderVersionProbe {
   readonly arguments: readonly string[];
-  /** Reads the banner: the first stdout line, trimmed and bounded by the service. */
-  readonly identify: (banner: string) => ProviderToolIdentification;
+  /**
+   * Reads the banner: the first stdout line, trimmed and bounded by the
+   * service. Undefined means the banner identifies no tool.
+   */
+  readonly identify: (banner: string) => ProviderToolIdentification | undefined;
+  /** The limitation recorded when no banner identified the tool, whose identity is then assumed. */
+  readonly assumedIdentity: string;
 }
 
 /** Provider-neutral command profile consumed by the shared application workflow. */

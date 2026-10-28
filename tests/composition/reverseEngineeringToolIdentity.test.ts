@@ -9,6 +9,7 @@ import {
   VERSION_PROBE_FAILURE_REASONS,
 } from "../../src/application/reverse/ReverseEngineeringService.js";
 import { lookupExecutable } from "../../src/process/ExecutableLookup.js";
+import { RIZIN_VERSION_PROBE } from "../../src/rizin/RizinCommand.js";
 import { OwnedCommandFailure } from "../../src/process/OwnedCommand.js";
 import type { ProviderProcessSupervisor } from "../../src/process/ProviderProcess.js";
 import type { execFileOutput } from "../../src/process/ExecFileOutput.js";
@@ -84,7 +85,7 @@ const gate = () => {
 const posix = it.skipIf(process.platform === "win32");
 
 posix(
-  "records the version from the banner, runs the path it hashed, and probes once per path and digest",
+  "records the version from the banner and probes the path it hashed before every command",
   async () => {
     const { executable, path, digest } = await fixture();
     // Homebrew's Rizin 0.9.1 printed this banner, package suffix included.
@@ -113,16 +114,23 @@ posix(
         provider_executable_sha256: await digest(),
         provider_version_banner: banner,
         provider_version_banner_truncated: false,
+        provider_identity: "banner",
       });
     }
-    expect(probes(run)).toBe(1);
-    // The probe and both commands spawn the resolved path, within the budget.
-    expect(run.mock.calls.map(([command]) => command)).toEqual([
-      executable,
-      executable,
-      executable,
+    // Each call probes, then runs its command, both from the resolved path
+    // and within the call's budget.
+    expect(
+      run.mock.calls.map(([command, args, options]) => [
+        command,
+        args[0] === "-v" ? "-v" : args.at(-2),
+        options?.timeout,
+      ]),
+    ).toEqual([
+      [executable, "-v", 4_321],
+      [executable, "iI", 4_321],
+      [executable, "-v", 4_321],
+      [executable, "iS", 4_321],
     ]);
-    expect(run.mock.calls[0]?.[2]?.timeout).toBe(4_321);
 
     await writeFile(executable, "#!/bin/sh\nexit 1\n");
     const changed = await service.executeRizinCommand({ path, command: "iI" });
@@ -130,7 +138,7 @@ posix(
     expect(changed.value.parameters.provider_executable_sha256).toBe(
       await digest(),
     );
-    expect(probes(run)).toBe(2);
+    expect(probes(run)).toBe(3);
   },
 );
 
@@ -180,19 +188,30 @@ posix(
 posix.each([
   [
     "radare2 6.1.8 +0 abi:110 @ darwin-arm_64",
+    "radare2 6.1.8 +0 abi:110 @ darwin-arm_64",
     { id: "rizin", name: "radare2", version: "6.1.8" },
+    "banner",
     "not Rizin",
   ],
   [
     "Usage: tool [options]",
+    "Usage: tool [options]",
     { id: "rizin", name: "Rizin", version: null },
-    "banner did not identify them",
+    "assumed",
+    RIZIN_VERSION_PROBE.assumedIdentity,
+  ],
+  [
+    "\nrizin 0.9.1 @ linux-x86-64",
+    "",
+    { id: "rizin", name: "Rizin", version: null },
+    "assumed",
+    RIZIN_VERSION_PROBE.assumedIdentity,
   ],
 ])(
-  "runs the command for banner %j and records what it identified",
-  async (banner, provider, limitation) => {
+  "runs the command for -v output %j and records what it identified",
+  async (stdout, banner, provider, identity, limitation) => {
     const { executable, path } = await fixture();
-    const run = runner(() => banner);
+    const run = runner(() => stdout);
     const service = new TestReverseEngineeringService({
       run,
       lookup: lookupExecutable,
@@ -201,7 +220,10 @@ posix.each([
     const result = await service.executeRizinCommand({ path, command: "iI" });
     if (!result.ok) throw result.error;
     expect(result.value.provider).toEqual(provider);
-    expect(result.value.parameters.provider_version_banner).toBe(banner);
+    expect(result.value.parameters).toMatchObject({
+      provider_version_banner: banner,
+      provider_identity: identity,
+    });
     expect(result.value.limitations).toEqual(
       expect.arrayContaining([expect.stringContaining(limitation)]),
     );
@@ -212,7 +234,7 @@ posix.each([
 );
 
 posix(
-  "keeps a failed probe's exit and output, runs the command, and reuses that result",
+  "keeps a failed probe's exit and output and still runs the command",
   async () => {
     const { executable, path } = await fixture();
     const run = vi.fn(
@@ -261,7 +283,7 @@ posix(
         stdout: "command output",
       });
     }
-    expect(probes(run)).toBe(1);
+    expect(probes(run)).toBe(2);
   },
 );
 
@@ -319,21 +341,14 @@ posix(
       expect(left.error._tag).toBe("AnalysisCancelledError");
       expect(left.error.cause).toBe("first caller left");
       release.open();
-      const kept = await within(second, "second call");
-      if (!kept.ok) throw kept.error;
-      expect(kept.value.provider.version).toBe("0.9.1");
+      const answered = await within(second, "second call");
+      if (!answered.ok) throw answered.error;
+      expect(answered.value.provider.version).toBe("0.9.1");
       const probeCalls = run.mock.calls.filter(([, args]) => args[0] === "-v");
       expect(probeCalls.map(([, , options]) => options?.timeout)).toEqual([
         1_234, 5_678,
       ]);
       expect(probeCalls[0]?.[2]?.signal).not.toBe(probeCalls[1]?.[2]?.signal);
-      // The completed probe is reused; the cancelled one was never kept.
-      const reused = await within(
-        service.executeRizinCommand({ path, command: "iz" }),
-        "reusing call",
-      );
-      if (!reused.ok) throw reused.error;
-      expect(probes(run)).toBe(2);
     } finally {
       release.open();
       leaving.abort("test cleanup");
@@ -342,133 +357,6 @@ posix(
     }
   },
 );
-
-posix.each([
-  { first: "success", second: "timeout" },
-  { first: "exit", second: "success" },
-] as const)(
-  "keeps the successful reading when concurrent probes end in $first then $second",
-  async ({ first: firstEnds, second: secondEnds }) => {
-    const { executable, path } = await fixture();
-    const started = [gate(), gate()] as const;
-    const release = [gate(), gate()] as const;
-    const ends = [firstEnds, secondEnds] as const;
-    const run = vi.fn(
-      async (
-        _command: string,
-        args: readonly string[],
-        _options?: ExecFileOutputOptions,
-      ) => {
-        if (args[0] !== "-v") return { stdout: "command output", stderr: "" };
-        const index = probes(run) === 1 ? 0 : 1;
-        started[index].open();
-        await release[index].opened;
-        if (ends[index] === "success")
-          return { stdout: "rizin 0.9.1 @ linux-x86-64", stderr: "" };
-        throw Object.assign(
-          new Error("probe failed"),
-          ends[index] === "timeout"
-            ? { code: "ETIMEDOUT", signal: "SIGTERM", stdout: "", stderr: "" }
-            : { code: 2, signal: null, stdout: "", stderr: "usage\n" },
-        );
-      },
-    );
-    const service = new TestReverseEngineeringService({
-      run,
-      lookup: lookupExecutable,
-      environment: { REA_RIZIN_COMMAND: executable },
-    });
-    const pending: Promise<unknown>[] = [];
-    try {
-      const first = service.executeRizinCommand({ path, command: "iI" });
-      pending.push(first);
-      await awaitAcknowledgement(started[0].opened, first, "first probe");
-      const second = service.executeRizinCommand({ path, command: "iS" });
-      pending.push(second);
-      await awaitAcknowledgement(started[1].opened, second, "second probe");
-      // Each call reports its own probe, in the order the probes end.
-      for (const [index, call] of [first, second].entries()) {
-        release[index]?.open();
-        const result = await within(call, `call ${String(index + 1)}`);
-        if (!result.ok) throw result.error;
-        expect(result.value.provider.version).toBe(
-          ends[index] === "success" ? "0.9.1" : null,
-        );
-      }
-      const later = await within(
-        service.executeRizinCommand({ path, command: "iz" }),
-        "later call",
-      );
-      if (!later.ok) throw later.error;
-      expect(later.value.provider).toEqual({
-        id: "rizin",
-        name: "Rizin",
-        version: "0.9.1",
-      });
-      expect(probes(run)).toBe(2);
-    } finally {
-      for (const each of release) each.open();
-      await Promise.allSettled(pending);
-      await service.close();
-    }
-  },
-);
-
-posix("keys completed probes by launch path as well as digest", async () => {
-  const { executable, path } = await fixture();
-  const other = join(dirname(executable), "other");
-  await mkdir(other);
-  const twin = join(other, "rizin");
-  await writeFile(twin, await readFile(executable), { mode: 0o755 });
-  const run = vi.fn(
-    async (
-      command: string,
-      args: readonly string[],
-      _options?: ExecFileOutputOptions,
-    ) => ({
-      stdout:
-        args[0] !== "-v"
-          ? "command output"
-          : command === twin
-            ? "rizin 0.8.0 @ linux-x86-64"
-            : "rizin 0.9.1 @ linux-x86-64",
-      stderr: "",
-    }),
-  );
-  // One service, so its cache spans the calls; each call selects a launcher.
-  let selected = executable;
-  const service = new TestReverseEngineeringService({
-    run,
-    lookup: lookupExecutable,
-    commands: {
-      objdump: (input) =>
-        createReverseEngineeringCommandPort({}).objdump(input),
-      rizin: (input) =>
-        createReverseEngineeringCommandPort({
-          REA_RIZIN_COMMAND: selected,
-        }).rizin(input),
-    },
-  });
-  const versions: unknown[] = [];
-  try {
-    for (const launcher of [executable, twin, executable]) {
-      selected = launcher;
-      const result = await service.executeRizinCommand({ path, command: "iI" });
-      if (!result.ok) throw result.error;
-      versions.push(result.value.provider.version);
-    }
-  } finally {
-    await service.close();
-  }
-  expect(versions).toEqual(["0.9.1", "0.8.0", "0.9.1"]);
-  // Byte-identical launchers in different directories are probed apart, and
-  // each launcher's completed probe is reused.
-  expect(
-    run.mock.calls
-      .filter(([, args]) => args[0] === "-v")
-      .map(([command]) => command),
-  ).toEqual([executable, twin]);
-});
 
 posix.each(["cancellation", "deadline"] as const)(
   "stops a stalled executable lookup on its %s without running anything",
@@ -663,32 +551,6 @@ posix(
 );
 
 posix(
-  "keeps one completed probe per launch path and replaces it when the digest changes",
-  async () => {
-    const { executable, path } = await fixture();
-    const original = await readFile(executable);
-    const run = runner(() => "rizin 0.9.1 @ linux-x86-64");
-    const service = new TestReverseEngineeringService({
-      run,
-      lookup: lookupExecutable,
-      environment: { REA_RIZIN_COMMAND: executable },
-    });
-    const call = async () => {
-      const result = await service.executeRizinCommand({ path, command: "iI" });
-      if (!result.ok) throw result.error;
-    };
-    await call();
-    await writeFile(executable, "#!/bin/sh\nexit 1\n");
-    await call();
-    // The first file's reading was replaced, so the restored file is probed again.
-    await writeFile(executable, original);
-    await call();
-    await call();
-    expect(probes(run)).toBe(3);
-  },
-);
-
-posix(
   "keeps at most 2,048 characters of a banner and marks it truncated",
   async () => {
     const { executable, path } = await fixture();
@@ -699,7 +561,6 @@ posix(
       lookup: lookupExecutable,
       environment: { REA_RIZIN_COMMAND: executable },
     });
-    // The second call reads the kept probe, which holds the bounded banner.
     for (const command of ["iI", "iS"]) {
       const result = await service.executeRizinCommand({ path, command });
       if (!result.ok) throw result.error;
@@ -709,7 +570,7 @@ posix(
         provider_version_banner_truncated: true,
       });
     }
-    expect(probes(run)).toBe(1);
+    expect(probes(run)).toBe(2);
   },
 );
 
@@ -762,7 +623,7 @@ posix(
 );
 
 posix(
-  "probes again after a probe whose output was not fully collected",
+  "reports no exit status for a probe whose output was not fully collected",
   async () => {
     const { executable, path } = await fixture();
     const bannerOutput = {
@@ -772,21 +633,17 @@ posix(
         observedBytes: 26,
       },
     };
-    let probeCount = 0;
     const runOwned = vi.fn(
       async (request: { readonly arguments: readonly string[] }) => {
         if (request.arguments[0] !== "-v") return providerSnapshot();
-        probeCount += 1;
         // The probe exits 0, but its output was not fully collected.
-        if (probeCount === 1)
-          throw new OwnedCommandFailure(
-            "process",
-            "Provider output collection failed.",
-            providerSnapshot(bannerOutput),
-            null,
-            { collectionFailure: true },
-          );
-        return providerSnapshot(bannerOutput);
+        throw new OwnedCommandFailure(
+          "process",
+          "Provider output collection failed.",
+          providerSnapshot(bannerOutput),
+          null,
+          { collectionFailure: true },
+        );
       },
     );
     const service = new TestReverseEngineeringService({
@@ -800,65 +657,6 @@ posix(
     expect(first.value.parameters.provider_version_probe).toMatchObject({
       exit_code: null,
     });
-    const second = await service.executeRizinCommand({ path, command: "iI" });
-    if (!second.ok) throw second.error;
-    expect(second.value.provider.version).toBe("0.9.1");
-    expect(probeCount).toBe(2);
-  },
-);
-
-posix(
-  "probes again under a later call's deadline after a probe timed out",
-  async () => {
-    const { executable, path } = await fixture();
-    const probeDeadlines: (number | null)[] = [];
-    const runOwned = vi.fn(
-      async (
-        request: { readonly arguments: readonly string[] },
-        limits: { readonly timeoutMs: number | null },
-      ) => {
-        if (request.arguments[0] !== "-v") return providerSnapshot();
-        probeDeadlines.push(limits.timeoutMs);
-        // The first call's deadline stops the probe, which exits by its stop signal.
-        if (probeDeadlines.length === 1)
-          throw new OwnedCommandFailure(
-            "timeout",
-            "Command deadline elapsed.",
-            providerSnapshot({ exitCode: null, signal: "SIGTERM" }),
-          );
-        return providerSnapshot({
-          stdout: {
-            text: "rizin 0.9.1 @ linux-x86-64",
-            bytes: 26,
-            observedBytes: 26,
-          },
-        });
-      },
-    );
-    const service = new TestReverseEngineeringService({
-      runOwned,
-      lookup: lookupExecutable,
-      environment: { REA_RIZIN_COMMAND: executable },
-    });
-    const short = await service.executeRizinCommand({
-      path,
-      command: "iI",
-      command_timeout_ms: 100,
-    });
-    if (!short.ok) throw short.error;
-    expect(short.value.provider.version).toBeNull();
-    expect(short.value.parameters.provider_version_probe).toMatchObject({
-      error_code: "ETIMEDOUT",
-      signal: "SIGTERM",
-    });
-    const long = await service.executeRizinCommand({
-      path,
-      command: "iI",
-      command_timeout_ms: 5_000,
-    });
-    if (!long.ok) throw long.error;
-    expect(long.value.provider.version).toBe("0.9.1");
-    expect(probeDeadlines).toEqual([100, 5_000]);
   },
 );
 
@@ -909,5 +707,109 @@ posix.each([
       stdout_invalid_utf8: invalid.stdout,
       stderr_invalid_utf8: invalid.stderr,
     });
+  },
+);
+
+posix.each(["cancelled", "cleanup-incomplete"] as const)(
+  "keeps invalid UTF-8 flags in a %s probe's captured output",
+  async (outcome) => {
+    const { executable, path } = await fixture();
+    const caller = new AbortController();
+    let stopped = false;
+    const owner = {
+      stop: async () =>
+        stopped
+          ? { status: "stopped" as const }
+          : { status: "incomplete" as const, reason: "probe still running" },
+    } as unknown as ProviderProcessSupervisor;
+    const snapshot = providerSnapshot({
+      exitCode: null,
+      signal: "SIGTERM",
+      stdout: {
+        text: "rizin �",
+        bytes: 7,
+        observedBytes: 7,
+        invalidUtf8: true,
+      },
+      stderr: {
+        text: "warning �",
+        bytes: 9,
+        observedBytes: 9,
+        invalidUtf8: true,
+      },
+    });
+    const runOwned = vi.fn(
+      async (request: { readonly arguments: readonly string[] }) => {
+        if (request.arguments[0] !== "-v") return providerSnapshot();
+        if (outcome === "cancelled") {
+          caller.abort("stop the probe");
+          throw new OwnedCommandFailure(
+            "cancelled",
+            "Command cancelled.",
+            snapshot,
+            null,
+            { cancellation: { reason: "stop the probe" } },
+          );
+        }
+        throw new OwnedCommandFailure(
+          "process",
+          "probe cleanup failed",
+          snapshot,
+          "probe still running",
+          undefined,
+          ["pid:9"],
+          owner,
+        );
+      },
+    );
+    const service = new TestReverseEngineeringService({
+      runOwned,
+      lookup: lookupExecutable,
+      environment: { REA_RIZIN_COMMAND: executable },
+    });
+    const result = await service.executeRizinCommand(
+      { path, command: "iI" },
+      { signal: caller.signal },
+    );
+    if (result.ok) throw new Error("Expected the probe to end the call");
+    expect(result.error._tag).toBe(
+      outcome === "cancelled"
+        ? "AnalysisCancelledError"
+        : "AnalysisOutputError",
+    );
+    expect(result.error.capturedOutput).toMatchObject({
+      stdout_invalid_utf8: true,
+      stderr_invalid_utf8: true,
+    });
+    stopped = true;
+    expect(await service.retryCleanup()).toEqual({ ok: true, value: null });
+  },
+);
+
+posix(
+  "identifies the tool a launcher runs on each call, though the launcher's digest stays the same",
+  async () => {
+    const { executable, path, digest } = await fixture();
+    // A version-manager shim: the same file delegates to whichever tool is selected.
+    const banners = [
+      "rizin 0.9.1 @ linux-x86-64",
+      "rizin 0.8.1 @ linux-x86-64",
+    ];
+    const run = runner(() => banners[probes(run) - 1] ?? "unexpected probe");
+    const service = new TestReverseEngineeringService({
+      run,
+      lookup: lookupExecutable,
+      environment: { REA_RIZIN_COMMAND: executable },
+    });
+    const versions: (string | null)[] = [];
+    const digests: unknown[] = [];
+    for (const command of ["iI", "iS"]) {
+      const result = await service.executeRizinCommand({ path, command });
+      if (!result.ok) throw result.error;
+      versions.push(result.value.provider.version);
+      digests.push(result.value.parameters.provider_executable_sha256);
+    }
+    expect(versions).toEqual(["0.9.1", "0.8.1"]);
+    expect(digests).toEqual([await digest(), await digest()]);
   },
 );

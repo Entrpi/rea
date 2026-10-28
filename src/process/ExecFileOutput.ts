@@ -147,6 +147,19 @@ export const execFileFailureCapturedOutput = (
   exit_code: typeof failure.code === "number" ? failure.code : null,
   signal: failure.signal,
   truncated: failure.outputTruncated,
+  ...capturedInvalidUtf8(failure),
+});
+
+/** Captured-output markers for the streams a runner reported as invalid UTF-8. */
+export const capturedInvalidUtf8 = (output: {
+  readonly stdoutInvalidUtf8?: boolean;
+  readonly stderrInvalidUtf8?: boolean;
+}): Pick<
+  AnalysisCapturedOutput,
+  "stdout_invalid_utf8" | "stderr_invalid_utf8"
+> => ({
+  ...(output.stdoutInvalidUtf8 === true ? { stdout_invalid_utf8: true } : {}),
+  ...(output.stderrInvalidUtf8 === true ? { stderr_invalid_utf8: true } : {}),
 });
 
 /** Run a shell-free command with no input while capturing its complete output bytes. */

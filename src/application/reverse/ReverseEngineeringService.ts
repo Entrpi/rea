@@ -39,6 +39,7 @@ import type {
   ReverseEngineeringProviderCommand,
 } from "./ReverseEngineeringCommandPort.js";
 import {
+  capturedInvalidUtf8,
   execFileFailureCapturedOutput,
   execFileOutput,
   execFileOutputFailure,
@@ -150,16 +151,6 @@ export class ReverseEngineeringService {
   readonly #activeOperations = new Map<
     AbortController,
     Promise<Result<Evidence, AnalysisError>>
-  >();
-  /**
-   * The latest completed version probe for each resolved launch path, with
-   * the digest of the file it read; a new digest replaces the entry, and a
-   * kept banner is bounded. Cancelled probes, probes whose output was not
-   * collected and probes whose cleanup is incomplete are not kept.
-   */
-  readonly #versionProbes = new Map<
-    string,
-    { readonly sha256: string; readonly completed: KeptVersionProbe }
   >();
   #closing = false;
   #closePromise: Promise<void> | undefined;
@@ -638,6 +629,7 @@ export class ReverseEngineeringService {
               ? capture.code
               : null,
           signal: capture.signal,
+          ...capturedInvalidUtf8(capture),
         };
         if (commandCancelled(signal, cause, code))
           failure = new AnalysisCancelledError(operation, {
@@ -731,6 +723,7 @@ export class ReverseEngineeringService {
           stderr_bytes: stderrBytes,
           exit_code: typeof exitCode === "number" ? exitCode : null,
           signal: signalName,
+          ...capturedInvalidUtf8({ stdoutInvalidUtf8, stderrInvalidUtf8 }),
         },
       });
       exitCode = null;
@@ -866,7 +859,8 @@ export class ReverseEngineeringService {
 
   /**
    * Resolve, hash and identify the selected executable, then run that same
-   * path. A completed probe is reused for the same launch path and digest. A
+   * path. Every call probes, in its environment and under its deadline: a
+   * launcher keeps its path and digest while the tool it runs can change. A
    * tool that cannot be identified still runs; only cancellation, the call's
    * deadline and a probe whose process cleanup remains incomplete stop the
    * command.
@@ -879,6 +873,7 @@ export class ReverseEngineeringService {
     timeoutMs: number,
   ): Promise<Result<ProviderIdentification, AnalysisError>> {
     const probe = profile.versionProbe;
+    // Without an identifying banner, a probed provider's name is assumed.
     const unidentified = (
       reason: string,
       executable = profile.executable,
@@ -888,8 +883,12 @@ export class ReverseEngineeringService {
       identity: profile.identity,
       limitations: [
         `The executable version and supported formats are reported as unknown because ${reason}.`,
+        ...(probe === undefined ? [] : [probe.assumedIdentity]),
       ],
-      parameters,
+      parameters:
+        probe === undefined
+          ? parameters
+          : { ...parameters, provider_identity: "assumed" },
     });
     if (probe === undefined)
       return ok(unidentified("no reliable version probe was performed"));
@@ -941,22 +940,16 @@ export class ReverseEngineeringService {
       provider_executable_path: lookup.path,
       provider_executable_sha256: sha256,
     };
-    const kept = this.#versionProbes.get(lookup.path);
-    let completed: VersionProbeOutcome | undefined =
-      kept?.sha256 === sha256 ? kept.completed : undefined;
-    if (completed === undefined) {
-      const outcome = await this.#runVersionProbe(
-        operation,
-        lookup.path,
-        probe,
-        environment,
-        signal,
-        timeoutMs,
-      );
-      if (!outcome.ok) return outcome;
-      completed = outcome.value;
-      this.#rememberVersionProbe(lookup.path, sha256, completed);
-    }
+    const outcome = await this.#runVersionProbe(
+      operation,
+      lookup.path,
+      probe,
+      environment,
+      signal,
+      timeoutMs,
+    );
+    if (!outcome.ok) return outcome;
+    const completed = outcome.value;
     if (completed.status !== "read")
       return ok(
         unidentified(
@@ -967,44 +960,28 @@ export class ReverseEngineeringService {
       );
     const { identification } = completed;
     const banner = `its ${probe.arguments.join(" ")} banner`;
+    const bannerParameters = {
+      ...parameters,
+      provider_version_banner: completed.banner,
+      provider_version_banner_truncated: completed.bannerTruncated,
+    };
+    if (identification === undefined)
+      return ok(
+        unidentified(
+          `${banner} did not identify the tool`,
+          lookup.path,
+          bannerParameters,
+        ),
+      );
     return ok({
       executable: lookup.path,
       identity: identification.identity,
       limitations: [
-        identification.identity.version === null
-          ? `The executable version and supported formats are reported as unknown because ${banner} did not identify them.`
-          : `The executable version comes from ${banner}; supported formats remain unknown.`,
+        `The executable version comes from ${banner}; supported formats remain unknown.`,
         ...identification.limitations,
       ],
-      parameters: {
-        ...parameters,
-        provider_version_banner: completed.banner,
-        provider_version_banner_truncated: completed.bannerTruncated,
-      },
+      parameters: { ...bannerParameters, provider_identity: "banner" },
     });
-  }
-
-  /**
-   * Keep an outcome scoped to the executable as its launch path's latest probe;
-   * a new digest replaces it. Concurrent first calls can each probe the same
-   * digest, so a later failure never replaces a successful reading of it; a
-   * success replaces an earlier failure. Outcomes scoped to one call are not
-   * kept.
-   */
-  #rememberVersionProbe(
-    path: string,
-    sha256: string,
-    outcome: VersionProbeOutcome,
-  ): void {
-    if (outcome.scope !== "executable") return;
-    const kept = this.#versionProbes.get(path);
-    if (
-      outcome.status !== "read" &&
-      kept?.sha256 === sha256 &&
-      kept.completed.status === "read"
-    )
-      return;
-    this.#versionProbes.set(path, { sha256, completed: outcome });
   }
 
   /**
@@ -1032,14 +1009,12 @@ export class ReverseEngineeringService {
       // identifies nothing.
       if (output.stdoutInvalidUtf8 === true)
         return ok({
-          scope: "executable",
           status: "undecodable",
           diagnostics: versionProbeDiagnostics(0, output),
         });
       const line = output.stdout.split(/\r?\n/u, 1)[0]?.trim() ?? "";
       const banner = line.slice(0, VERSION_PROBE_TEXT_CHARS);
       return ok({
-        scope: "executable",
         status: "read",
         identification: probe.identify(banner),
         banner,
@@ -1081,19 +1056,12 @@ export class ReverseEngineeringService {
             cleanupOwner,
           ),
         );
-      const diagnostics = versionProbeDiagnostics(code, capture);
-      // Only an exit or the call's deadline completes a probe. A launch
-      // failure, or output that was not fully collected, is not a reading of
-      // this executable, whatever its exit status.
-      return ok(
-        capture?.collectionFailure === true
-          ? { scope: "call", status: "unfinished", diagnostics }
-          : code === "ETIMEDOUT"
-            ? { scope: "call", status: "timed-out", diagnostics }
-            : typeof code === "number" || capture?.signal != null
-              ? { scope: "executable", status: "failed", diagnostics }
-              : { scope: "call", status: "unfinished", diagnostics },
-      );
+      // Both runners report the call's deadline as ETIMEDOUT, even when the
+      // stop signal also ended the process.
+      return ok({
+        status: code === "ETIMEDOUT" ? "timed-out" : "failed",
+        diagnostics: versionProbeDiagnostics(code, capture),
+      });
     }
   }
 
@@ -1115,49 +1083,33 @@ interface ProviderIdentification {
   readonly parameters: Readonly<Record<string, JsonValue>>;
 }
 
-/**
- * One version probe's outcome. An outcome scoped to the executable is a fact
- * about that file and is kept for its launch path and digest. One scoped to
- * the call is not kept: a timeout reflects that call's command_timeout_ms, and
- * unfinished output was not read.
- */
+/** One version probe's outcome. */
 type VersionProbeOutcome =
   | {
-      readonly scope: "executable";
       readonly status: "read";
-      readonly identification: ProviderToolIdentification;
+      /** Undefined when the banner identified no tool. */
+      readonly identification: ProviderToolIdentification | undefined;
       /** The first stdout line, trimmed and bounded. */
       readonly banner: string;
       readonly bannerTruncated: boolean;
     }
   | {
-      readonly scope: "executable";
-      readonly status: "failed" | "undecodable";
-      readonly diagnostics: Readonly<Record<string, JsonValue>>;
-    }
-  | {
-      readonly scope: "call";
-      readonly status: "timed-out" | "unfinished";
+      readonly status: "failed" | "timed-out" | "undecodable";
       readonly diagnostics: Readonly<Record<string, JsonValue>>;
     };
-type KeptVersionProbe = Extract<
-  VersionProbeOutcome,
-  { readonly scope: "executable" }
->;
 
 /** Why a probe that read no usable banner leaves the version unknown. */
 export const VERSION_PROBE_FAILURE_REASONS = {
   failed: "did not complete successfully",
   "timed-out": "reached the command deadline",
   undecodable: "printed output that is not valid UTF-8",
-  unfinished: "did not complete successfully",
 } as const satisfies Record<
   Exclude<VersionProbeOutcome["status"], "read">,
   string
 >;
 
 // A banner is one line; this bounds the banner a probe keeps and a failed
-// probe's diagnostics, so both stay small in Evidence and in the probe cache.
+// probe's diagnostics, so both stay small in Evidence.
 const VERSION_PROBE_TEXT_CHARS = 2_048;
 
 /** Bounded exit facts and output of a probe that printed no usable banner. */
