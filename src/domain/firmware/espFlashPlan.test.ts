@@ -164,6 +164,8 @@ describe("ESP flash layout plans", () => {
       ["partition-table.bin", 0x7000, 0x1000],
       ["partitions/app.bin", 0xf000, 0x1_0000],
       ["partitions/cut.bin", 0x2_f000, 0x9000],
+      // Past the end of the file: an entry holding none of its bytes.
+      ["partitions/gone.bin", 0xf_f000, 0],
     ]);
     expect(plan.limitations).toEqual([
       "Partition early at 0x0 starts before the end of the partition table at 0x9000; gen_esp32part.py rejects such a table.",
@@ -171,11 +173,6 @@ describe("ESP flash layout plans", () => {
       "Partition cut at 0x30000-0x40000 is truncated: the dump holds 36864 of its 65536 bytes.",
       "Partition gone at 0x100000-0x101000 lies outside the dump, which ends at flash 0x39000.",
     ]);
-    const facts = finishEspFlashLayout(plan, {
-      otadataRecords: [],
-      gapFirstUnerased: erasedGaps(plan.gaps.length),
-    });
-    expect(facts.coverage).toBe("unknown");
   });
 
   it("reports every region inside a longer one", () => {
@@ -192,6 +189,42 @@ describe("ESP flash layout plans", () => {
       "partitions/b.bin at 0xa000 overlaps partitions/a.bin, which ends at 0x11000.",
       "partitions/c.bin at 0xc000 overlaps partitions/a.bin, which ends at 0x11000.",
     ]);
+  });
+});
+
+describe("ESP flash layout coverage", () => {
+  it("keeps coverage complete for partitions the end of the file cuts short or leaves out", () => {
+    const cut = planEspFlashLayout(input({ fileSize: 0x2_8000 }));
+    const reads = (plan: typeof cut) => ({
+      otadataRecords: [],
+      gapFirstUnerased: erasedGaps(plan.gaps.length),
+    });
+    // ota_0 is cut short and ota_1 lies past the end; both are entries.
+    expect(
+      cut.regions.slice(-2).map(({ path, available }) => [path, available]),
+    ).toEqual([
+      ["partitions/ota_0.bin", 0x8000],
+      ["partitions/ota_1.bin", 0],
+    ]);
+    expect(finishEspFlashLayout(cut, reads(cut)).coverage).toBe("complete");
+    // A partition before the dump's first byte has no entry, so coverage is
+    // unknown even with the bootloader located.
+    const later = planEspFlashLayout(
+      input({
+        fileSize: 0x3_f000,
+        origin: { value: 0x1000, source: "caller" },
+        bootloader: {
+          flashAddress: 0x1000,
+          fileOffset: 0,
+          chip: espChipForId(0x0000)!,
+        },
+        table: table([
+          { label: "early", type: 1, subtype: 2, offset: 0x0, size: 0x1000 },
+          ...TWO_OTA_PARTITIONS,
+        ]),
+      }),
+    );
+    expect(finishEspFlashLayout(later, reads(later)).coverage).toBe("unknown");
   });
 });
 
@@ -234,8 +267,31 @@ describe("ESP flash layout otadata", () => {
     });
     expect(facts.otadata).toMatchObject({
       records: [{ index: 0, ota_seq: 1 }],
-      selected: { basis: "none", partition_index: null },
     });
+    expect(facts.boot_selection).toMatchObject({
+      basis: "none",
+      partition_index: null,
+    });
+  });
+
+  it("selects nothing from a table whose MD5 the bootloader rejects", () => {
+    const decoded = decodeEspPartitionTable(
+      partitionTable(TWO_OTA_PARTITIONS, { md5: "corrupt" }),
+    );
+    if (!decoded.ok) throw new Error(decoded.error);
+    const plan = planEspFlashLayout(input({ table: decoded.value }));
+    const facts = finishEspFlashLayout(plan, {
+      otadataRecords: [otaRecord({ seq: 1 }), Buffer.alloc(32, 0xff)],
+      gapFirstUnerased: erasedGaps(plan.gaps.length),
+    });
+    expect(facts.boot_selection).toMatchObject({
+      basis: "none",
+      partition_index: null,
+      assumptions: [],
+    });
+    expect(facts.limitations).toContain(
+      "The partition table MD5 at 0xc0 does not match the entries before it; ESP-IDF's bootloader rejects the table.",
+    );
   });
 
   it("keeps the record a dump holds when it ends between the two", () => {
@@ -251,9 +307,12 @@ describe("ESP flash layout otadata", () => {
       otadataRecords: [otaRecord({ seq: 3 }), undefined],
       gapFirstUnerased: erasedGaps(plan.gaps.length),
     });
-    expect(facts.otadata).toMatchObject({
-      records: [{ index: 0, ota_seq: 3, valid: true }],
-      selected: null,
+    expect(facts.otadata).toEqual({
+      partition_index: 1,
+      records: [expect.objectContaining({ index: 0, ota_seq: 3, valid: true })],
+    });
+    expect(facts.boot_selection).toMatchObject({
+      basis: "unknown",
       running_partition: "unknown",
     });
   });
@@ -293,19 +352,39 @@ describe("ESP flash layout facts", () => {
     expect(facts.otadata).toMatchObject({
       partition_index: 1,
       records: [{ ota_seq: 2, valid: true }, { valid: false }],
-      selected: {
-        active_record: 0,
-        slot: 1,
-        partition_index: 5,
-        basis: "otadata",
-      },
+    });
+    expect(facts.boot_selection).toMatchObject({
+      basis: "otadata",
+      active_record: 0,
+      slot: 1,
+      partition_index: 5,
       running_partition: "unknown",
     });
     expect(facts.coverage).toBe("complete");
+    // A factory-only table selects its factory app without otadata.
+    const withoutOtadata = planEspFlashLayout(
+      input({
+        table: table(
+          TWO_OTA_PARTITIONS.filter(({ label }) =>
+            ["nvs", "phy_init", "factory"].includes(label),
+          ),
+        ),
+      }),
+    );
+    expect(
+      finishEspFlashLayout(withoutOtadata, {
+        otadataRecords: [],
+        gapFirstUnerased: erasedGaps(withoutOtadata.gaps.length),
+      }),
+    ).toMatchObject({
+      otadata: null,
+      boot_selection: { basis: "no-otadata", partition_index: 2 },
+    });
   });
 
-  it("projects a partition's declaration with ESP-IDF names", () => {
+  it("projects a partition's declaration with ESP-IDF names and where it is written", () => {
     const [nvs] = table(TWO_OTA_PARTITIONS).partitions;
+    // A partition the dump holds none of has no observed bytes.
     expect(espFlashPartitionFacts(nvs!)).toEqual({
       kind: "esp-flash-partition",
       index: 0,
@@ -320,6 +399,23 @@ describe("ESP flash layout facts", () => {
       encrypted: false,
       readonly: false,
       unknown_flags: 0,
+      written_offset: null,
+      written_end: null,
+      written_bytes: null,
+    });
+    expect(
+      espFlashPartitionFacts(nvs!, { offset: 0x40, end: 0x1000, bytes: 9 }),
+    ).toMatchObject({
+      written_offset: 0x40,
+      written_end: 0x1000,
+      written_bytes: 9,
+    });
+    expect(
+      espFlashPartitionFacts(nvs!, { offset: null, end: null, bytes: 0 }),
+    ).toMatchObject({
+      written_offset: null,
+      written_end: null,
+      written_bytes: 0,
     });
   });
 });

@@ -38,6 +38,10 @@ import {
 } from "./analysisViewCoverage.js";
 import { analysisViewResultInputError } from "./analysisViewParent.js";
 import { ARTIFACT_INVENTORY_VIEW_CAVEATS } from "./artifactInventoryViewCaveats.js";
+import {
+  espFlashImageSummaryMetadataSchema,
+  summaryRootMetadata,
+} from "./espFlashImageSummary.js";
 
 const page = {
   kind: z.literal("inventory"),
@@ -98,7 +102,10 @@ export const artifactInventorySummarySchema = z.strictObject({
     })
     .exactOptional(),
   manifest: artifactGraphManifestSchema,
-  root_format_metadata: artifactFormatMetadataSchema.exactOptional(),
+  /** An ESP flash layout's nested images appear as summaries here. */
+  root_format_metadata: z
+    .union([artifactFormatMetadataSchema, espFlashImageSummaryMetadataSchema])
+    .exactOptional(),
   available_counts: z.strictObject({
     nodes: z.number().int().nonnegative(),
     occurrences: z.number().int().nonnegative(),
@@ -340,7 +347,7 @@ export const projectArtifactInventoryView = (
         inventory_evidence_ids: [...evidenceIds],
         ...(rootMetadata === null
           ? {}
-          : { root_format_metadata: rootMetadata }),
+          : { root_format_metadata: summaryRootMetadata(rootMetadata) }),
         inspection:
           inspection === null
             ? null

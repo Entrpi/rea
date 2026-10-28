@@ -7,6 +7,7 @@ import { EspFlashImageArtifactReader } from "./EspFlashImageArtifactReader.js";
 import { ArtifactResourceScope } from "./ArtifactResourceScope.js";
 import type { ArtifactEntry } from "./ArtifactReader.js";
 import { extractArtifact } from "./extraction/ArtifactExtraction.js";
+import * as regionReads from "./EspFlashRegionReads.js";
 import * as espImageDecoding from "../domain/firmware/espImage.js";
 import {
   TWO_OTA_PARTITIONS,
@@ -87,6 +88,7 @@ describe("ESP flash layout inventory", () => {
       flash_offset: { value: 0, source: "default" },
       chip: { target: "esp32c3", isa: "riscv" },
       bootloader: {
+        path: "bootloader.bin",
         flash_address: 0,
         region_size: 0x8000,
         facts: {
@@ -102,29 +104,36 @@ describe("ESP flash layout inventory", () => {
         md5: { status: "valid" },
       },
       partitions_outside_dump: [],
-      otadata: {
-        partition_index: 1,
-        selected: {
-          active_record: 0,
-          slot: 0,
-          partition_index: 4,
-          basis: "otadata",
-        },
+      otadata: { partition_index: 1 },
+      boot_selection: {
+        basis: "otadata",
+        active_record: 0,
+        slot: 0,
+        partition_index: 4,
         running_partition: "unknown",
       },
       undescribed: [],
     });
     const apps = (
       root(snapshot) as {
-        apps: { partition_index: number; facts: { status: string } }[];
+        apps: {
+          path: string;
+          partition_index: number;
+          facts: { status: string };
+        }[];
       }
     ).apps;
+    // Each image names its entry, so no lookup by index is needed.
     expect(
-      apps.map(({ partition_index, facts }) => [partition_index, facts.status]),
+      apps.map(({ path, partition_index, facts }) => [
+        path,
+        partition_index,
+        facts.status,
+      ]),
     ).toEqual([
-      [3, "esp-image"],
-      [4, "esp-image"],
-      [5, "erased"],
+      ["partitions/factory.bin", 3, "esp-image"],
+      ["partitions/ota_0.bin", 4, "esp-image"],
+      ["partitions/ota_1.bin", 5, "erased"],
     ]);
     const factory = snapshot.occurrences.find(
       ({ logical_path }) => logical_path === "partitions/factory.bin",
@@ -166,7 +175,8 @@ describe("ESP flash layout coverage and selection", () => {
   it("keeps usable partitions beside a truncated and a missing one", async () => {
     const cut = DUMP.subarray(0, 0x2_8000);
     const snapshot = await scanCanonicalArtifactInventory(await writeDump(cut));
-    expect(snapshot.coverage.status).toBe("unknown");
+    // The table names every partition, so the end of the file hides no entry.
+    expect(snapshot.coverage.status).toBe("complete");
     const ota0 = snapshot.occurrences.find(
       ({ logical_path }) => logical_path === "partitions/ota_0.bin",
     );
@@ -176,14 +186,81 @@ describe("ESP flash layout coverage and selection", () => {
         "partitions/ota_0.bin is truncated: the dump holds 32768 of its 65536 bytes.",
       ],
     });
-    expect(root(snapshot)).toMatchObject({
-      partitions_outside_dump: [{ index: 5, label: "ota_1" }],
+    // ota_1 lies past the end: an entry holding none of its bytes.
+    expect(root(snapshot)).toMatchObject({ partitions_outside_dump: [] });
+    expect(
+      snapshot.occurrences.find(
+        ({ logical_path }) => logical_path === "partitions/ota_1.bin",
+      ),
+    ).toMatchObject({
+      declared_size: 0,
+      limitations: [
+        "partitions/ota_1.bin lies outside the dump: the file holds none of its 65536 bytes.",
+      ],
+      format_metadata: {
+        index: 5,
+        written_offset: null,
+        written_end: null,
+        written_bytes: null,
+      },
     });
+    const { apps } = root(snapshot) as {
+      apps: { partition_index: number }[];
+    };
+    // An app partition the file holds none of has no image facts.
+    expect(apps.map(({ partition_index: index }) => index)).toEqual([3, 4]);
     expect(
       snapshot.occurrences.some(
         ({ logical_path }) => logical_path === "partitions/factory.bin",
       ),
     ).toBe(true);
+  });
+
+  it("reports written bytes in an app slot the bootloader finds empty", async () => {
+    // ota_1's header is erased, but an older image sits 0x8000 into the slot.
+    const dump = espFlashDump({
+      bootloader: { at: 0, bytes: BOOTLOADER },
+      parts: [
+        { at: 0xd000, bytes: otaData(otaRecord({ seq: 1 })) },
+        { at: 0x1_0000, bytes: APP },
+        { at: 0x2_0000, bytes: APP },
+        { at: 0x3_8000, bytes: APP },
+      ],
+    });
+    const snapshot = await scanCanonicalArtifactInventory(
+      await writeDump(dump),
+    );
+    const indices = [...APP.keys()].filter((index) => APP[index] !== 0xff);
+    const start = 0x8000 + indices[0]!;
+    const end = 0x8000 + indices.at(-1)! + 1;
+    const row = (path: string) =>
+      snapshot.occurrences.find(({ logical_path }) => logical_path === path)
+        ?.format_metadata;
+    expect(row("partitions/ota_1.bin")).toMatchObject({
+      written_offset: start,
+      written_end: end,
+      written_bytes: indices.length,
+    });
+    const { apps } = root(snapshot) as {
+      apps: { partition_index: number; facts: { status: string } }[];
+    };
+    expect(
+      apps.find(({ partition_index: index }) => index === 5),
+    ).toMatchObject({
+      facts: { status: "erased" },
+    });
+    // Only the erased app slot holds bytes the bootloader does not read.
+    expect(
+      snapshot.limitations.filter((text) => text.includes("finds no app")),
+    ).toEqual([
+      `partitions/ota_1.bin begins with erased flash, so ESP-IDF's bootloader finds no app in it, but ${String(indices.length)} of its bytes from offset 0x${start.toString(16)} to 0x${end.toString(16)} are not erased flash; they are not read as an image.`,
+    ]);
+    // A partition erased throughout has no written bytes.
+    expect(row("partitions/nvs.bin")).toMatchObject({
+      written_offset: null,
+      written_end: null,
+      written_bytes: 0,
+    });
   });
 
   it("reads a dump that starts at the caller's flash offset", async () => {
@@ -290,6 +367,24 @@ describe("ESP flash layout reader identity", () => {
       await expect(
         reader.entries()[Symbol.asyncIterator]().next(),
       ).rejects.toMatchObject({ reason: "unavailable" });
+    } finally {
+      await reader.close();
+    }
+  });
+
+  it("opens a partition past the end as the empty range at the end of the file", async () => {
+    const cut = DUMP.subarray(0, 0x2_8000);
+    const reader = new EspFlashImageArtifactReader(await writeDump(cut));
+    try {
+      const entry = (await list(reader)).find(
+        ({ path }) => path === "partitions/ota_1.bin",
+      );
+      if (entry === undefined) throw new Error("Missing entry");
+      expect(entry).toMatchObject({ byteOffset: cut.length, declaredSize: 0 });
+      const chunks: Buffer[] = [];
+      for await (const chunk of await reader.open(entry))
+        chunks.push(chunk as Buffer);
+      expect(Buffer.concat(chunks)).toHaveLength(0);
     } finally {
       await reader.close();
     }
@@ -444,6 +539,85 @@ describe("ESP flash layout extraction and lifecycle", () => {
         );
         await completion;
         expect(decoded).toBe(requestedAt);
+        await reader.close();
+        await expect(
+          reader.entries()[Symbol.asyncIterator]().next(),
+        ).rejects.toMatchObject({
+          reason: "unavailable",
+        });
+      } finally {
+        observer.mockRestore();
+        await reader.close();
+      }
+    },
+  );
+});
+
+describe("ESP flash layout written-bytes scan lifecycle", () => {
+  it.each(["cancel", "close"] as const)(
+    "settles the written-bytes scan when the caller requests %s after its first chunk",
+    async (action) => {
+      // Only the written-bytes scan reads a data partition's bytes.
+      const parts = [
+        {
+          label: "storage",
+          type: 1,
+          subtype: 0x81,
+          offset: 0x1_0000,
+          size: 0x90_0000,
+        },
+      ];
+      const reader = new EspFlashImageArtifactReader(
+        await writeDump(
+          espFlashDump({
+            size: 0x91_0000,
+            bootloader: { at: 0, bytes: BOOTLOADER },
+            table: partitionTable(parts),
+            parts: [{ at: 0x1_0000, bytes: Buffer.alloc(0x90_0000, 0x5a) }],
+          }),
+        ),
+      );
+      const controller = new AbortController();
+      const reason = { stage: "written-bytes scan" };
+      let completion: Promise<void> | undefined;
+      let scanned = 0;
+      let acknowledge = (): void => undefined;
+      const scanning = new Promise<void>((resolve) => {
+        acknowledge = resolve;
+      });
+      const scan = regionReads.writtenExtent;
+      // Count the chunks the scan examines once the reader admits them.
+      const observer = vi
+        .spyOn(regionReads, "writtenExtent")
+        .mockImplementation((context, region, assertOpen) =>
+          scan(context, region, () => {
+            assertOpen();
+            if (region.length < 0x10_0000) return;
+            scanned += 1;
+            if (scanned === 1) acknowledge();
+          }),
+        );
+      try {
+        const pending = reader
+          .entries(controller.signal)
+          [Symbol.asyncIterator]()
+          .next();
+        await Promise.race([
+          scanning,
+          pending.then(() => {
+            throw new Error("Preparation settled before the scan began");
+          }),
+        ]);
+        const requestedAt = scanned;
+        if (action === "cancel") controller.abort(reason);
+        else completion = reader.close();
+        await expect(pending).rejects.toMatchObject(
+          action === "cancel"
+            ? { reason: "cancelled", cause: reason }
+            : { reason: "unavailable" },
+        );
+        await completion;
+        expect(scanned).toBe(requestedAt);
         await reader.close();
         await expect(
           reader.entries()[Symbol.asyncIterator]().next(),

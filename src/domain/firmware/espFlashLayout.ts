@@ -15,9 +15,9 @@ import {
   ESP_OTA_DATA_SECTOR_BYTES,
   ESP_OTA_SELECT_ENTRY_BYTES,
   decodeEspOtaRecord,
-  selectEspOtaSlot,
+  selectEspBootPartition,
+  type EspBootSelection,
   type EspOtaRecord,
-  type EspOtaSelection,
 } from "./espOtaData.js";
 
 /** Where the file's first byte sits in flash, and who said so. */
@@ -213,7 +213,10 @@ export const planEspFlashLayout = (input: EspFlashPlanInput): EspFlashPlan => {
       limitations.push(
         `Partition ${name} at ${rangeText(part.offset, part.size)} is truncated: the dump holds ${String(placed.available)} of its ${String(part.size)} bytes.`,
       );
-    if (placed.fileOffset >= 0 && placed.available > 0) regions.push(placed);
+    // Every partition from the dump's first byte on is an entry holding the
+    // bytes the file has, none when it lies past the end, so comparison sees
+    // what the file lacks instead of a missing path.
+    if (placed.fileOffset >= 0) regions.push(placed);
   }
   limitations.push(...overlaps(regions));
   const boot = espBootPartitions(input.table.partitions);
@@ -300,10 +303,6 @@ export interface EspFlashOtaFacts {
   readonly partition_index: number;
   /** The records the dump holds, each with its index. */
   readonly records: readonly EspOtaRecord[];
-  /** Derived from the records; see its assumptions. Null when unknown. */
-  readonly selected: EspOtaSelection | null;
-  /** The bootloader's rollback and fallback decide it at boot. */
-  readonly running_partition: "unknown";
 }
 
 /** Facts the adapter read for the plan: the otadata records and the gaps. */
@@ -316,6 +315,8 @@ export interface EspFlashReads {
 
 export interface EspFlashLayoutFacts {
   readonly otadata: EspFlashOtaFacts | null;
+  /** Derived for every table, with or without otadata; see its basis. */
+  readonly boot_selection: EspBootSelection;
   readonly undescribed: readonly { offset: number; length: number }[];
   readonly coverage: "complete" | "unknown";
   readonly limitations: readonly string[];
@@ -344,18 +345,28 @@ export const finishEspFlashLayout = (
   const otadata =
     plan.otadata === undefined
       ? null
-      : otaFacts(plan, plan.otadata, reads.otadataRecords);
-  const incomplete = plan.input.table.partitions.some((part) => {
-    const region = plan.regions.find((item) => item.partition === part);
-    return region === undefined || region.available < part.size;
-  });
+      : otaFacts(plan.otadata, reads.otadataRecords);
+  // Every partition from the dump's first byte on has an entry holding the
+  // bytes the file has; only one that begins before it has none.
+  const unplaced = plan.input.table.partitions.some(
+    (part) => !plan.regions.some(({ partition }) => partition === part),
+  );
   return {
     otadata,
+    boot_selection: selectEspBootPartition(
+      plan.boot,
+      plan.otadata === undefined || otadata === null
+        ? undefined
+        : {
+            offset: plan.otadata.partition.offset,
+            size: plan.otadata.partition.size,
+            records: otadata.records,
+          },
+      plan.input.table.md5.status === "invalid",
+    ),
     undescribed,
     coverage:
-      undescribed.length > 0 ||
-      incomplete ||
-      plan.input.bootloader === undefined
+      undescribed.length > 0 || plan.input.bootloader === undefined || unplaced
         ? "unknown"
         : "complete",
     limitations,
@@ -363,28 +374,43 @@ export const finishEspFlashLayout = (
 };
 
 const otaFacts = (
-  plan: EspFlashPlan,
   otadata: NonNullable<EspFlashPlan["otadata"]>,
   bytes: readonly (Uint8Array | undefined)[],
-): EspFlashOtaFacts => {
-  const records = otadata.records.flatMap(({ index, available }, position) => {
+): EspFlashOtaFacts => ({
+  partition_index: otadata.partition.index,
+  records: otadata.records.flatMap(({ index, available }, position) => {
     const read = bytes[position];
     return available &&
       read !== undefined &&
       read.length >= ESP_OTA_SELECT_ENTRY_BYTES
       ? [decodeEspOtaRecord(read, index)]
       : [];
-  });
-  return {
-    partition_index: otadata.partition.index,
-    records,
-    selected: selectEspOtaSlot(records, plan.boot, otadata.partition.size),
-    running_partition: "unknown",
-  };
-};
+  }),
+});
 
-/** Flat entry metadata for one partition, as the table declares it. */
-export const espFlashPartitionFacts = (part: EspPartition) => ({
+/**
+ * Where the bytes of a partition the dump holds are not erased flash,
+ * relative to the partition's start: one range from the first such byte to
+ * just past the last, and how many such bytes there are.
+ */
+export interface EspFlashWrittenExtent {
+  /** The first byte that is not 0xFF, or null when every byte is. */
+  readonly offset: number | null;
+  /** Just past the last byte that is not 0xFF, or null. */
+  readonly end: number | null;
+  /** How many of the bytes are not 0xFF. */
+  readonly bytes: number;
+}
+
+/**
+ * Flat entry metadata for one partition: what the table declares, and where
+ * the bytes the dump holds are written. `written` is undefined for a
+ * partition the dump holds none of.
+ */
+export const espFlashPartitionFacts = (
+  part: EspPartition,
+  written?: EspFlashWrittenExtent,
+) => ({
   kind: "esp-flash-partition" as const,
   index: part.index,
   label: part.label,
@@ -398,4 +424,20 @@ export const espFlashPartitionFacts = (part: EspPartition) => ({
   encrypted: part.encrypted,
   readonly: part.readonly,
   unknown_flags: part.unknownFlags,
+  written_offset: written?.offset ?? null,
+  written_end: written?.end ?? null,
+  written_bytes: written?.bytes ?? null,
 });
+
+/**
+ * An app slot whose header bytes are erased holds no image for the
+ * bootloader, which then treats the slot as empty; bytes written later in
+ * it, such as an older image, are reported but not read as an image.
+ */
+export const espErasedSlotLimitation = (
+  path: string,
+  written: EspFlashWrittenExtent,
+): string | undefined =>
+  written.offset === null || written.end === null
+    ? undefined
+    : `${path} begins with erased flash, so ESP-IDF's bootloader finds no app in it, but ${String(written.bytes)} of its bytes from offset ${offsetText(written.offset)} to ${offsetText(written.end)} are not erased flash; they are not read as an image.`;

@@ -60,8 +60,10 @@ cliTest(
       kind: "esp-flash-image",
       chip: { target: "esp32c3" },
       partition_table: { method: "default", md5: { status: "valid" } },
-      otadata: {
-        selected: { slot: 1, partition_index: 5, basis: "otadata" },
+      boot_selection: {
+        basis: "otadata",
+        slot: 1,
+        partition_index: 5,
         running_partition: "unknown",
       },
     });
@@ -114,6 +116,32 @@ cliTest(
     expect(unpaired.exitCode).not.toBe(0);
     expect(unpaired.stdout + unpaired.stderr).toContain(
       "flash_offset and partition_table_offset apply only with format=esp-flash-image",
+    );
+    // Without the format, the bootloader is read as one ESP image, and the
+    // table at file offset 0x7000 says how to reopen the dump.
+    const automatic = await cli.run({
+      arguments: ["inspect-artifact", source, "--json"],
+    });
+    expect(automatic.exitCode, automatic.stdout + automatic.stderr).toBe(0);
+    const guessed = rootMetadata(automatic.json);
+    expect(guessed.graph.manifest.root_format).toBe("esp-image");
+    expect(guessed.root).toMatchObject({
+      flash_dump: { flash_offset: 0x1000, table_file_offset: 0x7000 },
+    });
+    expect(
+      artifactInspectionResultSchema.parse(
+        parseEvidence(automatic.json).normalized_result,
+      ).next_probes,
+    ).toEqual([
+      {
+        operation: "open_binary",
+        rationale:
+          "Reopen the file with format esp-flash-image and flash_offset 0x1000, then inspect_artifact: it is a flash dump read from flash 0x1000, with a partition table at file offset 0x7000.",
+        authority: "artifact-bytes",
+      },
+    ]);
+    expect(guessed.graph.limitations).toContain(
+      "This file looks like a flash dump read from flash 0x1000, not one ESP image: its esp32 image at file offset 0 is where the ROM loads the bootloader from 0x1000, and a partition table sits at file offset 0x7000, which is flash 0x8000 from that origin. Reopen it with format esp-flash-image and flash_offset 0x1000.",
     );
     const inspected = await cli.run({
       arguments: [
