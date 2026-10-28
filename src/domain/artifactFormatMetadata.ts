@@ -290,12 +290,24 @@ export const espFlashPartitionMetadataSchema = z.strictObject({
   readonly: z.boolean(),
   /** Flag bits other than `encrypted` and `readonly`, which ESP-IDF ignores. */
   unknown_flags: uint32,
+  /**
+   * Observed in the bytes the dump holds, from the partition's start: the
+   * first byte that is not 0xFF and just past the last, null when every byte
+   * is erased, and how many bytes are not 0xFF. All null for a partition the
+   * dump holds none of.
+   */
+  written_offset: uint32.nullable(),
+  written_end: uint32.nullable(),
+  written_bytes: uint32.nullable(),
 });
 export type EspFlashPartitionMetadata = z.infer<
   typeof espFlashPartitionMetadataSchema
 >;
 
-/** What a partition entry declares; its index is layout. */
+/**
+ * What a partition entry declares; its index is layout, and the written
+ * fields are observed from its bytes, which content comparison covers.
+ */
 export const espFlashPartitionDeclaration = (
   metadata: EspFlashPartitionMetadata,
 ) => ({

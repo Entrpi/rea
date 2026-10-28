@@ -187,6 +187,50 @@ describe("ESP flash layout coverage and selection", () => {
     ).toBe(true);
   });
 
+  it("reports written bytes in an app slot the bootloader finds empty", async () => {
+    // ota_1's header is erased, but an older image sits 0x8000 into the slot.
+    const dump = espFlashDump({
+      bootloader: { at: 0, bytes: BOOTLOADER },
+      parts: [
+        { at: 0xd000, bytes: otaData(otaRecord({ seq: 1 })) },
+        { at: 0x1_0000, bytes: APP },
+        { at: 0x2_0000, bytes: APP },
+        { at: 0x3_8000, bytes: APP },
+      ],
+    });
+    const snapshot = await scanCanonicalArtifactInventory(
+      await writeDump(dump),
+    );
+    const indices = [...APP.keys()].filter((index) => APP[index] !== 0xff);
+    const start = 0x8000 + indices[0]!;
+    const end = 0x8000 + indices.at(-1)! + 1;
+    const row = (path: string) =>
+      snapshot.occurrences.find(({ logical_path }) => logical_path === path)
+        ?.format_metadata;
+    expect(row("partitions/ota_1.bin")).toMatchObject({
+      written_offset: start,
+      written_end: end,
+      written_bytes: indices.length,
+    });
+    const { apps } = root(snapshot) as {
+      apps: { partition_index: number; facts: { status: string } }[];
+    };
+    expect(
+      apps.find(({ partition_index: index }) => index === 5),
+    ).toMatchObject({
+      facts: { status: "erased" },
+    });
+    expect(snapshot.limitations).toContain(
+      `partitions/ota_1.bin begins with erased flash, so ESP-IDF's bootloader finds no app in it, but ${String(indices.length)} of its bytes from offset 0x${start.toString(16)} to 0x${end.toString(16)} are not erased flash; they are not read as an image.`,
+    );
+    // A partition erased throughout has no written bytes.
+    expect(row("partitions/nvs.bin")).toMatchObject({
+      written_offset: null,
+      written_end: null,
+      written_bytes: 0,
+    });
+  });
+
   it("reads a dump that starts at the caller's flash offset", async () => {
     const esp32 = espImage({
       segments: ESP32C3_BOOTLOADER_SEGMENTS,

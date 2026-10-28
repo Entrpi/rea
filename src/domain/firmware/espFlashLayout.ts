@@ -379,8 +379,29 @@ const otaFacts = (
   };
 };
 
-/** Flat entry metadata for one partition, as the table declares it. */
-export const espFlashPartitionFacts = (part: EspPartition) => ({
+/**
+ * Where the bytes of a partition the dump holds are not erased flash,
+ * relative to the partition's start: one range from the first such byte to
+ * just past the last, and how many such bytes there are.
+ */
+export interface EspFlashWrittenExtent {
+  /** The first byte that is not 0xFF, or null when every byte is. */
+  readonly offset: number | null;
+  /** Just past the last byte that is not 0xFF, or null. */
+  readonly end: number | null;
+  /** How many of the bytes are not 0xFF. */
+  readonly bytes: number;
+}
+
+/**
+ * Flat entry metadata for one partition: what the table declares, and where
+ * the bytes the dump holds are written. `written` is undefined for a
+ * partition the dump holds none of.
+ */
+export const espFlashPartitionFacts = (
+  part: EspPartition,
+  written?: EspFlashWrittenExtent,
+) => ({
   kind: "esp-flash-partition" as const,
   index: part.index,
   label: part.label,
@@ -394,4 +415,20 @@ export const espFlashPartitionFacts = (part: EspPartition) => ({
   encrypted: part.encrypted,
   readonly: part.readonly,
   unknown_flags: part.unknownFlags,
+  written_offset: written?.offset ?? null,
+  written_end: written?.end ?? null,
+  written_bytes: written?.bytes ?? null,
 });
+
+/**
+ * An app slot whose header bytes are erased holds no image for the
+ * bootloader, which then treats the slot as empty; bytes written later in
+ * it, such as an older image, are reported but not read as an image.
+ */
+export const espErasedSlotLimitation = (
+  path: string,
+  written: EspFlashWrittenExtent,
+): string | undefined =>
+  written.offset === null || written.end === null
+    ? undefined
+    : `${path} begins with erased flash, so ESP-IDF's bootloader finds no app in it, but ${String(written.bytes)} of its bytes from offset ${offsetText(written.offset)} to ${offsetText(written.end)} are not erased flash; they are not read as an image.`;

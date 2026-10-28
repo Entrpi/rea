@@ -4,12 +4,14 @@ import type { FileHandle } from "node:fs/promises";
 import type { EspFlashImageMetadata } from "../domain/artifactFormatMetadata.js";
 import { ESP_CHIP_TABLE_SOURCE } from "../domain/firmware/espChips.js";
 import {
+  espErasedSlotLimitation,
   espFlashPartitionFacts,
   finishEspFlashLayout,
   planEspFlashLayout,
   type EspFlashLayoutFacts,
   type EspFlashPlan,
   type EspFlashRegion,
+  type EspFlashWrittenExtent,
 } from "../domain/firmware/espFlashLayout.js";
 import {
   locateEspFlashLayout,
@@ -35,6 +37,7 @@ import {
   decodeEspFlashImage,
   firstUnerasedInRange,
   readEspFlashRange,
+  writtenExtent,
   type EspFlashReadContext,
 } from "./EspFlashRegionReads.js";
 import { readFileHandleChunks } from "../filesystem/readFileHandleChunks.js";
@@ -221,10 +224,11 @@ export class EspFlashImageArtifactReader implements ArtifactReader {
     const context: EspFlashReadContext = { handle, fileSize, signal };
     const facts = await this.#readFacts(context, plan);
     const images = await this.#decodeImages(context, plan);
+    const written = await this.#readWritten(context, plan);
     // A changed carrier is an identity failure, not a different layout.
     await this.#source.read(signal);
     for (const region of plan.regions) {
-      const entry = regionEntry(region);
+      const entry = regionEntry(region, written.get(region));
       this.#entries.set(entry.adapterKey, entry);
     }
     this.#metadata = layoutMetadata(location, plan, facts, images);
@@ -236,6 +240,7 @@ export class EspFlashImageArtifactReader implements ArtifactReader {
           ]
         : []),
       ...facts.limitations,
+      ...erasedSlotLimitations(images, written),
     ];
     if (facts.coverage === "unknown" || limitations.length > 0)
       this.#coverage = { status: facts.coverage, limitations };
@@ -284,6 +289,27 @@ export class EspFlashImageArtifactReader implements ArtifactReader {
       );
     }
     return finishEspFlashLayout(plan, { otadataRecords, gapFirstUnerased });
+  }
+
+  /** Where each partition the dump holds is not erased flash. */
+  async #readWritten(
+    context: EspFlashReadContext,
+    plan: EspFlashPlan,
+  ): Promise<ReadonlyMap<EspFlashRegion, EspFlashWrittenExtent>> {
+    const written = new Map<EspFlashRegion, EspFlashWrittenExtent>();
+    for (const region of plan.regions) {
+      if (region.partition === undefined) continue;
+      this.#assertOpen(context.signal);
+      written.set(
+        region,
+        await writtenExtent(
+          context,
+          { start: region.fileOffset, length: region.available },
+          () => this.#assertOpen(context.signal),
+        ),
+      );
+    }
+    return written;
   }
 
   /** ESP image facts for the bootloader region and each app partition. */
@@ -340,8 +366,27 @@ export class EspFlashImageArtifactReader implements ArtifactReader {
   }
 }
 
+/** App slots the bootloader finds empty that still hold written bytes. */
+const erasedSlotLimitations = (
+  images: ReadonlyMap<EspFlashRegion, EspFlashImageFacts>,
+  written: ReadonlyMap<EspFlashRegion, EspFlashWrittenExtent>,
+): string[] =>
+  [...images].flatMap(([region, image]) => {
+    const extent = written.get(region);
+    const limitation =
+      region.partition === undefined ||
+      image.status !== "erased" ||
+      extent === undefined
+        ? undefined
+        : espErasedSlotLimitation(region.path, extent);
+    return limitation === undefined ? [] : [limitation];
+  });
+
 /** One positional entry; a partition's declared flags stay metadata. */
-const regionEntry = (region: EspFlashRegion): ArtifactEntry => ({
+const regionEntry = (
+  region: EspFlashRegion,
+  written: EspFlashWrittenExtent | undefined,
+): ArtifactEntry => ({
   path: region.path,
   ...(region.partition?.label === null || region.partition === undefined
     ? {}
@@ -365,7 +410,7 @@ const regionEntry = (region: EspFlashRegion): ArtifactEntry => ({
   adapterKey: `esp-flash-image:${region.path}`,
   ...(region.partition === undefined
     ? {}
-    : { formatMetadata: espFlashPartitionFacts(region.partition) }),
+    : { formatMetadata: espFlashPartitionFacts(region.partition, written) }),
 });
 
 const layoutMetadata = (
@@ -416,7 +461,7 @@ const layoutMetadata = (
     },
     partitions_outside_dump: table.partitions
       .filter(({ index }) => !placed.has(index))
-      .map(espFlashPartitionFacts),
+      .map((part) => espFlashPartitionFacts(part)),
     apps: [...images].flatMap(([region, image]) =>
       region.partition === undefined
         ? []

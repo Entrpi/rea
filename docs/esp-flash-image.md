@@ -113,6 +113,15 @@ UTF-8), `label_hex` (the label's bytes when it is not UTF-8, else null),
 encryption stores the partition; it does not establish that the dump's
 bytes are ciphertext.
 
+Each partition entry also records where the bytes the dump holds are
+written, relative to the partition's start: `written_offset`, the first
+byte that is not erased flash (`0xFF`), `written_end`, just past the last
+such byte, and `written_bytes`, how many bytes are not `0xFF`. A partition
+erased throughout has null offsets and `written_bytes` `0`; a partition in
+`partitions_outside_dump` has all three null. The range bounds the written
+bytes and does not say whether erased flash lies between them; extract the
+partition to read them.
+
 ESP-IDF 5.3 and later may declare primary `bootloader` and `partition_table`
 entries over the bootloader region and the table sector. They are
 partitions like any other, whose bytes are also `bootloader.bin` and
@@ -135,6 +144,13 @@ image they hold the [ESP image](esp-image.md) root facts, `segments`,
 `signature_blocks`, `coverage` and `limitations`, with offsets relative to
 the region. Extract a partition and inspect it as an ESP image for its
 segments as entries.
+
+`erased` is the bootloader's view: with no image header at the start of the
+slot, it finds no app there. An erased slot can still hold data further in,
+such as a complete older app image that a previous partition layout placed
+there. When it does, its entry's `written_offset` and `written_end` say
+where, and a limitation says that the slot holds bytes the bootloader does
+not read; REA does not look for images in them.
 
 ### OTA data
 

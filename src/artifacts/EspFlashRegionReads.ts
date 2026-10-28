@@ -1,6 +1,7 @@
 import type { FileHandle } from "node:fs/promises";
 
 import type { EspFlashImageMetadata } from "../domain/artifactFormatMetadata.js";
+import type { EspFlashWrittenExtent } from "../domain/firmware/espFlashLayout.js";
 import {
   ESP8266_REFUSAL,
   createEspImageDecoder,
@@ -68,6 +69,32 @@ export const firstUnerasedInRange = async (
     position += chunk.length;
   }
   return undefined;
+};
+
+/** Read every byte of a region once and find where it is not erased. */
+export const writtenExtent = async (
+  context: EspFlashReadContext,
+  region: { readonly start: number; readonly length: number },
+  assertOpen: () => void,
+): Promise<EspFlashWrittenExtent> => {
+  let first = -1;
+  let last = -1;
+  let bytes = 0;
+  let position = 0;
+  if (region.length > 0)
+    for await (const chunk of chunks(context, region.start, region.length)) {
+      assertOpen();
+      for (let index = 0; index < chunk.length; index += 1)
+        if (chunk[index] !== 0xff) {
+          bytes += 1;
+          last = position + index;
+          if (first < 0) first = last;
+        }
+      position += chunk.length;
+    }
+  return first < 0
+    ? { offset: null, end: null, bytes: 0 }
+    : { offset: first, end: last + 1, bytes };
 };
 
 const noImage = (

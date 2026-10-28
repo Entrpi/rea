@@ -304,8 +304,9 @@ describe("ESP flash layout facts", () => {
     expect(facts.coverage).toBe("complete");
   });
 
-  it("projects a partition's declaration with ESP-IDF names", () => {
+  it("projects a partition's declaration with ESP-IDF names and where it is written", () => {
     const [nvs] = table(TWO_OTA_PARTITIONS).partitions;
+    // A partition the dump holds none of has no observed bytes.
     expect(espFlashPartitionFacts(nvs!)).toEqual({
       kind: "esp-flash-partition",
       index: 0,
@@ -320,6 +321,23 @@ describe("ESP flash layout facts", () => {
       encrypted: false,
       readonly: false,
       unknown_flags: 0,
+      written_offset: null,
+      written_end: null,
+      written_bytes: null,
+    });
+    expect(
+      espFlashPartitionFacts(nvs!, { offset: 0x40, end: 0x1000, bytes: 9 }),
+    ).toMatchObject({
+      written_offset: 0x40,
+      written_end: 0x1000,
+      written_bytes: 9,
+    });
+    expect(
+      espFlashPartitionFacts(nvs!, { offset: null, end: null, bytes: 0 }),
+    ).toMatchObject({
+      written_offset: null,
+      written_end: null,
+      written_bytes: 0,
     });
   });
 });
