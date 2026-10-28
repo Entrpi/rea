@@ -1,7 +1,7 @@
 import type {
-  RawArchitectureVariant,
+  ArchitectureVariant,
   RawEntryIsaMode,
-} from "../domain/rawArchitectureVariant.js";
+} from "../domain/architectureVariant.js";
 import type { RawBinaryLoad } from "../domain/binaryTargetTypes.js";
 import {
   isLegacyRawLoad,
@@ -18,16 +18,18 @@ export interface GhidraRawBinaryLanguage {
 /**
  * Ghidra decoder for each caller-named variant. `ARM:LE:32:Cortex` (the ARMv7
  * decoder with Thumb as the default state) has no ARMv8-M encodings such as
- * the MSPLIM and PSPLIM system registers, so v8-M variants use
- * `ARM:LE:32:v8-m`. Both languages share `ARMCortex.pspec`.
+ * the MSPLIM and PSPLIM system registers, so v8-M and v8.1-M variants use
+ * `ARM:LE:32:v8-m`, which Ghidra 12.1.4's `ARM.ldefs` also lists for
+ * `armv8.1-m.main`. Both languages share `ARMCortex.pspec`.
  */
-export const GHIDRA_RAW_VARIANT_LANGUAGES = {
+export const GHIDRA_VARIANT_LANGUAGES = {
   "armv6-m": "ARM:LE:32:Cortex",
   "armv7-m": "ARM:LE:32:Cortex",
   "armv7e-m": "ARM:LE:32:Cortex",
   "armv8-m.base": "ARM:LE:32:v8-m",
   "armv8-m.main": "ARM:LE:32:v8-m",
-} as const satisfies Record<RawArchitectureVariant, string>;
+  "armv8.1-m.main": "ARM:LE:32:v8-m",
+} as const satisfies Record<ArchitectureVariant, string>;
 
 /**
  * Ghidra context register and value that select each entry instruction set,
@@ -55,8 +57,8 @@ export const GHIDRA_RAW_ENTRY_CONTEXT = {
  * 0 those labels would fall inside the image and over the code after the table.
  * Admission reads the vector table itself. Undefined keeps the language default.
  */
-export const ghidraRawProcessorLabels = (
-  variant: RawArchitectureVariant | undefined,
+export const ghidraVariantProcessorLabels = (
+  variant: ArchitectureVariant | undefined,
 ): "not-applied-v1" | undefined =>
   variant === undefined ? undefined : "not-applied-v1";
 
@@ -70,11 +72,11 @@ export const ghidraRawProcessorLabels = (
  */
 export const ghidraRawBinaryLanguage = (
   architecture: RawBinaryAdmission["architecture"],
-  variant?: RawArchitectureVariant,
+  variant?: ArchitectureVariant,
 ): GhidraRawBinaryLanguage => {
   if (variant !== undefined)
     return {
-      languageId: GHIDRA_RAW_VARIANT_LANGUAGES[variant],
+      languageId: GHIDRA_VARIANT_LANGUAGES[variant],
       compilerSpecId: "default",
       defaultAddressSpace: "ram",
     };
@@ -123,6 +125,15 @@ export const ghidraRawBinaryLanguage = (
 const GENERIC_RAW_LANGUAGES =
   "Little-endian generic Ghidra languages are used for x86, x86_64, arm, arm64, and NMOS 6502; m68k uses the big-endian 68000 default language, which decodes the 68040 superset. Big-endian ARM, 65C02, 65816, separate 68020/68030/CPU32/ColdFire variants, and other processor variants are unsupported; ARM M-profile code needs architecture_variant.";
 
+/**
+ * Observed with Ghidra 12.1.4 on the verifier's Cortex-M55 image: WLS and LE
+ * decode with LLVM's mnemonics, but WLS branched 2 bytes short, LE branched 4
+ * bytes past the loop start, and LE had no fall-through, so the code after the
+ * loop was not disassembled.
+ */
+const GHIDRA_LOW_OVERHEAD_LOOPS =
+  "Ghidra 12.1.4 decodes the ARMv8.1-M low-overhead-loop branches WLS and LE, but their targets can be wrong and LE has no fall-through, so code after such a loop may be left undisassembled.";
+
 /** Limitations that every result from a raw-binary session carries. */
 export const ghidraRawBinaryLimitations = (
   load: RawBinaryLoad,
@@ -139,6 +150,9 @@ export const ghidraRawBinaryLimitations = (
         load.architectureVariant === undefined
           ? GENERIC_RAW_LANGUAGES
           : `The caller-named ${load.architectureVariant} variant is decoded with ${language.languageId} in Thumb state. The decoder does not refuse instructions that this profile lacks, and floating-point and TrustZone state are not modeled.`,
+        ...(load.architectureVariant === "armv8.1-m.main"
+          ? [GHIDRA_LOW_OVERHEAD_LOOPS]
+          : []),
         ...(load.entrySource.kind === "vector-table"
           ? [
               `The entry is the Reset vector ${load.entrySource.resetVector} read from the vector table at ${load.entrySource.address}, with bit 0 cleared. The initial stack pointer ${load.entrySource.initialStackPointer} is recorded and not validated.`,

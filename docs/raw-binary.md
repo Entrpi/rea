@@ -115,19 +115,24 @@ rea inspect /absolute/path/to/dump.bin --target-format raw-binary --architecture
 
 `architecture_variant` names the M profile and selects the Ghidra decoder:
 
-| architecture_variant | Profile          | language_id        | compiler_spec_id |
-| -------------------- | ---------------- | ------------------ | ---------------- |
-| `armv6-m`            | ARMv6-M          | `ARM:LE:32:Cortex` | `default`        |
-| `armv7-m`            | ARMv7-M          | `ARM:LE:32:Cortex` | `default`        |
-| `armv7e-m`           | ARMv7E-M         | `ARM:LE:32:Cortex` | `default`        |
-| `armv8-m.base`       | ARMv8-M Baseline | `ARM:LE:32:v8-m`   | `default`        |
-| `armv8-m.main`       | ARMv8-M Mainline | `ARM:LE:32:v8-m`   | `default`        |
+| architecture_variant | Profile            | language_id        | compiler_spec_id |
+| -------------------- | ------------------ | ------------------ | ---------------- |
+| `armv6-m`            | ARMv6-M            | `ARM:LE:32:Cortex` | `default`        |
+| `armv7-m`            | ARMv7-M            | `ARM:LE:32:Cortex` | `default`        |
+| `armv7e-m`           | ARMv7E-M           | `ARM:LE:32:Cortex` | `default`        |
+| `armv8-m.base`       | ARMv8-M Baseline   | `ARM:LE:32:v8-m`   | `default`        |
+| `armv8-m.main`       | ARMv8-M Mainline   | `ARM:LE:32:v8-m`   | `default`        |
+| `armv8.1-m.main`     | ARMv8.1-M Mainline | `ARM:LE:32:v8-m`   | `default`        |
 
 `ARM:LE:32:Cortex` is Ghidra's ARMv7 decoder with Thumb as the default state. It
 has no ARMv8-M encodings, such as the `MSPLIM` and `PSPLIM` system registers that
-v8-M startup code sets, so the v8-M variants use `ARM:LE:32:v8-m`. Neither
-decoder refuses instructions that a smaller profile lacks: `armv6-m` code is
-decoded with the ARMv7-M instruction set.
+v8-M startup code sets, so the v8-M and v8.1-M variants use `ARM:LE:32:v8-m`.
+Ghidra 12.1.4's `ARM.ldefs` lists `armv8.1-m.main` for that language, which also
+decodes ARMv8.1-M encodings such as MVE and the low-overhead loops (`wls`, `le`);
+the loop branches' flow is wrong, as Limitations describes.
+Neither decoder refuses instructions that a smaller profile lacks: `armv6-m`
+code is decoded with the ARMv7-M instruction set, and `armv8-m.main` code with
+the ARMv8.1-M one.
 
 - `base_address` maps file offset 0 at its own address, and `entry_point` must
   then lie inside the mapped image. It is accepted only with
@@ -217,7 +222,9 @@ This is decision D1 of the embedded-target work, raised in
   Ghidra's processor-defined labels not applied to variant loads.
 - **Alternatives.** A single `processor_variant: "cortex-m"` value
   ([#4927](https://github.com/morluto/rea/pull/4927)) cannot select the v8-M
-  decoder. A language passthrough with a base (#4246, option C) exposes provider
+  decoder. Folding ARMv8.1-M into `armv8-m.main` would use the same decoder but
+  drop the profile from identity, and splitting it out later would change
+  identity again. A language passthrough with a base (#4246, option C) exposes provider
   language ids in a provider-neutral contract. Masking odd entries hides the
   caller's value; refusing first keeps accepting them a later, additive change.
   A `role` that records how the entry was chosen mixes provenance with what the
@@ -230,8 +237,8 @@ This is decision D1 of the embedded-target work, raised in
   separate base for every raw family is a later, additive widening; it needs
   base-separated cases in the 6502 and m68k lanes and on Windows Ghidra P0,
   which admits raw 6502.
-- **Owner and consumers.** `src/domain/rawArchitectureVariant.ts` owns the
-  vocabulary; `GHIDRA_RAW_VARIANT_LANGUAGES` owns the Ghidra mapping, which
+- **Owner and consumers.** `src/domain/architectureVariant.ts` owns the
+  vocabulary; `GHIDRA_VARIANT_LANGUAGES` owns the Ghidra mapping, which
   follows the GNU architecture names in Ghidra 12.1.4's `ARM.ldefs`; raw
   admission owns the load, its legacy equivalence, the entry's role and basis,
   and its `raw_load` identity; the Ghidra profile owns the coordinate context
@@ -321,6 +328,11 @@ exercised.
   processor-defined vector labels are not applied, so other vectors are neither
   entries nor labels. Floating-point state, TrustZone and device memory maps are
   not modelled.
+- Ghidra 12.1.4 decodes the ARMv8.1-M low-overhead-loop branches `wls` and `le`
+  with the right mnemonics, but not their flow. In the verifier's Cortex-M55
+  image, `wls` branched 2 bytes short of its target, `le` branched 4 bytes past
+  the loop start, and `le` had no fall-through. Code after such a loop may be
+  left undisassembled; `armv8.1-m.main` results say so.
 - Reset vectors, memory-mapped I/O, and firmware boot sequences are not
   emulated.
 - Independent load-image verification covers source identity, mapped file

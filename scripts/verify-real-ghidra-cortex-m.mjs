@@ -21,13 +21,15 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 import { parseAnalysisSnapshot } from "../dist/domain/analysisSnapshot.js";
 import { parseEvidence } from "../dist/domain/evidence.js";
-import { GHIDRA_RAW_VARIANT_LANGUAGES } from "../dist/ghidra/GhidraRawBinaryLanguage.js";
+import { GHIDRA_VARIANT_LANGUAGES } from "../dist/ghidra/GhidraRawBinaryLanguage.js";
 import {
   CORTEX_M0_SOURCE,
+  CORTEX_M55_SOURCE,
   THUMB2_SOURCE,
   V8M_BASELINE_SOURCE,
   V8M_MSPLIM_SOURCE,
   cortexM0Fixture,
+  cortexM55Fixture,
   thumb2Fixture,
   v8mBaselineFixture,
   v8mMsplimFixture,
@@ -70,6 +72,7 @@ for (const source of [
   THUMB2_SOURCE,
   V8M_BASELINE_SOURCE,
   V8M_MSPLIM_SOURCE,
+  CORTEX_M55_SOURCE,
 ])
   oracle.set(source, await llvmThumbMnemonics(source, llvm));
 
@@ -170,6 +173,23 @@ try {
       stackPointer: 0x20002000,
     }),
   );
+  // A Cortex-M55 loop: WLS/LE around MVE, which only ARMv8.1-M has. Base 0
+  // also puts the v8-m decoder where ARMCortex.pspec would label the table.
+  // Ghidra 12.1.4 decodes WLS and LE, but places their targets wrongly and
+  // gives LE no fall-through, so the pop after the loop is not disassembled.
+  // The results carry that limitation; the case records both branches' flow.
+  cases.push(
+    await verifyCase({
+      name: "armv8.1-m.main-m55",
+      variant: "armv8.1-m.main",
+      base: 0,
+      bytes: cortexM55Fixture(0),
+      source: CORTEX_M55_SOURCE,
+      stackPointer: 0x20005000,
+      notDisassembled: [0x5c],
+      loopBranches: [0x46, 0x58],
+    }),
+  );
   const identity = await verifyIdentityAndSnapshots();
   assert.deepEqual(
     (await readdir(runtime)).filter((name) => name.startsWith("rea-ghidra-")),
@@ -242,10 +262,7 @@ async function verifyCase(fixture) {
   assert.equal(loaded.status, "verified", JSON.stringify(image));
   assert.equal(loaded.variant, "segments");
   assert.equal(loaded.version, 1);
-  assert.equal(
-    loaded.language_id,
-    GHIDRA_RAW_VARIANT_LANGUAGES[fixture.variant],
-  );
+  assert.equal(loaded.language_id, GHIDRA_VARIANT_LANGUAGES[fixture.variant]);
   assert.deepEqual(loaded.segments, [
     {
       name: "image",
@@ -294,8 +311,9 @@ async function verifyCase(fixture) {
     memory.normalized_result.bytes_hex,
     fixture.bytes.toString("hex"),
   );
-  await verifyDecoding(fixture, address, digest);
+  const { loopBranches } = await verifyDecoding(fixture, address, digest);
   await verifyOddEntryAndCli(fixture, selection, image, path);
+  const notDisassembled = (fixture.notDisassembled ?? []).map(address);
   return {
     name: fixture.name,
     variant: fixture.variant,
@@ -305,16 +323,57 @@ async function verifyCase(fixture) {
     language_id: loaded.language_id,
     thumb_entry_context: true,
     only_entry: entry,
-    llvm_mnemonics_matched: oracle.get(fixture.source).size,
+    llvm_mnemonics_matched:
+      oracle.get(fixture.source).size - notDisassembled.length,
+    ...(notDisassembled.length === 0
+      ? {}
+      : { not_disassembled: notDisassembled }),
+    ...(loopBranches.length === 0 ? {} : { loop_branches: loopBranches }),
     odd_entry_refused: true,
     cli_mcp_parity: true,
   };
+}
+
+/**
+ * One spelling for both decoders, which write an encoding width (ldr.w) and an
+ * IT-block condition (Ghidra mov.eq, LLVM moveq) differently.
+ */
+function canonicalMnemonic(name) {
+  return name
+    ?.toLowerCase()
+    .replace(/\.[nw]$/u, "")
+    .replace(/\.(eq|ne|cs|hs|cc|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le|al)$/u, "$1");
+}
+
+/**
+ * Whether Ghidra and LLVM name the same instruction. A data type that gives
+ * only the element size (Ghidra vldrw.32) matches one that adds signedness
+ * (LLVM vldrw.u32); opposite signedness does not.
+ */
+function sameMnemonic(ghidra, llvm) {
+  const left = canonicalMnemonic(ghidra) ?? "";
+  const right = canonicalMnemonic(llvm) ?? "";
+  if (left === right) return true;
+  const typed = /^(.+)\.([su]?)(8|16|32|64)$/u;
+  const a = typed.exec(left);
+  const b = typed.exec(right);
+  return (
+    a !== null &&
+    b !== null &&
+    a[1] === b[1] &&
+    a[3] === b[3] &&
+    (a[2] === "" || b[2] === "")
+  );
 }
 
 /** Ghidra's decoding at every oracle offset, in Thumb state, and its functions. */
 async function verifyDecoding(fixture, address, digest) {
   const prefix = fixture.prefix ?? 0;
   const entry = address(0x40);
+  // Offsets the case expects Ghidra's analysis not to reach.
+  const unreached = new Set(fixture.notDisassembled ?? []);
+  // Collect every disagreement so one run reports them all.
+  const disagreements = [];
   for (const [offset, mnemonic] of oracle.get(fixture.source)) {
     const decoded = (
       await call(
@@ -323,28 +382,36 @@ async function verifyDecoding(fixture, address, digest) {
         digest,
       )
     ).normalized_result;
-    assert.equal(decoded.status, "decoded", JSON.stringify(decoded));
-    // The decoders spell an encoding width (ldr.w) and an IT-block condition
-    // (Ghidra mov.eq, LLVM moveq) differently; compare one spelling.
-    const canonical = (name) =>
-      name
-        ?.toLowerCase()
-        .replace(/\.[nw]$/u, "")
-        .replace(
-          /\.(eq|ne|cs|hs|cc|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le|al)$/u,
-          "$1",
-        );
-    assert.equal(
-      canonical(decoded.mnemonic),
-      canonical(mnemonic),
-      `${fixture.name} ${address(offset)}: Ghidra ${decoded.raw_disassembly}, LLVM ${mnemonic}`,
-    );
-    assert.equal(
-      decoded.decoder_context?.find((context) => context.register === "TMode")
-        ?.value,
-      "1",
-    );
+    if (unreached.has(offset)) {
+      if (decoded.status !== "undecodable")
+        disagreements.push({
+          address: address(offset),
+          llvm: mnemonic,
+          ghidra: decoded.raw_disassembly ?? decoded.status,
+          expected: "not disassembled",
+        });
+      continue;
+    }
+    const tmode = decoded.decoder_context?.find(
+      (context) => context.register === "TMode",
+    )?.value;
+    if (
+      decoded.status !== "decoded" ||
+      !sameMnemonic(decoded.mnemonic, mnemonic) ||
+      tmode !== "1"
+    )
+      disagreements.push({
+        address: address(offset),
+        llvm: mnemonic,
+        ghidra: decoded.raw_disassembly ?? decoded.status,
+        tmode,
+      });
   }
+  assert.deepEqual(
+    disagreements,
+    [],
+    `${fixture.name}: ${JSON.stringify(disagreements)}`,
+  );
   const procedures = await call("list_procedures", {}, digest);
   assert.ok(
     procedures.normalized_result.some((item) => item.address === entry),
@@ -380,6 +447,28 @@ async function verifyDecoding(fixture, address, digest) {
     );
     assert.equal(byOffset.normalized_result, helper.normalized_result);
   }
+  // Ghidra's flow for the low-overhead-loop branches, recorded as evidence for
+  // the limitation that armv8.1-m.main results carry.
+  const loopBranches = [];
+  for (const offset of fixture.loopBranches ?? []) {
+    const evidence = await call(
+      "inspect_native_instruction",
+      { address: address(offset) },
+      digest,
+    );
+    assert.ok(
+      evidence.limitations.some((text) => text.includes("low-overhead-loop")),
+      `${fixture.name}: results omit the low-overhead-loop limitation`,
+    );
+    const { raw_disassembly: disassembly, flow } = evidence.normalized_result;
+    loopBranches.push({
+      address: address(offset),
+      disassembly,
+      conditional: flow.conditional,
+      destinations: flow.direct_destinations,
+    });
+  }
+  return { loopBranches };
 }
 
 /** Refuse an odd entry with its code address, keep the session, and match the CLI. */

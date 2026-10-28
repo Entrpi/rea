@@ -158,3 +158,44 @@ done:
   bx lr
 `,
 };
+
+const CORTEX_M55_CODE =
+  "10b50020042141f009c892ed001f21f001e883ed001f01300ff009c810bd";
+
+/**
+ * Image offsets:
+ *   00 initial stack pointer, 04 odd reset vector, 08..3f reserved vectors
+ *   40 push {r4,lr}; 42 movs r0,#0; 44 movs r1,#4; 46 wls lr,r1,done
+ *   4a loop: vldrw.u32 q0,[r2]; 4e vctp.32 r1; 52 vstrw.32 q0,[r3]
+ *   56 adds r0,#1; 58 le lr,loop; 5c done: pop {r4,pc}
+ * The WLS/LE low-overhead loop exists only from ARMv8.1-M, and the MVE load,
+ * store and VCTP only with its M-profile Vector Extension, as on Cortex-M55.
+ * MVE builds use the hard-float ABI; clang 19 refuses MVE without it.
+ */
+export const cortexM55Fixture = (base) =>
+  codeImage(base, 0x20005000, CORTEX_M55_CODE, 0x60);
+
+export const CORTEX_M55_SOURCE = {
+  triple: "thumbv8.1m.main-none-eabi",
+  cpu: "cortex-m55",
+  floatAbi: "hard",
+  codeOffset: 0x40,
+  code: CORTEX_M55_CODE,
+  source: `
+  .syntax unified
+  .thumb
+  .text
+  push {r4, lr}
+  movs r0, #0
+  movs r1, #4
+  wls lr, r1, done
+loop:
+  vldrw.u32 q0, [r2]
+  vctp.32 r1
+  vstrw.32 q0, [r3]
+  adds r0, #1
+  le lr, loop
+done:
+  pop {r4, pc}
+`,
+};

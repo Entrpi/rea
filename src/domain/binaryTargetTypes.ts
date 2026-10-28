@@ -1,8 +1,8 @@
 import type { DolHeader } from "./gamecubeDol.js";
 import type {
-  RawArchitectureVariant,
+  ArchitectureVariant,
   RawEntryIsaMode,
-} from "./rawArchitectureVariant.js";
+} from "./architectureVariant.js";
 import type { ZipPackageFormat } from "./zipPackageFormat.js";
 
 /** Provider-neutral CPU families detected from headers or explicitly selected raw loads. */
@@ -53,7 +53,7 @@ export interface RawBinaryLoad {
   /** Canonical address of file offset 0. */
   readonly baseAddress: string;
   /** Caller-named profile variant; absent for the family's generic decoder. */
-  readonly architectureVariant?: RawArchitectureVariant;
+  readonly architectureVariant?: ArchitectureVariant;
   /** Canonical code entry. */
   readonly entryPoint: string;
   /** Instruction set at the entry, when the variant fixes one. */

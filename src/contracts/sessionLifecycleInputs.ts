@@ -11,7 +11,7 @@ import {
   rawBinaryVectorTableAddressSchema,
   type NativeLoadSelection,
 } from "../domain/rawBinary.js";
-import { rawArchitectureVariantSchema } from "../domain/rawArchitectureVariant.js";
+import { architectureVariantSchema } from "../domain/architectureVariant.js";
 import { z } from "zod";
 import {
   espFlashAddressSchema,
@@ -81,7 +81,7 @@ export const openBinaryInputSchema = z
       .describe(
         "Address of raw file offset 0 (0xhex) for an architecture_variant image, separate from entry_point. Defaults to entry_point. Only with format=raw-binary.",
       ),
-    architecture_variant: rawArchitectureVariantSchema
+    architecture_variant: architectureVariantSchema
       .optional()
       .describe(
         "ARM M-profile variant of a raw image (raw dumps do not record it). Requires format=raw-binary and architecture=arm. Code is decoded in Thumb state; an odd entry_point is refused.",

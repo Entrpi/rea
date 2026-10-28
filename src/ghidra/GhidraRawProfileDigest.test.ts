@@ -6,14 +6,14 @@ import type {
   RawBinaryLoad,
 } from "../domain/binaryTargetTypes.js";
 import {
-  RAW_ARCHITECTURE_VARIANT_NAMES,
-  type RawArchitectureVariant,
-} from "../domain/rawArchitectureVariant.js";
+  ARCHITECTURE_VARIANT_NAMES,
+  type ArchitectureVariant,
+} from "../domain/architectureVariant.js";
 import {
   admittedRawLoad,
   vectorTableWords,
 } from "../domain/rawBinary.fixture.js";
-import { GHIDRA_RAW_VARIANT_LANGUAGES } from "./GhidraRawBinaryLanguage.js";
+import { GHIDRA_VARIANT_LANGUAGES } from "./GhidraRawBinaryLanguage.js";
 import { silentLogger } from "../logger.js";
 import { ghidraProfileInstallationHost as host } from "./GhidraInstallation.fixture.js";
 import { GhidraProvider } from "./GhidraProvider.js";
@@ -150,7 +150,7 @@ describe("M-profile raw-binary analysis profile", () => {
     return resolved.value.profile;
   };
   const reset = (
-    variant: RawArchitectureVariant,
+    variant: ArchitectureVariant,
     selection: { baseAddress?: string; vectorTableAddress?: string } = {},
   ) =>
     admittedRawLoad(
@@ -179,12 +179,12 @@ describe("M-profile raw-binary analysis profile", () => {
     expect(legacy.parameters).not.toHaveProperty("raw_load");
   });
 
-  it.each(RAW_ARCHITECTURE_VARIANT_NAMES)(
+  it.each(ARCHITECTURE_VARIANT_NAMES)(
     "commits the %s decoder, Thumb entry context and raw_load",
     async (variant) => {
       const committed = await profile(reset(variant));
       expect(committed.parameters).toMatchObject({
-        language_id: GHIDRA_RAW_VARIANT_LANGUAGES[variant],
+        language_id: GHIDRA_VARIANT_LANGUAGES[variant],
         compiler_spec_id: "default",
         load_image_evidence: "independent-raw-segments-v1",
         entry_point: "0x80001c4",

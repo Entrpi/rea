@@ -1479,8 +1479,8 @@ this real-provider lane. See [raw binary analysis](raw-binary.md).
 
 `npm run verify:ghidra:cortex-m` checks ARM M-profile raw images through the
 compiled CLI and stdio MCP server. It needs Ghidra 12.1.4, a full JDK 21, and
-LLVM with Thumb targets (`clang` and `llvm-objdump`, or `REA_CLANG` and
-`REA_LLVM_OBJDUMP`). Its source-owned fixtures are:
+LLVM with Thumb targets and the Cortex-M55 CPU (`clang` and `llvm-objdump`, or
+`REA_CLANG` and `REA_LLVM_OBJDUMP`). Its source-owned fixtures are:
 
 - a Cortex-M0 (`armv6-m`) image at bases `0x0` and `0x08000000`;
 - the same image after a 256-byte boot2-style header, opened with
@@ -1488,10 +1488,16 @@ LLVM with Thumb targets (`clang` and `llvm-objdump`, or `REA_CLANG` and
 - a Thumb-2 image (`movw`, `movt`, `ldr.w`, `it`, `cbz`) opened as `armv7-m` at
   `0x0` and as `armv7e-m` at `0x08000000`;
 - an `armv8-m.base` image with `movw`, `movt`, `cbz` and `udiv`;
-- an `armv8-m.main` image that sets `MSPLIM`.
+- an `armv8-m.main` image that sets `MSPLIM`;
+- an `armv8.1-m.main` (Cortex-M55) image at `0x0` with a `wls`/`le`
+  low-overhead loop around the MVE instructions `vldrw`, `vctp` and `vstrw`.
+  Ghidra 12.1.4 does not follow the loop's exits, so for this image the lane
+  requires the code after the loop to stay undisassembled, records both loop
+  branches' flow, and checks that the results report the limitation.
 
 LLVM assembles each fixture's annotated source to the same bytes and names each
-instruction; Ghidra must decode the same mnemonics in Thumb state. The lane
+instruction, with `-mcpu=cortex-m55 -mfloat-abi=hard` for the MVE fixture;
+Ghidra must decode the same mnemonics in Thumb state. The lane
 also checks:
 
 - the Reset-derived entry, and that it is the only entry Ghidra reports;

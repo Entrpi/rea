@@ -124,7 +124,7 @@ import {
   GHIDRA_RAW_ENTRY_CONTEXT,
   ghidraRawBinaryLanguage,
   ghidraRawBinaryLimitations,
-  ghidraRawProcessorLabels,
+  ghidraVariantProcessorLabels,
 } from "./GhidraRawBinaryLanguage.js";
 import { ghidraDolLanguage, ghidraDolSectionFile } from "./GhidraDolProfile.js";
 
@@ -488,7 +488,7 @@ export const createGhidraProviderClient = (input: {
                       GHIDRA_RAW_ENTRY_CONTEXT[target.rawLoad.entryIsaMode],
                   }),
               // The profile commits the same label policy.
-              ...(ghidraRawProcessorLabels(
+              ...(ghidraVariantProcessorLabels(
                 target.rawLoad.architectureVariant,
               ) === undefined
                 ? {}
