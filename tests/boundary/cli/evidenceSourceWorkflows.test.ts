@@ -62,6 +62,8 @@ const wasmInspection = (parameter: "i32" | "i64"): Evidence => {
   );
 };
 
+const wasmLeft = wasmInspection("i32");
+
 /**
  * Each tool naming Evidence through the shared source contract, with its CLI
  * command: one taking the request JSON, or one taking each source as a saved
@@ -94,11 +96,7 @@ const workflows: readonly {
   {
     tool: "compare_wasm_interfaces",
     command: "compare-wasm-interfaces",
-    input: {
-      left: wasmInspection("i32"),
-      right: wasmInspection("i64"),
-      scope: "both",
-    },
+    input: { left: wasmLeft, right: wasmInspection("i64"), scope: "both" },
     sources: ["left", "right"],
   },
   {
@@ -142,13 +140,13 @@ const workflows: readonly {
 /** Replace each source of a workflow's inline request with another form. */
 const withSources = (
   workflow: (typeof workflows)[number],
-  form: (record: Evidence) => unknown,
+  form: (record: Evidence, field: string) => unknown,
 ): Record<string, unknown> => ({
   ...workflow.input,
   ...Object.fromEntries(
     workflow.sources.map((field) => [
       field,
-      form(parseEvidence(workflow.input[field])),
+      form(parseEvidence(workflow.input[field]), field),
     ]),
   ),
 });
@@ -231,6 +229,21 @@ cliTest(
         ],
       ] as const)
         expect(await mcp(input), `${workflow.tool} ${form}`).toBe(inline);
+      // Each side of one request can use a different form.
+      if (workflow.sources.length > 1)
+        expect(
+          await mcp(
+            withSources(workflow, ({ evidence_id }, field) =>
+              field === "right"
+                ? { kind: "retained-evidence", evidence_id }
+                : {
+                    kind: "evidence-file",
+                    path: join(root, `${evidence_id}.json`),
+                  },
+            ),
+          ),
+          `${workflow.tool} file and retained`,
+        ).toBe(inline);
       if (workflow.fileCommand !== undefined) {
         const files = workflow.sources.map(
           (field) => `${parseEvidence(workflow.input[field]).evidence_id}.json`,
@@ -291,6 +304,28 @@ cliTest(
       details: {
         operation: "compare_functions",
         issues: [expect.objectContaining({ path: ["right", "evidence_id"] })],
+      },
+    });
+    // Evidence of another kind, read from a file, is refused at its field.
+    const wrongKind = await call("compare_wasm_interfaces", {
+      left: {
+        kind: "evidence-file",
+        path: join(root, `${wasmLeft.evidence_id}.json`),
+      },
+      right: {
+        kind: "evidence-file",
+        path: join(
+          root,
+          `${FUNCTION_COMPARISON_EXAMPLE.right.evidence_id}.json`,
+        ),
+      },
+      scope: "both",
+    });
+    expect(parseMcpToolError(wrongKind).error).toMatchObject({
+      code: "invalid_request",
+      details: {
+        operation: "compare_wasm_interfaces",
+        issues: [expect.objectContaining({ path: ["right"] })],
       },
     });
     // inspect_analysis_view names its own source field through the same reader.

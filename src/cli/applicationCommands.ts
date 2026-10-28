@@ -1,21 +1,21 @@
 import { Cli, z } from "incur";
 
-import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { CLI_COMMANDS } from "../cliCommandNames.js";
-import { parseCliJsonInput, resolveCliJsonPaths } from "../cliJsonInput.js";
+import { parseCliJsonInput } from "../cliJsonInput.js";
 import { logCliCommand } from "../cliLogging.js";
-import { traceJavaScriptSemanticsRequestSchema } from "../contracts/javascript/applicationWorkflowInputContracts.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
-import type { Evidence } from "../domain/evidence.js";
+import {
+  APPLICATION_EVIDENCE_SOURCE,
+  PAIRED_EVIDENCE_SOURCES,
+} from "../domain/evidenceReference.js";
 import { JAVASCRIPT_APPLICATION_WORKFLOW_PROVIDER } from "../domain/investigationProviders.js";
 import type { JsonValue } from "../domain/jsonValue.js";
-import { ok, type Result } from "../domain/result.js";
+import { ok } from "../domain/result.js";
 import type { Logger } from "pino";
+import { registerEvidenceSourceCommand } from "./evidenceSourceCommand.js";
 import { registerSourceToBundleCommand } from "./sourceToBundleCommand.js";
 import { analysisInputErrorFromIssues } from "../domain/inputIssueProjection.js";
-import { withCommandCancellation } from "./commandCancellation.js";
-import { finishAnalysisCommand } from "./finishAnalysisCommand.js";
 
 type CliInstance = ReturnType<typeof Cli.create>;
 
@@ -108,15 +108,15 @@ const registerJavaScriptWorkflowCommands = (
   cli: CliInstance,
   logger: Logger,
 ): void => {
-  registerEvidenceSourceCommand({
-    cli,
-    logger,
+  const providerId = JAVASCRIPT_APPLICATION_WORKFLOW_PROVIDER.id;
+  registerEvidenceSourceCommand(cli, logger, {
     name: CLI_COMMANDS.traceApplicationFeature,
     operation: "trace_application_feature",
+    providerId,
     description:
-      "Trace a typed seed through authenticated application Evidence JSON",
+      'Trace a typed seed through authenticated application Evidence, inline or {kind:"evidence-file",path,evidence_id?}',
     inputSchema: z.unknown(),
-    sources: ["application"],
+    sources: APPLICATION_EVIDENCE_SOURCE,
     workflow: async (input, options) => {
       const { traceApplicationFeatureEvidence } =
         await import("../application/javascript/JavaScriptApplicationWorkflowService.js");
@@ -128,43 +128,33 @@ const registerJavaScriptWorkflowCommands = (
       return result.ok ? ok(result.value.evidence) : result;
     },
   });
-  registerEvidenceSourceCommand({
-    cli,
-    logger,
+  registerEvidenceSourceCommand(cli, logger, {
     name: CLI_COMMANDS.traceJavaScriptSemantics,
     operation: "trace_javascript_semantics",
+    providerId,
     description:
-      "Trace bounded static semantic relations through authenticated application Evidence",
-    inputSchema: traceJavaScriptSemanticsRequestSchema,
-    sources: ["application"],
+      'Trace bounded static semantic relations through authenticated application Evidence, inline or {kind:"evidence-file",path,evidence_id?}',
+    inputSchema: z.unknown(),
+    sources: APPLICATION_EVIDENCE_SOURCE,
     workflow: async (input, options) => {
-      const [
-        { resolveEvidenceSources },
-        { traceJavaScriptSemanticsEvidenceValidated },
-      ] = await Promise.all([
-        import("../application/EvidenceInputResolver.js"),
-        import("../application/javascript/JavaScriptSemanticTraceService.js"),
-      ]);
-      const resolved = await resolveEvidenceSources(
+      const { traceJavaScriptSemanticsEvidence } =
+        await import("../application/javascript/JavaScriptSemanticTraceService.js");
+      const result = await traceJavaScriptSemanticsEvidence(
         input,
-        ["application"],
         undefined,
-        { ...options, operation: "trace_javascript_semantics" },
+        options,
       );
-      return resolved.ok
-        ? traceJavaScriptSemanticsEvidenceValidated(resolved.value)
-        : resolved;
+      return result.ok ? ok(result.value.evidence) : result;
     },
   });
-  registerEvidenceSourceCommand({
-    cli,
-    logger,
+  registerEvidenceSourceCommand(cli, logger, {
     name: CLI_COMMANDS.compareApplicationVersions,
     operation: "compare_application_versions",
+    providerId,
     description:
-      "Compare two authenticated JavaScript Application Graph versions",
+      'Compare two authenticated JavaScript Application Graph versions, each inline or {kind:"evidence-file",path,evidence_id?}',
     inputSchema: z.unknown(),
-    sources: ["left", "right"],
+    sources: PAIRED_EVIDENCE_SOURCES,
     workflow: async (input, options) => {
       const { compareApplicationVersionsEvidence } =
         await import("../application/javascript/JavaScriptApplicationWorkflowService.js");
@@ -177,15 +167,14 @@ const registerJavaScriptWorkflowCommands = (
     },
   });
   registerSourceToBundleCommand(cli, logger);
-  registerEvidenceSourceCommand({
-    cli,
-    logger,
+  registerEvidenceSourceCommand(cli, logger, {
     name: CLI_COMMANDS.compareJavaScriptExportShapes,
     operation: "compare_javascript_export_shapes",
+    providerId,
     description:
-      "Compare exact static JavaScript export return shapes without execution",
+      'Compare exact static JavaScript export return shapes without execution; each side inline or {kind:"evidence-file",path,evidence_id?}',
     inputSchema: z.unknown(),
-    sources: ["left", "right"],
+    sources: PAIRED_EVIDENCE_SOURCES,
     workflow: async (input, options) => {
       const { compareJavaScriptExportShapesEvidence } =
         await import("../application/javascript/JavaScriptApplicationWorkflowService.js");
@@ -196,73 +185,6 @@ const registerJavaScriptWorkflowCommands = (
       );
       return result.ok ? ok(result.value.evidence) : result;
     },
-  });
-};
-
-interface EvidenceSourceCommandOptions<Schema extends z.ZodType> {
-  readonly cli: CliInstance;
-  readonly logger: Logger;
-  readonly name: string;
-  readonly operation: string;
-  readonly description: string;
-  readonly inputSchema: Schema;
-  /** Request fields naming Evidence, inline or as a relative or absolute Evidence file. */
-  readonly sources: readonly string[];
-  readonly workflow: (
-    input: z.output<Schema>,
-    options: {
-      readonly signal: AbortSignal;
-      readonly resources: ArtifactResourceScope;
-    },
-  ) => Promise<Result<Evidence, AnalysisError>>;
-}
-
-/** Resolve Evidence-file paths from the working directory; the command owns the files it reads. */
-const registerEvidenceSourceCommand = <Schema extends z.ZodType>({
-  cli,
-  logger,
-  name,
-  operation,
-  description,
-  inputSchema,
-  sources,
-  workflow,
-}: EvidenceSourceCommandOptions<Schema>): void => {
-  cli.command(name, {
-    description,
-    args: z.object({
-      inputJson: z.string().describe("Inline workflow JSON or JSON file path"),
-    }),
-    run: ({ args }) =>
-      withCommandCancellation((signal) =>
-        logCliCommand(logger, name, async () => {
-          const input = await parseCliJsonInput(args.inputJson, name, signal);
-          if (!input.ok) return input.error;
-          const value = resolveCliJsonPaths(
-            input.value,
-            sources.map((field) => [field, "path"]),
-          );
-          const parsed = inputSchema.safeParse(value);
-          if (!parsed.success)
-            return {
-              error: "Application workflow failed",
-              ...projectAnalysisError(
-                analysisInputErrorFromIssues(name, parsed.error.issues, value),
-              ),
-            };
-          const resources = new ArtifactResourceScope();
-          const result = await finishAnalysisCommand(
-            () => workflow(parsed.data, { signal, resources }),
-            resources,
-            JAVASCRIPT_APPLICATION_WORKFLOW_PROVIDER.id,
-            operation,
-            signal,
-          );
-          return result.ok
-            ? result.value
-            : { error: "Application workflow failed", ...result.error };
-        }),
-      ),
   });
 };
 

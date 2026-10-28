@@ -3,6 +3,10 @@ import {
   type EvidenceLookup,
 } from "../EvidenceInputResolver.js";
 import type { EvidenceFileReadOptions } from "../EvidenceFileSource.js";
+import {
+  APPLICATION_EVIDENCE_SOURCE,
+  PAIRED_EVIDENCE_SOURCES,
+} from "../../domain/evidenceReference.js";
 import { parseAnalysisInput } from "../AnalysisInput.js";
 import type { ResolvedSourceToBundleReference } from "./SourceToBundleReference.js";
 import { z } from "zod";
@@ -91,7 +95,7 @@ const resolveApplicationGraphPair = async (
 > => {
   const selected = await resolveEvidenceSources(
     input,
-    ["left", "right"],
+    PAIRED_EVIDENCE_SOURCES,
     lookup,
     { ...options, operation },
   );
@@ -130,7 +134,7 @@ export const traceApplicationFeatureEvidence = async (
   if (!request.ok) return request;
   const selected = await resolveEvidenceSources(
     request.value,
-    ["application"],
+    APPLICATION_EVIDENCE_SOURCE,
     lookup,
     { ...options, operation },
   );

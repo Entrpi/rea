@@ -10,6 +10,7 @@ import type { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScop
 import { AnalysisCancelledError } from "../../domain/analysisErrorCore.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import type { Evidence } from "../../domain/evidence.js";
+import { APPLICATION_EVIDENCE_SOURCE } from "../../domain/evidenceReference.js";
 import { analysisInputErrorFromIssues } from "../../domain/inputIssueProjection.js";
 import { err, ok, type Result } from "../../domain/result.js";
 import {
@@ -45,7 +46,7 @@ export const resolveSourceToBundleSources = async (
 > => {
   const resolved = await resolveEvidenceSources(
     input,
-    ["application"],
+    APPLICATION_EVIDENCE_SOURCE,
     lookup,
     { ...options, operation: "compare_source_to_bundle" },
   );

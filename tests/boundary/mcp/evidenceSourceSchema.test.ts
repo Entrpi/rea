@@ -5,6 +5,7 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { expect, it } from "vitest";
+import type { z } from "zod";
 
 import { ARTIFACT_COMPARISON_EXAMPLE } from "../../../src/contracts/artifactComparisonExample.js";
 import {
@@ -13,7 +14,7 @@ import {
 } from "../../../src/contracts/javascript/javascriptApplicationWorkflowExamples.js";
 import { JAVASCRIPT_EXPORT_SHAPE_COMPARISON_EXAMPLE } from "../../../src/contracts/javascript/javascriptExportShapeComparisonExample.js";
 import { toolContract } from "../../../src/contracts/toolContracts.js";
-import { MAX_JSON_DEPTH } from "../../../src/domain/jsonValue.js";
+import { analysisInputErrorFromIssues } from "../../../src/domain/inputIssueProjection.js";
 import { toolRegistrationOptions } from "../../../src/server/toolRegistrationOptions.js";
 import { advertisedSchemaErrors } from "../../fixtures/mcpAdvertisedSchemaValidity.js";
 
@@ -113,8 +114,34 @@ const sides: readonly (readonly [string, unknown, boolean])[] = [
   ["empty side", {}, false],
 ];
 
-/** An SDK server and client that validate input for every tool on the contract. */
-const connect = async () => {
+/** Malformed sources and the only issues each may report. */
+const malformedSides: readonly (readonly [
+  unknown,
+  readonly (readonly [readonly string[], string])[],
+])[] = [
+  [
+    { ...evidence, provider: { ...evidence.provider, name: 3 } },
+    [[["provider", "name"], "invalid_type"]],
+  ],
+  [{ kind: "retained-evidence" }, [[["evidence_id"], "missing_argument"]]],
+];
+
+/** The projected issue paths and reasons a caller sees for one refused request. */
+const refusalIssues = (
+  contract: { readonly name: string; readonly inputSchema: z.ZodType },
+  request: Readonly<Record<string, unknown>>,
+) => {
+  const parsed = contract.inputSchema.safeParse(request);
+  if (parsed.success)
+    throw new Error(`${contract.name} accepted ${JSON.stringify(request)}`);
+  return analysisInputErrorFromIssues(
+    contract.name,
+    parsed.error.issues,
+    request,
+  ).issues.map(({ path, reason }) => [path, reason]);
+};
+
+it("advertises one source contract and rejects the same sources the parser rejects", async () => {
   const server = new McpServer({ name: "evidence-sources", version: "0" });
   const client = new Client({ name: "evidence-sources", version: "0" });
   const [clientTransport, serverTransport] =
@@ -125,17 +152,9 @@ const connect = async () => {
       toolRegistrationOptions(contract),
       async () => ({ content: [] }),
     );
-  await server.connect(serverTransport);
-  await client.connect(clientTransport);
-  return {
-    client,
-    close: () => Promise.allSettled([client.close(), server.close()]),
-  };
-};
-
-it("advertises one source contract and rejects the same sources the parser rejects", async () => {
-  const { client, close } = await connect();
   try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
     const { tools: advertised } = await client.listTools();
     expect(advertisedSchemaErrors(advertised)).toEqual([]);
     expect(
@@ -179,49 +198,15 @@ it("advertises one source contract and rejects the same sources the parser rejec
           ).toBe(accepted);
           expect(validate(request), `${label}: ${form}`).toBe(accepted);
         }
+        // A malformed source reports only the issues of the form it names.
+        for (const [side, issues] of malformedSides)
+          expect(
+            refusalIssues(contract, { ...input, [field]: side }),
+            label,
+          ).toEqual(issues.map(([path, reason]) => [[field, ...path], reason]));
       }
     }
   } finally {
-    await close();
-  }
-});
-
-it("reports the issues of the source form that each side selects", async () => {
-  let nested: unknown = 1;
-  for (let depth = 0; depth <= MAX_JSON_DEPTH; depth += 1) nested = { nested };
-  // The SDK shows a failed union's message, not the issues of its forms.
-  const failures = [
-    [
-      { ...evidence, parameters: { nested } },
-      `parameters: JSON value exceeds maximum nesting depth of ${MAX_JSON_DEPTH}. This release has no runtime override.`,
-    ],
-    [
-      { kind: "retained-evidence" },
-      "evidence_id: Invalid input: expected string, received undefined",
-    ],
-    [
-      { kind: "inline", evidence },
-      'kind: Invalid input: expected "retained-evidence" or "evidence-file"; complete Evidence has no kind',
-    ],
-  ] as const;
-  const { client, close } = await connect();
-  try {
-    for (const { contract, input, sources } of tools)
-      for (const field of sources)
-        for (const [side, issue] of failures) {
-          const reply = await client.callTool({
-            name: contract.name,
-            arguments: { ...input, [field]: side },
-          });
-          expect(reply.isError, `${contract.name}.${field}`).toBe(true);
-          expect(reply.content).toEqual([
-            {
-              type: "text",
-              text: `Input validation error: Invalid arguments for tool ${contract.name}: ${field}: ${issue}`,
-            },
-          ]);
-        }
-  } finally {
-    await close();
+    await Promise.allSettled([client.close(), server.close()]);
   }
 });

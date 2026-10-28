@@ -11,6 +11,7 @@ import {
   type ManagedMemberComparisonResult,
 } from "../../domain/managed/managedMemberComparison.js";
 import { readManagedMemberEvidence } from "../../domain/managed/managedMemberComparisonMatch.js";
+import { PAIRED_EVIDENCE_SOURCES } from "../../domain/evidenceReference.js";
 import type { BinaryTarget } from "../../domain/binaryTargetTypes.js";
 import type { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
 import {
@@ -65,7 +66,7 @@ export const executeManagedMemberComparison = async (
   if (!request.ok) return request;
   const resolved = await resolveEvidenceSources(
     request.value,
-    ["left", "right"],
+    PAIRED_EVIDENCE_SOURCES,
     lookup,
     { ...options, operation },
   );

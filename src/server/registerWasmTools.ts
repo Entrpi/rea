@@ -1,13 +1,12 @@
 import { compareWasmInterfaces } from "../application/wasm/WasmInterfaceComparisonService.js";
 import { COMPARE_WASM_INTERFACES_CONTRACT } from "../contracts/wasm/wasmComparisonContracts.js";
-import { recordEvidenceSources } from "../application/investigation/recordEvidenceSources.js";
+import { retainAnalysisResultSources } from "../application/investigation/recordEvidenceSources.js";
 import type { EvidenceMcpServer } from "./EvidenceMcpServer.js";
 
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import type { WasmArtifactService } from "../application/wasm/WasmArtifactService.js";
 import type { EvidenceWriter } from "../application/investigation/InvestigationRecordPort.js";
 import type { EvidenceLookup } from "../application/EvidenceInputResolver.js";
-import { ok } from "../domain/result.js";
 import { wasmArtifactModule } from "../composition/wasm.js";
 import type { Logger } from "pino";
 import {
@@ -25,10 +24,10 @@ export const registerWasmTools = (
   server: EvidenceMcpServer,
   service: Pick<WasmArtifactService, "inspect">,
   logger: Logger,
-  recordEvidence?: EvidenceWriter["recordEvidence"],
-  withAdmittedAnalysis?: WithAdmittedAnalysis,
-  evidenceById?: EvidenceLookup,
-  artifactResources?: ArtifactResourceScope,
+  recordEvidence: EvidenceWriter["recordEvidence"] | undefined,
+  withAdmittedAnalysis: WithAdmittedAnalysis | undefined,
+  evidenceById: EvidenceLookup | undefined,
+  artifactResources: ArtifactResourceScope,
 ): void => {
   const comparison = COMPARE_WASM_INTERFACES_CONTRACT;
   const compareHandler = createEvidenceToolHandler(
@@ -36,17 +35,14 @@ export const registerWasmTools = (
     async (rawInput, options) => {
       const result = await compareWasmInterfaces(
         rawInput,
-        artifactResources === undefined
-          ? options
-          : { ...options, resources: artifactResources },
+        { ...options, resources: artifactResources },
         evidenceById,
       );
-      if (!result.ok) return result;
-      const recorded = recordEvidenceSources(
-        recordEvidence,
-        result.value.sources,
-      );
-      return recorded.ok ? ok(result.value.evidence) : recorded;
+      // A delivered comparison, complete or a cancelled partial, keeps the
+      // inspections it cites; a server without a ledger records neither.
+      return recordEvidence === undefined
+        ? result
+        : retainAnalysisResultSources(comparison.name, recordEvidence, result);
     },
     logger,
     recordEvidence,

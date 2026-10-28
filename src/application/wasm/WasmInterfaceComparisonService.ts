@@ -23,12 +23,17 @@ import {
 import { fixedAllowanceOptions } from "../../domain/fixedAllowanceRemediation.js";
 import { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { analysisInputErrorFromIssues } from "../../domain/inputIssueProjection.js";
+import { PAIRED_EVIDENCE_SOURCES } from "../../domain/evidenceReference.js";
 import { err, ok, type Result } from "../../domain/result.js";
 import {
   resolveEvidenceSources,
   type EvidenceLookup,
 } from "../EvidenceInputResolver.js";
 import type { EvidenceFileReadOptions } from "../EvidenceFileSource.js";
+import {
+  withEvidenceSources,
+  type AnalysisResultWithSources,
+} from "../investigation/recordEvidenceSources.js";
 import type { ExecutionOptions } from "../AnalysisProvider.js";
 import type { z } from "zod";
 import { safeParseEvidence } from "../../domain/evidenceValidation.js";
@@ -37,16 +42,19 @@ import { completeProviderEvidence } from "../ProviderOperationExecution.js";
 const OPERATION = "compare_wasm_interfaces";
 const parseInspection = (
   raw: unknown,
+  side: (typeof PAIRED_EVIDENCE_SOURCES)[number],
 ): Result<{ evidence: Evidence; result: WasmArtifact }, AnalysisInputError> => {
   const authenticated = safeParseEvidence(raw);
-  if (!authenticated.ok) return inspectionInputFailure(authenticated.error);
+  if (!authenticated.ok)
+    return inspectionInputFailure(authenticated.error, side);
   const evidence = authenticated.value;
   if (evidence.operation !== "inspect_wasm_artifact")
     return inspectionInputFailure(
       new TypeError("Expected complete inspect_wasm_artifact Evidence"),
+      side,
     );
   const parsed = wasmArtifactSchema.safeParse(evidence.normalized_result);
-  if (!parsed.success) return inspectionInputFailure(parsed.error);
+  if (!parsed.success) return inspectionInputFailure(parsed.error, side);
   const result = parsed.data;
   if (
     !wasmArtifactMatchesSubject(
@@ -64,31 +72,31 @@ const parseInspection = (
       new TypeError(
         "WASM Evidence subject/selection does not match normalized artifact identity",
       ),
+      side,
     );
   return ok({ evidence, result });
 };
 
 const inspectionInputFailure = (
   cause: Error,
+  side: (typeof PAIRED_EVIDENCE_SOURCES)[number],
 ): Result<never, AnalysisInputError> =>
   err(
     new AnalysisInputError(OPERATION, { cause }, [
-      { path: [], reason: "invalid_value", message: cause.message },
+      { path: [side], reason: "invalid_value", message: cause.message },
     ]),
   );
 
-/** Comparison Evidence and the authenticated inspections it cites. */
-export interface WasmInterfaceComparisonExecution {
-  readonly evidence: Evidence;
-  readonly sources: readonly [Evidence, Evidence];
-}
-
-/** Compare only producer-owned typed facts; no raw WAT or original file is reread. */
+/**
+ * Compare only producer-owned typed facts; no raw WAT or original file is
+ * reread. A delivered comparison, complete or a cancelled partial, carries the
+ * inspections it cites so the adapter can retain them with it.
+ */
 export const compareWasmInterfaces = async (
   rawInput: unknown,
   options: ExecutionOptions & EvidenceFileReadOptions = {},
   lookup?: EvidenceLookup,
-): Promise<Result<WasmInterfaceComparisonExecution, AnalysisError>> => {
+): Promise<AnalysisResultWithSources<Evidence>> => {
   if (options.signal?.aborted)
     return err(
       new AnalysisCancelledError(OPERATION, { cause: options.signal.reason }),
@@ -100,7 +108,7 @@ export const compareWasmInterfaces = async (
     );
   const resolved = await resolveEvidenceSources(
     parsed.data,
-    ["left", "right"],
+    PAIRED_EVIDENCE_SOURCES,
     lookup,
     { ...options, operation: OPERATION },
   );
@@ -114,9 +122,9 @@ export const compareWasmInterfaces = async (
   try {
     await setImmediate();
     assertActive();
-    const parsedLeft = parseInspection(resolved.value.left);
+    const parsedLeft = parseInspection(resolved.value.left, "left");
     if (!parsedLeft.ok) return parsedLeft;
-    const parsedRight = parseInspection(resolved.value.right);
+    const parsedRight = parseInspection(resolved.value.right, "right");
     if (!parsedRight.ok) return parsedRight;
     const left = parsedLeft.value;
     const right = parsedRight.value;
@@ -282,13 +290,10 @@ export const compareWasmInterfaces = async (
       evidenceLinks: [left.evidence.evidence_id, right.evidence.evidence_id],
     });
     await setImmediate();
-    const completed = completeProviderEvidence(evidence, options.signal);
-    return completed.ok
-      ? ok({
-          evidence: completed.value,
-          sources: [left.evidence, right.evidence],
-        })
-      : completed;
+    return withEvidenceSources(
+      completeProviderEvidence(evidence, options.signal),
+      [left.evidence, right.evidence],
+    );
   } catch (cause: unknown) {
     if (cause instanceof AnalysisError) return err(cause);
     throw cause;

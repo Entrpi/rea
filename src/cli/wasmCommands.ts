@@ -1,17 +1,16 @@
 import { projectCliAnalysisResult } from "./projectCliAnalysisResult.js";
 import { localPathStringSchema } from "../domain/localPath.js";
 import { compareWasmInterfaces } from "../application/wasm/WasmInterfaceComparisonService.js";
-import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
-import { parseCliJsonInput, resolveCliJsonPaths } from "../cliJsonInput.js";
 import { CLI_COMMANDS } from "../cliCommandNames.js";
 import { z } from "incur";
 import { wasmArtifactModule } from "../composition/wasm.js";
 import { logCliCommand } from "../cliLogging.js";
 import { ARTIFACT_COMPARISON_PROVIDER } from "../domain/comparisonEvidenceIdentity.js";
-import { ok } from "../domain/result.js";
+import { PAIRED_EVIDENCE_SOURCES } from "../domain/evidenceReference.js";
 import type { Logger } from "pino";
 import type { CliInstance } from "./types.js";
 import { withCommandCancellation } from "./commandCancellation.js";
+import { registerEvidenceSourceCommand } from "./evidenceSourceCommand.js";
 import { absoluteCallerPath } from "../filesystem/callerPath.js";
 import { finishAnalysisCommand } from "./finishAnalysisCommand.js";
 import {
@@ -25,48 +24,15 @@ export const registerWasmCommands = (
   logger: Logger,
   environment: Readonly<NodeJS.ProcessEnv>,
 ): void => {
-  cli.command(CLI_COMMANDS.compareWasmInterfaces, {
+  registerEvidenceSourceCommand(cli, logger, {
+    name: CLI_COMMANDS.compareWasmInterfaces,
+    operation: "compare_wasm_interfaces",
+    providerId: ARTIFACT_COMPARISON_PROVIDER.id,
     description:
-      "Compare core WASM interfaces from two exact inspection Evidence records",
-    args: z.object({
-      input: z
-        .string()
-        .describe(
-          'Inline JSON or input file containing required scope and left/right complete Evidence or {kind:"evidence-file",path,evidence_id?}',
-        ),
-    }),
-    run: ({ args }) =>
-      withCommandCancellation(async (signal) =>
-        logCliCommand(logger, CLI_COMMANDS.compareWasmInterfaces, async () => {
-          const input = await parseCliJsonInput(
-            args.input,
-            "compare_wasm_interfaces",
-            signal,
-          );
-          if (!input.ok) return input.error;
-          // Evidence-file paths are resolved against the operator's working directory.
-          const value = resolveCliJsonPaths(input.value, [
-            ["left", "path"],
-            ["right", "path"],
-          ]);
-          const resources = new ArtifactResourceScope();
-          return projectCliAnalysisResult(
-            await finishAnalysisCommand(
-              async () => {
-                const result = await compareWasmInterfaces(value, {
-                  signal,
-                  resources,
-                });
-                return result.ok ? ok(result.value.evidence) : result;
-              },
-              resources,
-              ARTIFACT_COMPARISON_PROVIDER.id,
-              "compare_wasm_interfaces",
-              signal,
-            ),
-          );
-        }),
-      ),
+      'Compare core WASM interfaces from two exact inspection Evidence records under a required scope; each side inline or {kind:"evidence-file",path,evidence_id?}',
+    inputSchema: z.unknown(),
+    sources: PAIRED_EVIDENCE_SOURCES,
+    workflow: (input, options) => compareWasmInterfaces(input, options),
   });
   const service = wasmArtifactModule.create(environment);
   cli.command(wasmArtifactModule.cliCommand, {

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { prefixedDigestSchema } from "./digests.js";
-import { evidenceSchema } from "./evidence.js";
+import { evidenceSchema, type Evidence } from "./evidence.js";
 import { absoluteLocalPathStringSchema } from "./localPath.js";
 
 /** Exact reference to Evidence already retained by the current session. */
@@ -25,12 +25,24 @@ export type EvidenceFileReference = z.output<
   typeof evidenceFileReferenceSchema
 >;
 
-/** Evidence named instead of sent inline. Evidence itself is strict and has no kind. */
-export const evidenceReferenceSchema = z.discriminatedUnion("kind", [
-  retainedEvidenceReferenceSchema,
-  evidenceFileReferenceSchema,
-]);
+/** A key that Evidence does not have; the compiler rejects one Evidence gains. */
+type NotEvidenceKey<Key extends string> = Key extends keyof Evidence
+  ? never
+  : Key;
+const REFERENCE_DISCRIMINATOR: NotEvidenceKey<"kind"> = "kind";
+
+/** Evidence named instead of sent inline: retained in the session or in a local Evidence file. */
+export const evidenceReferenceSchema = z.discriminatedUnion(
+  REFERENCE_DISCRIMINATOR,
+  [retainedEvidenceReferenceSchema, evidenceFileReferenceSchema],
+);
 export type EvidenceReference = z.output<typeof evidenceReferenceSchema>;
+
+/** Whether a source names a reference: Evidence is a strict object without the discriminator. */
+export const namesEvidenceReference = (source: unknown): boolean =>
+  typeof source === "object" &&
+  source !== null &&
+  Object.hasOwn(source, REFERENCE_DISCRIMINATOR);
 
 /** Portable observation or exact retained identity, for a loader that cannot read Evidence files. */
 export const evidenceInputSchema = z.union([
@@ -39,42 +51,62 @@ export const evidenceInputSchema = z.union([
 ]);
 export type EvidenceInput = z.output<typeof evidenceInputSchema>;
 
-/** The references a source can name, in their union order after inline Evidence. */
-const SOURCE_REFERENCES = [
-  retainedEvidenceReferenceSchema,
-  evidenceFileReferenceSchema,
-] as const;
-const SOURCE_REFERENCE_KINDS = SOURCE_REFERENCES.map(
-  (reference) => reference.shape.kind.value,
-);
+/** Every Evidence source form, as it is advertised. */
+const evidenceSourceForms = z.union([
+  evidenceSchema,
+  ...evidenceReferenceSchema.options,
+]);
 
-const formatSourceIssue = ({ path, message }: z.core.$ZodIssue): string =>
-  path.length === 0 ? message : `${path.map(String).join(".")}: ${message}`;
+/** Check a source only against the form namesEvidenceReference selects. */
+const evidenceSourceParser = z
+  .unknown()
+  .nonoptional()
+  .transform((source, context): z.output<typeof evidenceSourceForms> => {
+    const parsed = namesEvidenceReference(source)
+      ? evidenceReferenceSchema.safeParse(source)
+      : evidenceSchema.safeParse(source);
+    if (parsed.success) return parsed.data;
+    for (const issue of parsed.error.issues)
+      context.addIssue({ ...issue, path: [...issue.path] });
+    return z.NEVER;
+  });
+// Zod clones reconstruct from the definition. Install the advertised forms in
+// the constructor so a described source keeps them.
+const EvidenceSource = z.core.$constructor<typeof evidenceSourceParser>(
+  "EvidenceSource",
+  (instance, definition) => {
+    z.ZodPipe.init(instance, definition);
+    instance._zod.processJSONSchema = (context, json, params) =>
+      evidenceSourceForms._zod.processJSONSchema!(context, json, params);
+  },
+);
 
 /**
- * Standard Schema clients, such as the MCP SDK, show a failed union's message
- * but not its branch issues. Evidence has no kind and each reference has one,
- * so report the issues of the form that the source's own kind selects.
+ * Each Evidence source of a paired comparison or application workflow:
+ * complete Evidence, a retained reference, or one record in a local Evidence
+ * file. It is advertised as every form, but a malformed source reports only
+ * the issues of the form it names.
  */
-const sourceFormIssues = (issue: z.core.$ZodRawIssue): string | undefined => {
-  if (issue.code !== "invalid_union") return undefined;
-  const { input } = issue;
-  const named =
-    typeof input === "object" && input !== null && Object.hasOwn(input, "kind");
-  // Form 0 is inline Evidence; each reference follows in its union order.
-  const form = named
-    ? SOURCE_REFERENCE_KINDS.indexOf(Reflect.get(input, "kind")) + 1
-    : 0;
-  if (named && form === 0)
-    return `kind: Invalid input: expected ${SOURCE_REFERENCE_KINDS.map((kind) => JSON.stringify(kind)).join(" or ")}; complete Evidence has no kind`;
-  const issues = issue.errors[form];
-  return issues === undefined || issues.length === 0
-    ? undefined
-    : issues.map(formatSourceIssue).join(", ");
-};
-
-/** Each Evidence source of a paired comparison or application workflow: inline, retained, or in a local Evidence file. */
-export const evidenceSourceInputSchema = z.union(
-  [evidenceSchema, ...SOURCE_REFERENCES],
-  { error: sourceFormIssues },
+export const evidenceSourceInputSchema = new EvidenceSource(
+  evidenceSourceParser._zod.def,
 );
+
+/** The request fields that name the two sides of a paired comparison. */
+export const PAIRED_EVIDENCE_SOURCES = ["left", "right"] as const;
+
+/** The request field that names an application workflow's Evidence. */
+export const APPLICATION_EVIDENCE_SOURCE = ["application"] as const;
+
+/** One Evidence source schema for each named request field. */
+export const evidenceSourceShape = <const Field extends string>(
+  fields: readonly Field[],
+  description?: string,
+): { readonly [Name in Field]: typeof evidenceSourceInputSchema } => {
+  const source =
+    description === undefined
+      ? evidenceSourceInputSchema
+      : evidenceSourceInputSchema.describe(description);
+  return Object.fromEntries(fields.map((field) => [field, source])) as {
+    readonly [Name in Field]: typeof evidenceSourceInputSchema;
+  };
+};

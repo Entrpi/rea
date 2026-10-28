@@ -43,17 +43,20 @@ or `application`) in one of three forms:
   one.
 
 The result cites the records that the sources resolve to, so all three forms
-give the same Evidence. A source with `kind` is the reference that `kind`
-names, and a source without `kind` is complete Evidence. An invalid source
-reports the problems of that form, for example
-`left: evidence_id: Invalid input: expected string, received undefined` for a
-retained reference without its ID. A retained reference that the session
-cannot resolve is refused with `evidence_integrity_mismatch` and
-`details.reason: "missing"`.
-A bundle with more than one record and no `evidence_id` is refused with
-`invalid_request` at that source's `evidence_id`, for example
-`["right", "evidence_id"]`. `match_native_functions` accepts only complete
-Evidence and retained references.
+give the same Evidence. A source is checked only against the form it names: a
+value with `kind` against the references, any other value against the
+Evidence schema, so a malformed source reports only that form's issues.
+
+Refusals that name the source's field in their issue path are
+`invalid_request`: a malformed reference, a bundle record that is absent or not
+selected (for example `["right", "evidence_id"]` when a bundle holds more than
+one record), and Evidence of a kind the tool does not take (for example
+`["right"]`). A retained reference that the session cannot resolve is refused
+with `evidence_integrity_mismatch`, `details.evidence_id` and
+`details.reason: "missing"`. An Evidence file that cannot be read, or that
+holds no valid Evidence, is refused with its file path rather than the field.
+`match_native_functions` accepts only complete Evidence and retained
+references.
 
 `compare_artifacts` can also resolve an artifact summary to its exact retained
 parent in the session. Supported historical summaries keep their original

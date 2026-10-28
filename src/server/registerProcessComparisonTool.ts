@@ -5,6 +5,7 @@ import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.j
 import type { BinarySessionPort } from "../application/binary/BinarySessionPort.js";
 import { toolContract } from "../contracts/toolContracts.js";
 import { AnalysisInputError } from "../domain/analysisErrorCore.js";
+import { PAIRED_EVIDENCE_SOURCES } from "../domain/evidenceReference.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import { describeValidationFailure } from "../domain/validationFailure.js";
 import { EvidenceIntegrityError } from "../domain/evidenceErrors.js";
@@ -100,7 +101,7 @@ export const registerProcessComparisonTool = (
         async () => {
           const resolved = await resolveEvidenceSources(
             input,
-            ["left", "right"],
+            PAIRED_EVIDENCE_SOURCES,
             session.evidenceForAnalysis.bind(session),
             {
               operation: contract.name,

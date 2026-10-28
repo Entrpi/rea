@@ -2,7 +2,10 @@ import { z } from "zod";
 
 import { digestCanonicalValue } from "../canonicalDigest.js";
 import { emptyArraySchema } from "../emptyArraySchema.js";
-import { evidenceSourceInputSchema } from "../evidenceReference.js";
+import {
+  PAIRED_EVIDENCE_SOURCES,
+  evidenceSourceShape,
+} from "../evidenceReference.js";
 import {
   cliMetadataGuidSchema,
   managedMetadataTokenSchema,
@@ -33,10 +36,9 @@ const boundedTextSchema = z.string().min(1);
  * Evidence file. Only the resolved records show whether two sides are the same
  * record, so the comparison refuses that after resolution.
  */
-export const compareManagedMembersInputSchema = z.strictObject({
-  left: evidenceSourceInputSchema,
-  right: evidenceSourceInputSchema,
-});
+export const compareManagedMembersInputSchema = z.strictObject(
+  evidenceSourceShape(PAIRED_EVIDENCE_SOURCES),
+);
 
 const concreteMatchBasisSchema = z.enum([
   "exact-il-signature",
