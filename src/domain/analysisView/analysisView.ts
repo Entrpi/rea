@@ -144,7 +144,10 @@ import {
   nativeInventoryOperationSchema,
 } from "../native/nativeInventory.js";
 
-import { absoluteLocalPathStringSchema } from "../localPath.js";
+import {
+  evidenceFileReferenceSchema,
+  retainedEvidenceReferenceSchema,
+} from "../evidenceReference.js";
 import { z } from "zod";
 import {
   browserScenarioSummarySchema,
@@ -317,6 +320,14 @@ import {
   androidMethodSummarySchema,
 } from "./androidSymbolView.js";
 import {
+  projectAndroidJniView,
+  androidJniSummarySchema,
+} from "./androidJniView.js";
+import {
+  androidJniViewRequestSchema,
+  androidJniViewItemsSchema,
+} from "../android/androidJniQuery.js";
+import {
   projectDartAotView,
   dartAotSummarySchema,
   dartAotViewRequestSchema,
@@ -446,6 +457,7 @@ export const analysisViewRequestSchema = z.discriminatedUnion("kind", [
   managedViewRequestSchema,
   managedMembersViewRequestSchema,
   androidViewRequestSchema,
+  androidJniViewRequestSchema,
   apiSurfaceViewSchema,
   environmentManifestViewRequestSchema,
   environmentStateViewRequestSchema,
@@ -471,25 +483,12 @@ inlineEvidenceInputSchema._zod.processJSONSchema =
 
 /** Unauthenticated inline input, an exact same-session retained reference, or one local Evidence file. */
 export const analysisViewSourceSchema = z.discriminatedUnion("kind", [
-  z.strictObject({
-    kind: z.literal("retained-evidence"),
-    evidence_id: prefixedDigestSchema("ev"),
-  }),
+  retainedEvidenceReferenceSchema,
   z.strictObject({
     kind: z.literal("inline"),
     evidence: inlineEvidenceInputSchema,
   }),
-  z.strictObject({
-    kind: z.literal("evidence-file"),
-    path: absoluteLocalPathStringSchema.describe(
-      "Absolute local path of one completed Evidence JSON file, or of an Evidence bundle written by --evidence_output or export_evidence_bundle. REA reads and authenticates it, then projects it like retained Evidence, so large captures are not charged as inline input.",
-    ),
-    evidence_id: prefixedDigestSchema("ev")
-      .exactOptional()
-      .describe(
-        "The record to project when the file is an Evidence bundle, such as a summary's normalized_result.parent_evidence_id. A bundle holding exactly one record needs no selection.",
-      ),
-  }),
+  evidenceFileReferenceSchema,
 ]);
 
 /** Public inspect_analysis_view input. */
@@ -566,6 +565,7 @@ const viewResultBase = {
     "inspect_android_package",
     "inspect_android_class",
     "inspect_android_method",
+    "inspect_android_jni_bindings",
     "inspect_pcap_capture",
     "inspect_dart_aot",
     "inspect_il2cpp_metadata",
@@ -869,6 +869,23 @@ export const androidPackageSummaryViewResultSchema = z.strictObject({
   ...summaryViewResultBase,
   parent_operation: z.literal("inspect_android_package"),
   summary: androidPackageSummarySchema,
+});
+export const androidJniSummaryViewResultSchema = z.strictObject({
+  ...summaryViewResultBase,
+  parent_operation: z.literal("inspect_android_jni_bindings"),
+  summary: androidJniSummarySchema,
+});
+export const androidJniPageViewResultSchema = z.strictObject({
+  ...viewResultBase,
+  kind: z.literal("android-jni"),
+  parent_operation: z.literal("inspect_android_jni_bindings"),
+  view: androidJniViewRequestSchema,
+  items: androidJniViewItemsSchema,
+  source: androidJniSummarySchema.pick({
+    native_inventory: true,
+    library_inventory: true,
+    selection: true,
+  }),
 });
 
 /** Exact class facts with complete raw protocol Evidence retained separately. */
@@ -1276,6 +1293,7 @@ export const analysisViewResultSchema = z.discriminatedUnion("kind", [
     webNetworkCaptureSummaryViewResultSchema,
     browserScenarioSummaryViewResultSchema,
     androidPackageSummaryViewResultSchema,
+    androidJniSummaryViewResultSchema,
     androidClassSummaryViewResultSchema,
     androidMethodSummaryViewResultSchema,
     pcapCaptureSummaryViewResultSchema,
@@ -1452,6 +1470,7 @@ export const analysisViewResultSchema = z.discriminatedUnion("kind", [
     parent_operation: z.literal("inspect_managed_members"),
   }),
   androidPackageViewResultSchema,
+  androidJniPageViewResultSchema,
   z.strictObject({
     kind: z.literal("dart-aot"),
     view: dartAotViewRequestSchema,
@@ -1599,6 +1618,7 @@ const retainedViewProjectors = new Map<string, typeof projectWasmArtifactView>([
   ["inspect_android_package", projectAndroidPackageView],
   ["inspect_android_class", projectAndroidSymbolSummary],
   ["inspect_android_method", projectAndroidSymbolSummary],
+  ["inspect_android_jni_bindings", projectAndroidJniView],
   ["capture_browser_scenario", projectBrowserScenarioView],
   ["inspect_dart_aot", projectDartAotView],
   ["inspect_il2cpp_metadata", projectIl2cppMetadataView],
