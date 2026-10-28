@@ -398,8 +398,10 @@ and the SHA-256 digests of the four definition files:
   "caller-provider-language-v1"` and `language_definition` (`version: 1`): the
   declared address size and, for each file, its path in the installation and
   its SHA-256.
-- Coordinate identity (`function_coordinate_context`) adds the four digests,
-  because a changed decoder can move function boundaries under the same ID.
+- Coordinate identity (`function_coordinate_context`) is keyed by the base, as
+  for a variant load, so every entry of one image compares, and adds the four
+  digests, because a changed decoder can move function boundaries under the
+  same ID.
 
 A change to any of the four files changes the analysis profile. Sessions,
 snapshots and function coordinates from the old definition then do not match
