@@ -7,6 +7,7 @@ import { EspFlashImageArtifactReader } from "./EspFlashImageArtifactReader.js";
 import { ArtifactResourceScope } from "./ArtifactResourceScope.js";
 import type { ArtifactEntry } from "./ArtifactReader.js";
 import { extractArtifact } from "./extraction/ArtifactExtraction.js";
+import * as regionReads from "./EspFlashRegionReads.js";
 import * as espImageDecoding from "../domain/firmware/espImage.js";
 import {
   TWO_OTA_PARTITIONS,
@@ -248,9 +249,12 @@ describe("ESP flash layout coverage and selection", () => {
     ).toMatchObject({
       facts: { status: "erased" },
     });
-    expect(snapshot.limitations).toContain(
+    // Only the erased app slot holds bytes the bootloader does not read.
+    expect(
+      snapshot.limitations.filter((text) => text.includes("finds no app")),
+    ).toEqual([
       `partitions/ota_1.bin begins with erased flash, so ESP-IDF's bootloader finds no app in it, but ${String(indices.length)} of its bytes from offset 0x${start.toString(16)} to 0x${end.toString(16)} are not erased flash; they are not read as an image.`,
-    );
+    ]);
     // A partition erased throughout has no written bytes.
     expect(row("partitions/nvs.bin")).toMatchObject({
       written_offset: null,
@@ -517,6 +521,85 @@ describe("ESP flash layout extraction and lifecycle", () => {
         );
         await completion;
         expect(decoded).toBe(requestedAt);
+        await reader.close();
+        await expect(
+          reader.entries()[Symbol.asyncIterator]().next(),
+        ).rejects.toMatchObject({
+          reason: "unavailable",
+        });
+      } finally {
+        observer.mockRestore();
+        await reader.close();
+      }
+    },
+  );
+});
+
+describe("ESP flash layout written-bytes scan lifecycle", () => {
+  it.each(["cancel", "close"] as const)(
+    "settles the written-bytes scan when the caller requests %s after its first chunk",
+    async (action) => {
+      // Only the written-bytes scan reads a data partition's bytes.
+      const parts = [
+        {
+          label: "storage",
+          type: 1,
+          subtype: 0x81,
+          offset: 0x1_0000,
+          size: 0x90_0000,
+        },
+      ];
+      const reader = new EspFlashImageArtifactReader(
+        await writeDump(
+          espFlashDump({
+            size: 0x91_0000,
+            bootloader: { at: 0, bytes: BOOTLOADER },
+            table: partitionTable(parts),
+            parts: [{ at: 0x1_0000, bytes: Buffer.alloc(0x90_0000, 0x5a) }],
+          }),
+        ),
+      );
+      const controller = new AbortController();
+      const reason = { stage: "written-bytes scan" };
+      let completion: Promise<void> | undefined;
+      let scanned = 0;
+      let acknowledge = (): void => undefined;
+      const scanning = new Promise<void>((resolve) => {
+        acknowledge = resolve;
+      });
+      const scan = regionReads.writtenExtent;
+      // Count the chunks the scan examines once the reader admits them.
+      const observer = vi
+        .spyOn(regionReads, "writtenExtent")
+        .mockImplementation((context, region, assertOpen) =>
+          scan(context, region, () => {
+            assertOpen();
+            if (region.length < 0x10_0000) return;
+            scanned += 1;
+            if (scanned === 1) acknowledge();
+          }),
+        );
+      try {
+        const pending = reader
+          .entries(controller.signal)
+          [Symbol.asyncIterator]()
+          .next();
+        await Promise.race([
+          scanning,
+          pending.then(() => {
+            throw new Error("Preparation settled before the scan began");
+          }),
+        ]);
+        const requestedAt = scanned;
+        if (action === "cancel") controller.abort(reason);
+        else completion = reader.close();
+        await expect(pending).rejects.toMatchObject(
+          action === "cancel"
+            ? { reason: "cancelled", cause: reason }
+            : { reason: "unavailable" },
+        );
+        await completion;
+        expect(scanned).toBe(requestedAt);
         await reader.close();
         await expect(
           reader.entries()[Symbol.asyncIterator]().next(),
