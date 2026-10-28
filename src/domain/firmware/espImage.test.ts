@@ -147,6 +147,7 @@ describe("ESP image decoding", () => {
       descriptor: {
         kind: "app",
         offset: 32,
+        observed_length: 256,
         secure_version: 0,
         version: "1.2.3",
         project_name: "rea_esp_fixture",
@@ -385,6 +386,7 @@ describe("ESP image framing and segment limits", () => {
     expect(decoded.metadata.descriptor).toMatchObject({
       kind: "app",
       offset: 32,
+      observed_length: 200,
       version: "1.2.3",
       mmu_page_size: 16,
       spi_flash_mode: 2,
@@ -393,9 +395,38 @@ describe("ESP image framing and segment limits", () => {
     expect(decoded.coverage).toBe("unknown");
   });
 
-  it("does not read an app descriptor whose fields are cut off", () => {
-    expect(image(APP.subarray(0, 32 + 181)).metadata.descriptor).toBeNull();
-  });
+  it.each([
+    [20, { secure_version: 0, version: null, app_elf_sha256: null }],
+    [
+      176,
+      {
+        idf_ver: "v6.1",
+        app_elf_sha256: "ab".repeat(32),
+        min_efuse_blk_rev_full: null,
+        max_efuse_blk_rev_full: null,
+        mmu_page_size: null,
+        spi_flash_mode: null,
+      },
+    ],
+    [
+      181,
+      { max_efuse_blk_rev_full: 199, mmu_page_size: 16, spi_flash_mode: null },
+    ],
+  ] as const)(
+    "keeps the descriptor fields a file cut at byte %i holds in full",
+    (length, fields) => {
+      const decoded = image(APP.subarray(0, 32 + length));
+      expect(decoded.metadata.descriptor).toMatchObject({
+        kind: "app",
+        observed_length: length,
+        ...fields,
+      });
+      // A cut field is unavailable, not malformed text.
+      expect(decoded.limitations).toEqual([
+        ESP_IMAGE_LIMITATIONS.truncatedSegment(0, 288, 32, length),
+      ]);
+    },
+  );
 
   it("keeps a truncated segment as an image with unavailable integrity", () => {
     const decoded = image(APP.subarray(0, 360));

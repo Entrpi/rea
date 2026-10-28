@@ -210,29 +210,34 @@ const uint16 = z.number().int().min(0).max(0xffff);
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/u);
 const byteRange = z.strictObject({ offset, length: offset });
 
-/** `esp_app_desc_t` fields, as ESP-IDF names them; strings stop at NUL. */
+/**
+ * `esp_app_desc_t` fields, as ESP-IDF names them; strings stop at NUL. A field
+ * the file cuts off is null; `observed_length` says where the descriptor ends.
+ */
 const espAppDescriptorSchema = z.strictObject({
   kind: z.literal("app"),
   offset,
-  secure_version: uint32,
+  /** Descriptor bytes the file holds, at most the 256 of `esp_app_desc_t`. */
+  observed_length: z.int().min(4).max(256),
+  secure_version: uint32.nullable(),
   version: z.string().nullable(),
   project_name: z.string().nullable(),
   time: z.string().nullable(),
   date: z.string().nullable(),
   idf_ver: z.string().nullable(),
-  app_elf_sha256: sha256Hex,
-  min_efuse_blk_rev_full: uint16,
-  max_efuse_blk_rev_full: uint16,
+  app_elf_sha256: sha256Hex.nullable(),
+  min_efuse_blk_rev_full: uint16.nullable(),
+  max_efuse_blk_rev_full: uint16.nullable(),
   /**
    * ESP-IDF's value: the MMU page size as a base-2 logarithm (16 is 64 KiB);
    * 0 in images built before ESP-IDF v5.4.
    */
-  mmu_page_size: uint8,
+  mmu_page_size: uint8.nullable(),
   /**
    * The byte ESP-IDF v6.1 names `spi_flash_mode`, as stored; REA does not
    * interpret it. Releases that reserve this byte leave it zero.
    */
-  spi_flash_mode: uint8,
+  spi_flash_mode: uint8.nullable(),
 });
 
 /** `esp_bootloader_desc_t` fields, as ESP-IDF names them. */

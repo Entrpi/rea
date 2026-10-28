@@ -22,8 +22,6 @@ export const ESP_APP_DESC_BYTES = 256;
 export const ESP_SIGNATURE_BLOCK_BYTES = 1216;
 const ERASED = 0xff;
 const APP_DESC_MAGIC = 0xabcd_5432;
-/** `esp_app_desc_t` through `spi_flash_mode`; REA does not read the reserved tail. */
-const APP_DESC_FIELD_BYTES = 182;
 const BOOTLOADER_DESC_MAGIC = 0x50;
 const BOOTLOADER_DESC_BYTES = 80;
 const SIGNATURE_MAGIC = 0xe7;
@@ -93,23 +91,27 @@ export const decodeEspDescriptor = (
       limitations.push(ESP_DESCRIPTOR_LIMITATIONS.fieldNotUtf8(field));
     return value;
   };
-  // A file that ends in the reserved tail still holds every field.
-  if (bytes.length >= APP_DESC_FIELD_BYTES && u32(bytes, 0) === APP_DESC_MAGIC)
+  if (bytes.length >= 4 && u32(bytes, 0) === APP_DESC_MAGIC) {
+    // A file can end inside the descriptor. Each field is kept when the file
+    // holds all of its bytes; a field it cuts off is null.
+    const held = (end: number): boolean => bytes.length >= end;
     return {
       kind: "app",
       offset,
-      secure_version: u32(bytes, 4),
-      version: text(16, 32, "version"),
-      project_name: text(48, 32, "project_name"),
-      time: text(80, 16, "time"),
-      date: text(96, 16, "date"),
-      idf_ver: text(112, 32, "idf_ver"),
-      app_elf_sha256: hex(bytes.subarray(144, 176)),
-      min_efuse_blk_rev_full: u16(bytes, 176),
-      max_efuse_blk_rev_full: u16(bytes, 178),
-      mmu_page_size: bytes[180] ?? 0,
-      spi_flash_mode: bytes[181] ?? 0,
+      observed_length: Math.min(bytes.length, ESP_APP_DESC_BYTES),
+      secure_version: held(8) ? u32(bytes, 4) : null,
+      version: held(48) ? text(16, 32, "version") : null,
+      project_name: held(80) ? text(48, 32, "project_name") : null,
+      time: held(96) ? text(80, 16, "time") : null,
+      date: held(112) ? text(96, 16, "date") : null,
+      idf_ver: held(144) ? text(112, 32, "idf_ver") : null,
+      app_elf_sha256: held(176) ? hex(bytes.subarray(144, 176)) : null,
+      min_efuse_blk_rev_full: held(178) ? u16(bytes, 176) : null,
+      max_efuse_blk_rev_full: held(180) ? u16(bytes, 178) : null,
+      mmu_page_size: held(181) ? (bytes[180] ?? 0) : null,
+      spi_flash_mode: held(182) ? (bytes[181] ?? 0) : null,
     };
+  }
   if (
     bytes.length < BOOTLOADER_DESC_BYTES ||
     bytes[0] !== BOOTLOADER_DESC_MAGIC

@@ -114,8 +114,9 @@ name and value: the MMU page size as a base-2 logarithm, as
 `esp_app_desc_t` declares it, so `16` means 64 KiB. It is `0` in images built
 before ESP-IDF v5.4. `spi_flash_mode` is the next byte, which ESP-IDF v6.1
 names, kept as stored and not interpreted; releases that reserve it leave it
-`0`. A file that ends inside the app descriptor's reserved tail still yields
-every field; the segment's truncation is reported as usual.
+`0`. A file can end inside the app descriptor: every field it holds in full
+is kept, a field it cuts off is `null`, and `observed_length` gives the
+descriptor bytes the file holds. The segment's truncation is reported as usual.
 
 ## Segments
 
