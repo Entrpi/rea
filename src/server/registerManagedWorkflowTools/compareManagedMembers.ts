@@ -16,6 +16,9 @@ export const registerCompareManagedMembers = (
   server: EvidenceMcpServer,
   options: ManagedWorkflowToolRegistration,
 ): void => {
+  const evidenceById = options.session.evidenceForAnalysis.bind(
+    options.session,
+  );
   server.registerTool(
     compareContract.name,
     toolRegistrationOptions(compareContract),
@@ -29,7 +32,11 @@ export const registerCompareManagedMembers = (
           const result = await logToolExecution(
             options.logger,
             compareContract.name,
-            () => Promise.resolve(executeManagedMemberComparison(input)),
+            () =>
+              executeManagedMemberComparison(input, evidenceById, {
+                signal: context.mcpReq.signal,
+                resources: options.artifactResources,
+              }),
           );
           if (!result.ok)
             return server.delivery.toCallToolResult(result, compareContract);

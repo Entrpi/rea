@@ -82,6 +82,15 @@ Compare saved capture Evidence with:
 rea compare-process-captures authority.json reconstruction.json
 ```
 
+Each argument is a file that holds one capture record, as
+`capture-process --json` writes it. Relative paths resolve from the working
+directory. MCP `compare_process_captures` does not need captures sent back.
+Name each side as `{"kind": "retained-evidence", "evidence_id": "<id>"}` for a
+`capture_process_scenario` result retained in the session, or as an
+`evidence-file` source for a saved capture or a record in a saved bundle.
+Complete inline Evidence is also accepted. Every form gives the same comparison
+Evidence; see [Evidence sources](mcp-contracts.md#tool-results).
+
 The comparison checks terminal, interaction, exit, filesystem, and
 process observations under a shared comparison contract. It reports observed
 differences with their locations, while residual unknowns or truncated

@@ -4,12 +4,14 @@ import { join } from "node:path";
 import { expect } from "vitest";
 
 import { FUNCTION_COMPARISON_EXAMPLE } from "../../../src/contracts/functionComparisonExample.js";
+import { INVESTIGATION_EXAMPLES } from "../../../src/contracts/investigationExamples.js";
 import {
   JAVASCRIPT_APPLICATION_VERSION_COMPARISON_EXAMPLE,
   JAVASCRIPT_FEATURE_TRACE_EXAMPLE,
   SOURCE_TO_BUNDLE_COMPARISON_EXAMPLE,
 } from "../../../src/contracts/javascript/javascriptApplicationWorkflowExamples.js";
 import { JAVASCRIPT_EXPORT_SHAPE_COMPARISON_EXAMPLE } from "../../../src/contracts/javascript/javascriptExportShapeComparisonExample.js";
+import { MANAGED_MEMBER_COMPARISON_EXAMPLE } from "../../../src/contracts/managed/managedWorkflowExamples.js";
 import {
   createEvidence,
   parseEvidence,
@@ -62,16 +64,33 @@ const wasmInspection = (parameter: "i32" | "i64"): Evidence => {
 
 const wasmLeft = wasmInspection("i32");
 
-/** Each tool naming Evidence through the shared source contract, with its CLI command. */
+/**
+ * Each tool naming Evidence through the shared source contract, with its CLI
+ * command: one taking the request JSON, or one taking each source as a saved
+ * Evidence file argument.
+ */
 const workflows: readonly {
   readonly tool: string;
   readonly command?: string;
+  readonly fileCommand?: string;
   readonly input: Readonly<Record<string, unknown>>;
   readonly sources: readonly string[];
 }[] = [
   {
     tool: "compare_functions",
     input: FUNCTION_COMPARISON_EXAMPLE,
+    sources: ["left", "right"],
+  },
+  {
+    tool: "compare_process_captures",
+    fileCommand: "compare-process-captures",
+    input: INVESTIGATION_EXAMPLES.compare_process_captures.input,
+    sources: ["left", "right"],
+  },
+  {
+    // The CLI command compares two PE files instead of saved Evidence.
+    tool: "compare_managed_members",
+    input: MANAGED_MEMBER_COMPARISON_EXAMPLE,
     sources: ["left", "right"],
   },
   {
@@ -225,6 +244,20 @@ cliTest(
           ),
           `${workflow.tool} file and retained`,
         ).toBe(inline);
+      if (workflow.fileCommand !== undefined) {
+        const files = workflow.sources.map(
+          (field) => `${parseEvidence(workflow.input[field]).evidence_id}.json`,
+        );
+        const result = await runFileCli(cli, {
+          arguments: [workflow.fileCommand, ...files, "--json"],
+          cwd: root,
+        });
+        expect(result.exitCode, result.stdout).toBe(0);
+        expect(
+          parseEvidence(result.json).evidence_id,
+          `${workflow.fileCommand} files`,
+        ).toBe(inline);
+      }
       if (workflow.command === undefined) continue;
       // The CLI resolves relative Evidence-file paths from its working directory.
       for (const [form, input] of [
@@ -334,5 +367,45 @@ cliTest(
         issues: [expect.objectContaining({ path: ["right", "evidence_id"] })],
       },
     });
+  },
+);
+
+cliTest(
+  "refuses one managed member record named on both sides in any source form",
+  async ({ cli }) => {
+    const { root, bundle } = await writeSources("rea-evidence-duplicates-");
+    const call = await sharedMcp(cli);
+    const imported = await call("import_evidence_bundle", { path: bundle });
+    expect(imported.isError, JSON.stringify(imported)).not.toBe(true);
+    const record = MANAGED_MEMBER_COMPARISON_EXAMPLE.left;
+    const { evidence_id } = record;
+    // Distinctness is a fact about the resolved records, not the spellings.
+    for (const [form, right] of [
+      ["inline", record],
+      ["retained", { kind: "retained-evidence", evidence_id }],
+      [
+        "file",
+        { kind: "evidence-file", path: join(root, `${evidence_id}.json`) },
+      ],
+      ["bundle record", { kind: "evidence-file", path: bundle, evidence_id }],
+    ] as const) {
+      const reply = await call("compare_managed_members", {
+        left: record,
+        right,
+      });
+      expect(parseMcpToolError(reply).error, form).toMatchObject({
+        code: "invalid_request",
+        details: {
+          operation: "compare_managed_members",
+          issues: [
+            {
+              path: ["right"],
+              reason: "invalid_value",
+              message: "Managed member Evidence must be distinct",
+            },
+          ],
+        },
+      });
+    }
   },
 );

@@ -46,6 +46,16 @@ const tools = [
     sources: ["left", "right"],
   },
   {
+    contract: toolContract("compare_process_captures"),
+    input: { left: retained, right: retained },
+    sources: ["left", "right"],
+  },
+  {
+    contract: toolContract("compare_managed_members"),
+    input: { left: retained, right: retained },
+    sources: ["left", "right"],
+  },
+  {
     contract: toolContract("trace_application_feature"),
     input: { ...JAVASCRIPT_FEATURE_TRACE_EXAMPLE, application: retained },
     sources: ["application"],

@@ -2,7 +2,10 @@ import { z } from "zod";
 
 import { digestCanonicalValue } from "../canonicalDigest.js";
 import { emptyArraySchema } from "../emptyArraySchema.js";
-import { evidenceSchema } from "../evidence.js";
+import {
+  PAIRED_EVIDENCE_SOURCES,
+  evidenceSourceShape,
+} from "../evidenceReference.js";
 import {
   cliMetadataGuidSchema,
   managedMetadataTokenSchema,
@@ -28,20 +31,14 @@ import { digestSchema, prefixedDigestSchema } from "../digests.js";
 const evidenceIdSchema = prefixedDigestSchema("ev");
 const boundedTextSchema = z.string().min(1);
 
-/** Two authenticated managed member observations. */
-export const compareManagedMembersInputSchema = z
-  .strictObject({
-    left: evidenceSchema,
-    right: evidenceSchema,
-  })
-  .superRefine((input, context) => {
-    if (input.left.evidence_id === input.right.evidence_id)
-      context.addIssue({
-        code: "custom",
-        path: ["right"],
-        message: "Managed member Evidence must be distinct",
-      });
-  });
+/**
+ * Name each managed member observation once: inline, retained, or in a local
+ * Evidence file. Only the resolved records show whether two sides are the same
+ * record, so the comparison refuses that after resolution.
+ */
+export const compareManagedMembersInputSchema = z.strictObject(
+  evidenceSourceShape(PAIRED_EVIDENCE_SOURCES),
+);
 
 const concreteMatchBasisSchema = z.enum([
   "exact-il-signature",

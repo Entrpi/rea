@@ -4,7 +4,6 @@ import { absoluteLocalPathStringSchema } from "../domain/localPath.js";
 import { bundleComparisonInputSchema } from "../domain/bundleComparison.js";
 
 import { processTraceSpecificationSchema } from "../domain/process/processTraceSpecification.js";
-import { evidenceSchema } from "../domain/evidence.js";
 import {
   PAIRED_EVIDENCE_SOURCES,
   evidenceSourceShape,
@@ -48,10 +47,9 @@ export const bundleComparisonMcpInputSchema =
     ),
   });
 
-/** Evidence references for deterministic process comparison. */
+/** Name each compared process capture once: inline, retained, or in a local Evidence file. */
 export const processComparisonInputSchema = z.strictObject({
-  left: evidenceSchema,
-  right: evidenceSchema,
+  ...evidenceSourceShape(PAIRED_EVIDENCE_SOURCES),
   trace_spec: processTraceSpecificationSchema.optional(),
   max_capture_age_ms: z.int().nonnegative().optional(),
 });

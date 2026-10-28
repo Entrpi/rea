@@ -651,6 +651,13 @@ rea analyze-javascript-application /absolute/path/to/app --json > app-evidence.j
 rea trace-application-feature '{"application":{"kind":"evidence-file","path":"app-evidence.json"},"seed":{"kind":"module","value":"main.js","match":"exact"}}' --json
 ```
 
+Two comparison commands take files instead of a source request.
+`compare-process-captures LEFT RIGHT` reads one saved capture record from each
+file; see [process capture](process-capture.md#compare-two-captures).
+`compare-managed-members LEFT RIGHT` inspects two PE files and compares them;
+see [member comparison](managed-code-analysis.md#member-comparison). Their MCP
+tools take the three source forms.
+
 ## Import historical source
 
 Historical source inventories preserve exact filenames, including literal backslashes

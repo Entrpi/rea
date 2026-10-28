@@ -27,7 +27,8 @@ to `compare_artifacts`. Use `get_evidence_bundle` when the task needs broader
 retained session history or an explicit bundle for transfer.
 
 Comparisons and application workflows do not need that Evidence sent back.
-`compare_artifacts`, `compare_functions`, `compare_wasm_interfaces`,
+`compare_artifacts`, `compare_functions`, `compare_process_captures`,
+`compare_managed_members`, `compare_wasm_interfaces`,
 `trace_application_feature`, `trace_javascript_semantics`,
 `compare_application_versions`, `compare_source_to_bundle` and
 `compare_javascript_export_shapes` take each Evidence source (`left`, `right`

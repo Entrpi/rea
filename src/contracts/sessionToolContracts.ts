@@ -100,7 +100,7 @@ export const SESSION_TOOL_CONTRACTS = [
   ),
   session(
     "compare_process_captures",
-    "Compare two compatible process capture observations across terminal, interaction, lifecycle, process, filesystem, command-shim, HTTP, and WebSocket evidence. Optional trace_spec validates exact events against an explicit partial order or finite trace language; concurrency is never inferred from timestamps or broad sorting. Missing, journal-free, or truncated observations are never treated as equivalent.",
+    'Compare two compatible process capture observations across terminal, interaction, lifecycle, process, filesystem, command-shim, HTTP, and WebSocket evidence. Name each side as complete capture Evidence, {kind: "retained-evidence", evidence_id} or {kind: "evidence-file", path, evidence_id?}. Optional trace_spec validates exact events against an explicit partial order or finite trace language; concurrency is never inferred from timestamps or broad sorting. Missing, journal-free, or truncated observations are never treated as equivalent.',
     processComparisonInputSchema,
   ),
   session(

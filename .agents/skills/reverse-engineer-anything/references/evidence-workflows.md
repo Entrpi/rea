@@ -42,8 +42,9 @@ Use `update_unknown` with the current revision; reread after a stale revision
 instead of retrying blindly. Only qualifying observed evidence can verify a
 resolution.
 
-`compare_artifacts`, `compare_functions`, `compare_wasm_interfaces` and the
-JavaScript application workflows take each Evidence source (`left`, `right` or
+`compare_artifacts`, `compare_functions`, `compare_process_captures`,
+`compare_managed_members`, `compare_wasm_interfaces` and the JavaScript
+application workflows take each Evidence source (`left`, `right` or
 `application`) as `{kind: "retained-evidence", evidence_id}`,
 `{kind: "evidence-file", path, evidence_id?}` or complete Evidence. Name a
 retained record or a saved file instead of resending Evidence.

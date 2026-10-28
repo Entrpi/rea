@@ -1,8 +1,11 @@
 import type { EvidenceMcpServer } from "./EvidenceMcpServer.js";
 
+import { resolveEvidenceSources } from "../application/EvidenceInputResolver.js";
+import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import type { BinarySessionPort } from "../application/binary/BinarySessionPort.js";
 import { toolContract } from "../contracts/toolContracts.js";
 import { AnalysisInputError } from "../domain/analysisErrorCore.js";
+import { PAIRED_EVIDENCE_SOURCES } from "../domain/evidenceReference.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import { describeValidationFailure } from "../domain/validationFailure.js";
 import { EvidenceIntegrityError } from "../domain/evidenceErrors.js";
@@ -83,7 +86,7 @@ export const registerProcessComparisonTool = (
   server: EvidenceMcpServer,
   session: BinarySessionPort,
   contract: ReturnType<typeof toolContract<"compare_process_captures">>,
-  now: () => number = Date.now,
+  resources: ArtifactResourceScope,
 ): void => {
   const admission = withAdmittedAnalysis({ kind: "session", session });
   server.registerTool(
@@ -96,9 +99,22 @@ export const registerProcessComparisonTool = (
         contract.name,
         context.mcpReq.signal,
         async () => {
-          const left = parseCaptureSide(contract.name, "left", input.left);
+          const resolved = await resolveEvidenceSources(
+            input,
+            PAIRED_EVIDENCE_SOURCES,
+            session.evidenceForAnalysis.bind(session),
+            {
+              operation: contract.name,
+              signal: context.mcpReq.signal,
+              resources,
+            },
+          );
+          if (!resolved.ok)
+            return server.delivery.toCallToolResult(resolved, contract);
+          const request = resolved.value;
+          const left = parseCaptureSide(contract.name, "left", request.left);
           if (!left.ok) return server.delivery.toCallToolResult(left, contract);
-          const right = parseCaptureSide(contract.name, "right", input.right);
+          const right = parseCaptureSide(contract.name, "right", request.right);
           if (!right.ok)
             return server.delivery.toCallToolResult(right, contract);
           const { record: leftRecord } = left.value;
@@ -108,13 +124,12 @@ export const registerProcessComparisonTool = (
             contract.name,
             () =>
               compareProcessCaptureEvidence(left.value, right.value, {
-                ...(input.max_capture_age_ms === undefined
+                ...(request.max_capture_age_ms === undefined
                   ? {}
-                  : { maxCaptureAgeMs: input.max_capture_age_ms }),
-                ...(input.trace_spec === undefined
+                  : { maxCaptureAgeMs: request.max_capture_age_ms }),
+                ...(request.trace_spec === undefined
                   ? {}
-                  : { traceSpecification: input.trace_spec }),
-                now,
+                  : { traceSpecification: request.trace_spec }),
               }),
           );
           if (!computed.ok)

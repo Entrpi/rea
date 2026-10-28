@@ -423,7 +423,12 @@ export const registerSessionTools = (
       });
     }
   };
-  registerProcessComparisonTool(server, session, compareContract);
+  registerProcessComparisonTool(
+    server,
+    session,
+    compareContract,
+    options.artifactResources,
+  );
   registerArtifactComparisonTool(
     server,
     session,

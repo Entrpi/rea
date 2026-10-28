@@ -8,7 +8,6 @@ import { traceJavaScriptSemanticsRequestSchema } from "./javascript/applicationW
 import { JAVASCRIPT_FEATURE_TRACE_EXAMPLE } from "./javascript/javascriptApplicationWorkflowExamples.js";
 import {
   MANAGED_APPLICATION_GRAPH_EXAMPLE,
-  MANAGED_MEMBER_COMPARISON_EXAMPLE,
   MANAGED_NATIVE_VERIFICATION_EXAMPLE,
 } from "./managed/managedWorkflowExamples.js";
 import { managedApplicationGraphReferenceInputSchema } from "./managed/managedWorkflowToolContracts.js";
@@ -33,14 +32,7 @@ describe("workflow input contracts", () => {
     ).toBe(false);
   });
 
-  it("rejects duplicate inline managed Evidence records", () => {
-    expect(
-      toolContract("compare_managed_members").inputSchema.safeParse({
-        left: MANAGED_MEMBER_COMPARISON_EXAMPLE.left,
-        right: MANAGED_MEMBER_COMPARISON_EXAMPLE.left,
-      }).success,
-    ).toBe(false);
-
+  it("rejects duplicate inline managed application graph Evidence records", () => {
     expect(
       managedApplicationGraphReferenceInputSchema.safeParse({
         managed_artifact: MANAGED_APPLICATION_GRAPH_EXAMPLE.managed_members,
