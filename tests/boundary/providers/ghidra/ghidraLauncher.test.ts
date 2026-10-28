@@ -31,6 +31,7 @@ import {
 } from "../../../../src/ghidra/GhidraLauncher.js";
 import { GHIDRA_RAW_ENTRY_CONTEXT } from "../../../../src/ghidra/GhidraRawBinaryLanguage.js";
 import { GHIDRA_LANGUAGE_DEFINITION_FILES } from "../../../../src/ghidra/GhidraLanguageCatalog.js";
+import { GHIDRA_RISCV_CALLING_CONVENTION_IDS } from "../../../../src/ghidra/GhidraRiscvProfile.js";
 
 const fixturePath = fileURLToPath(
   new URL(
@@ -538,62 +539,65 @@ describe("Ghidra headless launcher", () => {
       ).toThrow(/generic MIPS ELF/u);
   });
 
-  it("runs the committed RISC-V policy after the no-return refit and before the bridge", () => {
-    const base = {
-      platform: "linux" as const,
-      projectRoot: "/tmp/project",
-      targetPath: "/tmp/target",
-      bridgeScriptPath: "/package/bridge/ReaGhidraBridge.java",
-      descriptorPath: "/tmp/session.json",
-      ghidraLogPath: "/tmp/ghidra.log",
-      scriptLogPath: "/tmp/script.log",
-      languageOverride: {
-        languageId: "RISCV:LE:32:default",
-        compilerSpecId: "gcc",
-      },
-    };
-    const script = "/package/bridge/ReaGhidraRiscvCallingConvention.java";
-    // PSP, DOS and raw imports carry their own languages, so they omit the pin.
-    const { languageOverride: _pin, ...unpinned } = base;
-    expect(ghidraHeadlessArguments(base)).not.toContain(script);
-    const arguments_ = ghidraHeadlessArguments({
-      ...base,
-      riscvCallingConvention: "ilp32-prototype-v1",
-    });
-    const at = arguments_.indexOf(script);
-    expect(arguments_.slice(at - 1, at + 2)).toEqual([
-      "-postScript",
-      script,
-      "ilp32-prototype-v1",
-    ]);
-    expect(
-      arguments_.indexOf("/package/bridge/ReaGhidraNoReturnFix.java"),
-    ).toBeLessThan(at);
-    expect(at).toBeLessThan(
-      arguments_.indexOf("/package/bridge/ReaGhidraBridge.java"),
-    );
-    for (const conflict of [
-      { psp: true as const },
-      { mipsSoftFloat: true as const },
-      { dosMz: true as const },
-      { dosCom: true as const },
-      {
-        rawBinary: {
-          languageId: "x86:LE:32:default",
-          compilerSpecId: "default",
-          baseAddr: "0x1000",
-          entryPoint: "0x1000",
+  it.each(GHIDRA_RISCV_CALLING_CONVENTION_IDS)(
+    "runs the committed RISC-V policy %s after the no-return refit and before the bridge",
+    (policy) => {
+      const base = {
+        platform: "linux" as const,
+        projectRoot: "/tmp/project",
+        targetPath: "/tmp/target",
+        bridgeScriptPath: "/package/bridge/ReaGhidraBridge.java",
+        descriptorPath: "/tmp/session.json",
+        ghidraLogPath: "/tmp/ghidra.log",
+        scriptLogPath: "/tmp/script.log",
+        languageOverride: {
+          languageId: "RISCV:LE:32:default",
+          compilerSpecId: "gcc",
         },
-      },
-    ])
-      expect(() =>
-        ghidraHeadlessArguments({
-          ...unpinned,
-          riscvCallingConvention: "ilp32-prototype-v1",
-          ...conflict,
-        }),
-      ).toThrow(/generic RISC-V ELF/u);
-  });
+      };
+      const script = "/package/bridge/ReaGhidraRiscvCallingConvention.java";
+      // PSP, DOS and raw imports carry their own languages, so they omit the pin.
+      const { languageOverride: _pin, ...unpinned } = base;
+      expect(ghidraHeadlessArguments(base)).not.toContain(script);
+      const arguments_ = ghidraHeadlessArguments({
+        ...base,
+        riscvCallingConvention: policy,
+      });
+      const at = arguments_.indexOf(script);
+      expect(arguments_.slice(at - 1, at + 2)).toEqual([
+        "-postScript",
+        script,
+        policy,
+      ]);
+      expect(
+        arguments_.indexOf("/package/bridge/ReaGhidraNoReturnFix.java"),
+      ).toBeLessThan(at);
+      expect(at).toBeLessThan(
+        arguments_.indexOf("/package/bridge/ReaGhidraBridge.java"),
+      );
+      for (const conflict of [
+        { psp: true as const },
+        { mipsSoftFloat: true as const },
+        { dosMz: true as const },
+        { dosCom: true as const },
+        {
+          rawBinary: {
+            languageId: "x86:LE:32:default",
+            compilerSpecId: "default",
+            baseAddr: "0x1000",
+            entryPoint: "0x1000",
+          },
+        },
+      ])
+        expect(() =>
+          ghidraHeadlessArguments({
+            ...unpinned,
+            riscvCallingConvention: policy,
+            ...conflict,
+          }),
+        ).toThrow(/generic RISC-V ELF/u);
+    },
+  );
 });
 
 describe("Ghidra configured import language and seeds", () => {
