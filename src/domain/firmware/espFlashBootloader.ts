@@ -37,6 +37,10 @@ export interface EspBootloaderSearch {
   readonly limitations: readonly string[];
   /** A known chip's image sits at another chip's ROM offset. */
   readonly misplaced: boolean;
+  /** The first such image, which may be the bootloader of a later origin. */
+  readonly misplacedImage:
+    | { readonly chip: EspChip; readonly fileOffset: number }
+    | undefined;
   /** An ESP8266 image sits at a ROM offset. */
   readonly esp8266: boolean;
 }
@@ -51,7 +55,7 @@ export const locateEspBootloader = (
   probes: readonly EspBootloaderProbe[],
 ): EspBootloaderSearch => {
   const limitations: string[] = [];
-  let misplaced = false;
+  let misplacedImage: EspBootloaderSearch["misplacedImage"];
   let esp8266 = false;
   for (const probe of probes) {
     const recognized = recognizeEspImage(probe.prefix, probe.available);
@@ -68,16 +72,24 @@ export const locateEspBootloader = (
         },
         limitations: [],
         misplaced: false,
+        misplacedImage: undefined,
         esp8266: false,
       };
-    if (chip !== undefined) misplaced = true;
+    if (chip !== undefined)
+      misplacedImage ??= { chip, fileOffset: probe.fileOffset };
     limitations.push(
       chip === undefined
         ? `An ESP image at flash ${offsetText(probe.flashAddress)} has chip_id 0x${chipId.toString(16).padStart(4, "0")}, which is not in the chip table; it is not read as the bootloader.`
         : `An ${chip.target} image is at flash ${offsetText(probe.flashAddress)}, but its ROM loads the bootloader from ${offsetText(chip.romBootloaderOffset)}; the dump may not start at flash ${offsetText(probe.flashAddress - probe.fileOffset)}.`,
     );
   }
-  return { location: undefined, limitations, misplaced, esp8266 };
+  return {
+    location: undefined,
+    limitations,
+    misplaced: misplacedImage !== undefined,
+    misplacedImage,
+    esp8266,
+  };
 };
 
 /**

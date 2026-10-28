@@ -688,7 +688,8 @@ A whole-flash dump opens as `esp-flash-image`. `root_format_metadata` holds
 proof of ciphertext. `written_offset`/`written_end` bound the bytes that
 are not erased: an app slot whose facts say `erased` can still hold an older
 image, and a limitation says so. For a dump read from another flash address, call
-`open_binary` with `format: "esp-flash-image"` and `flash_offset`; a
+`open_binary` with `format: "esp-flash-image"` and `flash_offset`; an
+`esp-image` whose `flash_dump` is set names that offset in a next probe; a
 relocated table can be named with `partition_table_offset`. No table found
 means unknown, often flash encryption. Extraction writes `nvs_keys` as
 ordinary data. See

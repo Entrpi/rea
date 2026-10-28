@@ -45,7 +45,10 @@ refuses two kinds of dump before looking for a table:
   bootloader at the start of a dump read from `0x1000`. The dump's origin
   is not the flash address REA assumed, given or default, and a table found
   there would place every partition at the wrong file offset; pass the
-  `flash_offset` where the dump starts.
+  `flash_offset` where the dump starts. When a partition table sits where
+  the image's own ROM offset puts `0x8000`, the refusal names that offset.
+  Without a selected format such a dump opens as its bootloader image, whose
+  [ESP image](esp-image.md) facts say how to reopen it.
 - an ESP8266 image at a ROM offset. ESP8266 dumps can hold the same table
   format, and they keep the [ESP image](esp-image.md) reader's ESP8266
   refusal.
@@ -281,7 +284,8 @@ otatool's own OTA logic runs unchanged. The lane then checks:
   selection is `no-otadata` with the factory app;
 - the relocated table, found by scanning and named with
   `partition_table_offset`, and the dump written from `0x1000`, read with
-  `flash_offset` and, without it, left an ESP image;
+  `flash_offset` and, without it, left an ESP image whose `flash_dump`
+  names `flash_offset` `0x1000`;
 - an app with a flipped byte beside valid partitions, and a truncated dump,
   read with complete coverage and its missing partitions outside the dump.
 

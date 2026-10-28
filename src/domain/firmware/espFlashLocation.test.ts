@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { espChipForId } from "./espChips.js";
 import {
+  espFlashDumpOrigin,
   locateEspFlashLayout,
   type EspFlashSelection,
 } from "./espFlashLocation.js";
@@ -208,6 +210,39 @@ describe("ESP flash layout origins", () => {
       });
     },
   );
+
+  it("names the origin a misplaced bootloader and the table at its 0x8000 show", async () => {
+    // Read from 0x1000: the bootloader at file 0, the table at file 0x7000.
+    const dump = fromSecondSector(0x8000);
+    const reader = (bytes: Uint8Array) => async (at: number, length: number) =>
+      bytes.subarray(at, at + length);
+    const esp32 = espChipForId(0x0000)!;
+    expect(
+      await espFlashDumpOrigin(reader(dump), dump.length, {
+        chip: esp32,
+        fileOffset: 0,
+      }),
+    ).toEqual({ flashOffset: 0x1000, tableFileOffset: 0x7000 });
+    expect(await locate(dump)).toEqual({
+      ok: false,
+      error:
+        "An esp32 image is at flash 0x0, but its ROM loads the bootloader from 0x1000; the dump may not start at flash 0x0. A partition table at file offset 0x7000 shows the dump was read from flash 0x1000; pass flash_offset 0x1000",
+    });
+    // No table there, or a chip whose ROM loads from 0x0, shows no origin.
+    const relocated = fromSecondSector(0x9000);
+    expect(
+      await espFlashDumpOrigin(reader(relocated), relocated.length, {
+        chip: esp32,
+        fileOffset: 0,
+      }),
+    ).toBeUndefined();
+    expect(
+      await espFlashDumpOrigin(reader(dump), dump.length, {
+        chip: espChipForId(0x0005)!,
+        fileOffset: 0,
+      }),
+    ).toBeUndefined();
+  });
 
   it("finds the table after the bootloader once the origin is right", async () => {
     const located = await locate(fromSecondSector(0x9000), {

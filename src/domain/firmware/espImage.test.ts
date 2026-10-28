@@ -150,6 +150,7 @@ describe("ESP image decoding", () => {
         max_efuse_blk_rev_full: 199,
         mmu_page_size: 16,
       },
+      flash_dump: null,
     });
     expect(
       decoded.segments.map(({ dataOffset, availableLength, metadata }) => [

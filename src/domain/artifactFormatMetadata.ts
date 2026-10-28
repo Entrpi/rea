@@ -216,6 +216,17 @@ export const espImageMetadataSchema = z.strictObject({
       espBootloaderDescriptorSchema,
     ])
     .nullable(),
+  /**
+   * Set when the file is a flash dump read from a later flash address: this
+   * image is not an app, its chip's ROM loads the bootloader from
+   * `flash_offset`, and a partition table sits at `table_file_offset`, where
+   * that origin puts the default `0x8000`. Reopen the file as
+   * `esp-flash-image` with that `flash_offset`. Null otherwise, and in the
+   * nested facts of a flash layout.
+   */
+  flash_dump: z
+    .strictObject({ flash_offset: uint32, table_file_offset: offset })
+    .nullable(),
 });
 export type EspImageMetadata = z.infer<typeof espImageMetadataSchema>;
 

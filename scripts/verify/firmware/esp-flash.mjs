@@ -339,6 +339,11 @@ const esp32Origin = async (report) => {
     "esp-image",
     "no origin, no layout",
   );
+  // The table at file offset 0x7000 shows where the dump was read from.
+  assert.deepEqual(guessed.root.flash_dump, {
+    flash_offset: 0x1000,
+    table_file_offset: 0x7000,
+  });
   const flags = [
     "--target-format",
     "esp-flash-image",
