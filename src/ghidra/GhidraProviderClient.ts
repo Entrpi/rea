@@ -22,6 +22,7 @@ import {
   ghidraSeedFailure,
   ghidraSeedLimitations,
 } from "./GhidraAnalysisSeeds.js";
+import { ghidraLanguageDefinitionSchema } from "./GhidraLanguageCatalog.js";
 import {
   ghidraPinnedLanguage,
   ghidraProfileDisabledAnalyzers,
@@ -255,6 +256,24 @@ export const createGhidraProviderClient = (input: {
       }),
     );
   const seeds = seedProfile.data;
+  // A caller-selected language loads only the definition its profile committed.
+  const definitionProfile = ghidraLanguageDefinitionSchema
+    .optional()
+    .safeParse(committedProfile.parameters.language_definition);
+  if (
+    !definitionProfile.success ||
+    (target.format === "raw-binary" && target.architecture === undefined) !==
+      (definitionProfile.data !== undefined)
+  )
+    return err(
+      new ProviderAdapterError("ghidra", "open_binary", {
+        diagnostics: {
+          reason:
+            "A caller-selected language opens only with the language definition that its analysis profile committed; resolve the profile again.",
+        },
+      }),
+    );
+  const languageDefinition = definitionProfile.data;
   const parameterLanguage = ghidraProfileLanguageOverride(
     committedProfile.parameters,
   );
@@ -459,6 +478,9 @@ export const createGhidraProviderClient = (input: {
               ...(ghidraRawProcessorLabels(target.rawLoad) === undefined
                 ? {}
                 : { applyProcessorLabels: false as const }),
+              ...(languageDefinition === undefined
+                ? {}
+                : { languageDefinition }),
             },
           }),
       ...(target.format === "gamecube-dol"

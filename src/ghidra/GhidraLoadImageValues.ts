@@ -13,6 +13,7 @@ import { err, ok, type Result } from "../domain/result.js";
 import {
   GHIDRA_RAW_ENTRY_CONTEXT,
   ghidraRawBinaryLanguage,
+  ghidraRawProcessorLabels,
 } from "./GhidraRawBinaryLanguage.js";
 import { isLegacyRawLoad, rawEntryRoleAndBasis } from "../domain/rawBinary.js";
 
@@ -469,9 +470,9 @@ export const attestGhidraRawBinaryLoadImage = (
     observations.entry_points.find((entry) => entry === entryPoint) ?? null,
   );
   check("relocation_records", [], observations.relocations);
-  if (rawLoad.architectureVariant !== undefined)
-    // Processor-defined labels are not applied to a variant load, so the
-    // committed entry is the only external entry.
+  if (ghidraRawProcessorLabels(rawLoad) !== undefined)
+    // Processor-defined labels are not applied to a variant or
+    // provider-language load, so the committed entry is the only external entry.
     check("entry_points", [entryPoint], [...observations.entry_points].sort());
   if (rawLoad.entryIsaMode !== undefined) {
     // The bridge reports the register committed for this import, not one chosen by language name.
@@ -494,7 +495,8 @@ export const attestGhidraRawBinaryLoadImage = (
         version: 1,
         format: "raw-binary",
         target_sha256: target.sha256,
-        architecture: target.architecture,
+        // A provider-language load names no family.
+        architecture: target.architecture ?? null,
         ...(rawLoad.architectureVariant === undefined
           ? {}
           : { architecture_variant: rawLoad.architectureVariant }),

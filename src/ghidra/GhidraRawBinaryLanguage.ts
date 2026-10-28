@@ -6,6 +6,7 @@ import type {
   RawBinaryLoad,
   RawBinaryTarget,
 } from "../domain/binaryTargetTypes.js";
+import type { ProviderLanguageSelection } from "../domain/providerLanguage.js";
 import { isLegacyRawLoad } from "../domain/rawBinary.js";
 
 /** Bound Ghidra language for a raw-binary load. */
@@ -143,7 +144,13 @@ export const ghidraRawBinaryLanguage = (
 };
 
 const GENERIC_RAW_LANGUAGES =
-  "Little-endian generic Ghidra languages are used for x86, x86_64, arm, arm64, and NMOS 6502; m68k uses the big-endian 68000 default language, which decodes the 68040 superset. Big-endian ARM, 65C02, 65816, separate 68020/68030/CPU32/ColdFire variants, and other processor variants are unsupported; ARM M-profile code needs architecture_variant.";
+  "Little-endian generic Ghidra languages are used for x86, x86_64, arm, arm64, and NMOS 6502; m68k uses the big-endian 68000 default language, which decodes the 68040 superset. Big-endian ARM, 65C02, 65816, separate 68020/68030/CPU32/ColdFire variants, and other processor variants are not families; ARM M-profile code needs architecture_variant, and provider_language can select another Ghidra language, unverified.";
+
+/** What REA checked about a caller-selected language, and what it did not. */
+const callerLanguageLimitation = (
+  selection: ProviderLanguageSelection,
+): string =>
+  `The caller selected the Ghidra language ${selection.languageId} with compiler spec ${selection.compilerSpecId} (verification: unverified). REA checked that the installation defines it, that the image fits its declared address size, and that its default address space is byte-addressed and its only loaded space, but not that it decodes this image. Entry alignment is left to the language's decoder.`;
 
 /**
  * Observed with Ghidra 12.1.4 on the verifier's Cortex-M55 image: WLS and LE
@@ -167,9 +174,11 @@ export const ghidraRawBinaryLimitations = (
       ]
     : [
         `Headerless raw-binary analysis maps file offset 0 at ${load.baseAddress} and seeds the entry ${load.entryPoint}. Headers are not discovered from file bytes.`,
-        load.architectureVariant === undefined
-          ? GENERIC_RAW_LANGUAGES
-          : `The caller-named ${load.architectureVariant} variant is decoded with ${language.languageId} in Thumb state. The decoder does not refuse instructions that this profile lacks, and floating-point and TrustZone state are not modeled.`,
+        load.providerLanguage !== undefined
+          ? callerLanguageLimitation(load.providerLanguage)
+          : load.architectureVariant === undefined
+            ? GENERIC_RAW_LANGUAGES
+            : `The caller-named ${load.architectureVariant} variant is decoded with ${language.languageId} in Thumb state. The decoder does not refuse instructions that this profile lacks, and floating-point and TrustZone state are not modeled.`,
         ...(load.architectureVariant === "armv8.1-m.main"
           ? [GHIDRA_LOW_OVERHEAD_LOOPS]
           : []),
@@ -178,5 +187,7 @@ export const ghidraRawBinaryLimitations = (
               `The entry is the Reset vector ${load.entrySource.resetVector} read from the vector table at ${load.entrySource.address}, with bit 0 cleared. The initial stack pointer ${load.entrySource.initialStackPointer} is recorded and not validated.`,
             ]
           : []),
-        "Only the file is mapped. SRAM, peripheral and system blocks are not created; Ghidra's processor-defined vector labels are not applied, so vectors other than Reset are neither labels nor entries; and reset, memory-mapped I/O, and boot sequences are not emulated.",
+        load.providerLanguage === undefined
+          ? "Only the file is mapped. SRAM, peripheral and system blocks are not created; Ghidra's processor-defined vector labels are not applied, so vectors other than Reset are neither labels nor entries; and reset, memory-mapped I/O, and boot sequences are not emulated."
+          : "Only the file is mapped, in the language's default address space. Ghidra's processor-defined labels and entries are not applied, and reset, memory-mapped I/O, and boot sequences are not emulated.",
       ];
