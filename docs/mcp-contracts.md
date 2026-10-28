@@ -1257,7 +1257,8 @@ known and differ. If only one value is known, storage comparison is unknown;
 when both are omitted, storage is not compared.
 
 `compare_artifacts` also compares the declarations in the `format_metadata`
-of PyInstaller entries (`pyinstaller-entry`), Node SEA members
+of UnityFS members (`unityfs-entry`), PyInstaller entries
+(`pyinstaller-entry`), Node SEA members
 (`node-sea-entry`), ESP image segments (`esp-image-segment`), ESP flash
 partitions (`esp-flash-partition`) and Intel HEX/S-record regions
 (`hex-record-region`); each format's

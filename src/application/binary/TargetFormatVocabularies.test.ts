@@ -118,6 +118,7 @@ const TARGETS: TargetFixtures = {
   "app-pack": { ...archive, format: "app-pack" },
   asar: { ...archive, format: "asar" },
   "godot-pck": { ...archive, format: "godot-pck" },
+  unityfs: { ...archive, format: "unityfs" },
   dmg: { ...archive, format: "dmg" },
   pkg: { ...archive, format: "pkg" },
   "intel-hex": { ...archive, format: "intel-hex" },

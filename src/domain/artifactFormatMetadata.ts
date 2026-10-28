@@ -555,6 +555,17 @@ const declarationsByKind: {
     notCompared:
       "index and declared_offset are layout; flags and md5_status repeat occurrence facts; source_path spells Godot's lookup path in a version-dependent way. docs/godot-pck.md gives the evidence.",
   },
+  unityfs: {
+    notCompared:
+      "Its fields come from the bundle's own bytes, which content comparison covers.",
+  },
+  /** What the directory declares for a member: its source path and raw node flags. Index and offset are layout. */
+  "unityfs-entry": {
+    declaration: (metadata) => ({
+      source_path: metadata.source_path,
+      flags: metadata.flags,
+    }),
+  },
   pyinstaller: {
     notCompared:
       "Its fields come from the archive's own bytes, which content comparison covers.",
