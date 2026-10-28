@@ -405,11 +405,11 @@ export const artifactFormatMetadataSchema = z.discriminatedUnion("kind", [
   nodeSeaEntryMetadataSchema,
   hexRecordsMetadataSchema,
   hexRecordRegionMetadataSchema,
+  uImageMetadataSchema,
+  uImageEntryMetadataSchema,
   espImageMetadataSchema,
   espImageSegmentMetadataSchema,
   espImageSignatureBlockMetadataSchema,
-  uImageMetadataSchema,
-  uImageEntryMetadataSchema,
 ]);
 export type ArtifactFormatMetadata = z.infer<
   typeof artifactFormatMetadataSchema
