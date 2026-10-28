@@ -141,7 +141,7 @@ describe("managed application graph MethodDef scope", () => {
 });
 
 describe("managed application graph projection", () => {
-  it("projects managed metadata and native declarations into authenticated graph Evidence", () => {
+  it("projects managed metadata and native declarations into authenticated graph Evidence", async () => {
     const { artifactEvidence, memberEvidence, boundaryEvidence } =
       createManagedInteropEvidence();
 
@@ -245,7 +245,7 @@ describe("managed application graph projection", () => {
       ),
     ).toContain("managed-static-analysis");
 
-    const trace = traceApplicationFeatureEvidence({
+    const trace = await traceApplicationFeatureEvidence({
       application: parsed,
       native_observations: [],
       seed: {

@@ -415,7 +415,12 @@ export const registerSessionTools = (
     compareArtifactsContract,
     options.artifactResources,
   );
-  registerFunctionComparisonTool(server, session, compareFunctionsContract);
+  registerFunctionComparisonTool(
+    server,
+    session,
+    compareFunctionsContract,
+    options.artifactResources,
+  );
   registerNativeFunctionMatchingTool(
     server,
     session,

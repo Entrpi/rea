@@ -1,15 +1,17 @@
-import type {
-  EvidenceInput,
-  EvidenceSourceInput,
+import {
+  evidenceReferenceSchema,
+  type EvidenceInput,
+  type EvidenceReference,
 } from "../domain/evidenceReference.js";
 import type { Evidence } from "../domain/evidence.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import { EvidenceReferenceError } from "../domain/evidenceErrors.js";
+import { analysisInputErrorFromIssues } from "../domain/inputIssueProjection.js";
 import { err, ok, type Result } from "../domain/result.js";
 import {
   readEvidenceFileSource,
   type EvidenceFileReadOptions,
-} from "./analysisView/evidenceFileSource.js";
+} from "./EvidenceFileSource.js";
 
 /** Read-only lookup supplied by the current investigation's Evidence ledger. */
 export type EvidenceLookup = (evidenceId: string) => Evidence | undefined;
@@ -42,82 +44,83 @@ export const resolveEvidenceInput = (
   return ok(record);
 };
 
-/** Resolve an application's Evidence before its existing semantic validation. */
-export const resolveApplicationEvidenceRequest = <
-  T extends { readonly application: EvidenceInput },
->(
-  input: T,
-  lookup: EvidenceLookup | undefined,
-): Result<
-  Omit<T, "application"> & { readonly application: Evidence },
-  EvidenceReferenceError
-> => {
-  const application = resolveEvidenceInput(input.application, lookup);
-  if (!application.ok) return application;
-  return ok({ ...input, application: application.value });
-};
+/** The operation resolving the sources, its cancellation, and the scope for Evidence-file reads. */
+export interface EvidenceSourceOptions extends EvidenceFileReadOptions {
+  readonly operation: string;
+}
 
-/** Resolve explicitly paired Evidence without guessing another session's record. */
-export const resolvePairedEvidenceRequest = <
-  T extends { readonly left: EvidenceInput; readonly right: EvidenceInput },
->(
-  input: T,
-  lookup: EvidenceLookup | undefined,
-): Result<
-  Omit<T, "left" | "right"> & {
-    readonly left: Evidence;
-    readonly right: Evidence;
-  },
-  EvidenceReferenceError
-> => {
-  const left = resolveEvidenceInput(input.left, lookup);
-  if (!left.ok) return left;
-  const right = resolveEvidenceInput(input.right, lookup);
-  if (!right.ok) return right;
-  return ok({ ...input, left: left.value, right: right.value });
-};
+/** A reference resolves to Evidence; inline Evidence is unchanged until its consumer authenticates it. */
+type ResolvedEvidenceSource<Source> = Source extends EvidenceReference
+  ? Evidence
+  : Source;
 
-/** Resolve paired sources like resolvePairedEvidenceRequest; Evidence files use the shared file reader. */
-export const resolvePairedEvidenceSources = async <
-  T extends {
-    readonly left: EvidenceSourceInput;
-    readonly right: EvidenceSourceInput;
-  },
+/**
+ * Resolve the named Evidence sources of one request, in order. A retained
+ * reference resolves from the session and an Evidence file through the shared
+ * reader; inline Evidence passes through unchanged for its consumer to
+ * authenticate. A workflow can pass sources it has not parsed: inline Evidence
+ * is then not copied, and a malformed reference is an input error at its field.
+ */
+export const resolveEvidenceSources = async <
+  Request extends { readonly [Name in Field]: unknown },
+  Field extends string,
 >(
-  input: T,
+  request: Request,
+  fields: readonly Field[],
   lookup: EvidenceLookup | undefined,
-  options: EvidenceFileReadOptions & { readonly operation: string },
+  options: EvidenceSourceOptions,
 ): Promise<
   Result<
-    Omit<T, "left" | "right"> & {
-      readonly left: Evidence;
-      readonly right: Evidence;
+    Omit<Request, Field> & {
+      readonly [Name in Field]: ResolvedEvidenceSource<Request[Name]>;
     },
     AnalysisError
   >
 > => {
-  const left = await resolveEvidenceSource(input.left, "left", lookup, options);
-  if (!left.ok) return left;
-  const right = await resolveEvidenceSource(
-    input.right,
-    "right",
-    lookup,
-    options,
-  );
-  if (!right.ok) return right;
-  return ok({ ...input, left: left.value, right: right.value });
+  const resolved: Partial<Record<Field, unknown>> = {};
+  for (const field of fields) {
+    const source = await resolveEvidenceSource(request, field, lookup, options);
+    if (!source.ok) return source;
+    resolved[field] = source.value;
+  }
+  // Each named field now holds its resolved source; the others are unchanged.
+  return ok({ ...request, ...resolved } as Omit<Request, Field> & {
+    readonly [Name in Field]: ResolvedEvidenceSource<Request[Name]>;
+  });
 };
 
-const resolveEvidenceSource = async (
-  input: EvidenceSourceInput,
-  side: "left" | "right",
+const resolveEvidenceSource = async <Field extends string>(
+  request: { readonly [Name in Field]: unknown },
+  field: Field,
   lookup: EvidenceLookup | undefined,
-  options: EvidenceFileReadOptions & { readonly operation: string },
-): Promise<Result<Evidence, AnalysisError>> => {
-  if ("kind" in input && input.kind === "evidence-file")
-    return readEvidenceFileSource(input.path, options, input.evidence_id, {
-      operation: options.operation,
-      path: [side],
-    });
-  return resolveEvidenceInput(input, lookup);
+  options: EvidenceSourceOptions,
+): Promise<Result<unknown, AnalysisError>> => {
+  const source = request[field];
+  // Evidence is a strict object without kind, so only a reference has one.
+  if (
+    typeof source !== "object" ||
+    source === null ||
+    !Object.hasOwn(source, "kind")
+  )
+    return ok(source);
+  const reference = evidenceReferenceSchema.safeParse(source);
+  if (!reference.success)
+    return err(
+      analysisInputErrorFromIssues(
+        options.operation,
+        reference.error.issues.map((issue) => ({
+          ...issue,
+          path: [field, ...issue.path],
+        })),
+        request,
+        { cause: reference.error },
+      ),
+    );
+  if (reference.data.kind === "retained-evidence")
+    return resolveEvidenceInput(reference.data, lookup);
+  return readEvidenceFileSource(
+    reference.data,
+    { operation: options.operation, path: [field] },
+    options,
+  );
 };

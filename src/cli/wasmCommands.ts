@@ -1,12 +1,14 @@
 import { projectCliAnalysisResult } from "./projectCliAnalysisResult.js";
 import { localPathStringSchema } from "../domain/localPath.js";
 import { compareWasmInterfaces } from "../application/wasm/WasmInterfaceComparisonService.js";
-import { parseCliJsonInput } from "../cliJsonInput.js";
+import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
+import { parseCliJsonInput, resolveCliJsonPaths } from "../cliJsonInput.js";
 import { CLI_COMMANDS } from "../cliCommandNames.js";
 import { z } from "incur";
 import { wasmArtifactModule } from "../composition/wasm.js";
 import { logCliCommand } from "../cliLogging.js";
-import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
+import { ARTIFACT_COMPARISON_PROVIDER } from "../domain/comparisonEvidenceIdentity.js";
+import { ok } from "../domain/result.js";
 import type { Logger } from "pino";
 import type { CliInstance } from "./types.js";
 import { withCommandCancellation } from "./commandCancellation.js";
@@ -30,7 +32,7 @@ export const registerWasmCommands = (
       input: z
         .string()
         .describe(
-          "Inline JSON or input file containing left/right complete Evidence and required scope",
+          'Inline JSON or input file containing required scope and left/right complete Evidence or {kind:"evidence-file",path,evidence_id?}',
         ),
     }),
     run: ({ args }) =>
@@ -42,8 +44,27 @@ export const registerWasmCommands = (
             signal,
           );
           if (!input.ok) return input.error;
-          const result = await compareWasmInterfaces(input.value, { signal });
-          return result.ok ? result.value : projectAnalysisError(result.error);
+          // Evidence-file paths are resolved against the operator's working directory.
+          const value = resolveCliJsonPaths(input.value, [
+            ["left", "path"],
+            ["right", "path"],
+          ]);
+          const resources = new ArtifactResourceScope();
+          return projectCliAnalysisResult(
+            await finishAnalysisCommand(
+              async () => {
+                const result = await compareWasmInterfaces(value, {
+                  signal,
+                  resources,
+                });
+                return result.ok ? ok(result.value.evidence) : result;
+              },
+              resources,
+              ARTIFACT_COMPARISON_PROVIDER.id,
+              "compare_wasm_interfaces",
+              signal,
+            ),
+          );
         }),
       ),
   });

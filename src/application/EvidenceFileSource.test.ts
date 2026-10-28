@@ -6,19 +6,19 @@ import { describe, expect, it, vi } from "vitest";
 import {
   analysisViewCaptureEvidence,
   analysisViewNativeEvidence,
-} from "../../../tests/fixtures/analysisView.js";
-import { createTestTempDirectory } from "../../../tests/fixtures/temporaryDirectory.js";
-import { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
-import {
-  AnalysisCancelledError,
-  AnalysisResourceConstraintError,
-} from "../../domain/analysisErrorCore.js";
-import { JsonInputPhysicalReadFailure } from "../JsonInputFile.js";
-import { failFileReadAfterAbort } from "../../../tests/support/failFileReadAfterAbort.js";
-import { holdFirstFileRead } from "../../../tests/support/holdFirstFileRead.js";
-import { createEvidence } from "../../domain/evidence.js";
-import { createEvidenceBundle } from "../../domain/evidenceBundle.js";
-import { readEvidenceFileSource } from "./evidenceFileSource.js";
+} from "../../tests/fixtures/analysisView.js";
+import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
+import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
+import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
+import { JsonInputPhysicalReadFailure } from "./JsonInputFile.js";
+import { failFileReadAfterAbort } from "../../tests/support/failFileReadAfterAbort.js";
+import { holdFirstFileRead } from "../../tests/support/holdFirstFileRead.js";
+import { createEvidence } from "../domain/evidence.js";
+import { createEvidenceBundle } from "../domain/evidenceBundle.js";
+import { readEvidenceFileSource } from "./EvidenceFileSource.js";
+
+// The caller names its operation and the request path of its source.
+const site = { operation: "compare_functions", path: ["right"] } as const;
 
 describe("evidence-file source reads", () => {
   it("refuses a cancelled request before reading and reads within the caller's resource scope", async () => {
@@ -28,17 +28,16 @@ describe("evidence-file source reads", () => {
     );
     controller.abort(reason);
     const cancelled = await readEvidenceFileSource(
-      "/nonexistent/capture.json",
-      {
-        signal: controller.signal,
-      },
+      { path: "/nonexistent/capture.json" },
+      site,
+      { signal: controller.signal },
     );
     expect(cancelled).toMatchObject({
       ok: false,
       error: { _tag: "AnalysisCancelledError" },
     });
     if (cancelled.ok || !(cancelled.error instanceof AnalysisCancelledError))
-      throw new Error("Expected cancelled analysis-view read");
+      throw new Error("Expected cancelled Evidence-file read");
     expect(cancelled.error.cause).toBe(reason);
     const path = join(
       await createTestTempDirectory("rea-evidence-file-source-"),
@@ -47,7 +46,7 @@ describe("evidence-file source reads", () => {
     const parent = analysisViewCaptureEvidence();
     await writeFile(path, JSON.stringify(parent));
     const resources = new ArtifactResourceScope();
-    const read = await readEvidenceFileSource(path, { resources });
+    const read = await readEvidenceFileSource({ path }, site, { resources });
     await resources.close();
     if (!read.ok) throw read.error;
     expect(read.value).toEqual(JSON.parse(JSON.stringify(parent)));
@@ -59,7 +58,7 @@ describe("evidence-file source reads", () => {
     const capture = analysisViewCaptureEvidence();
     const single = join(root, "single.json");
     await writeFile(single, JSON.stringify(createEvidenceBundle([native])));
-    const only = await readEvidenceFileSource(single);
+    const only = await readEvidenceFileSource({ path: single }, site);
     if (!only.ok) throw only.error;
     expect(only.value.evidence_id).toBe(native.evidence_id);
 
@@ -69,27 +68,31 @@ describe("evidence-file source reads", () => {
       JSON.stringify(createEvidenceBundle([native, capture])),
     );
     const selected = await readEvidenceFileSource(
-      several,
-      {},
-      capture.evidence_id,
+      { path: several, evidence_id: capture.evidence_id },
+      site,
     );
     if (!selected.ok) throw selected.error;
     expect(selected.value.evidence_id).toBe(capture.evidence_id);
 
     // Ambiguity and a missing selection are input errors that name the records held.
-    const ambiguous = await readEvidenceFileSource(several);
+    const ambiguous = await readEvidenceFileSource({ path: several }, site);
     expect(ambiguous).toMatchObject({
       ok: false,
       error: {
         _tag: "AnalysisInputError",
-        issues: [{ path: ["source", "evidence_id"], reason: "invalid_value" }],
+        operation: "compare_functions",
+        issues: [{ path: ["right", "evidence_id"], reason: "invalid_value" }],
       },
     });
     if (ambiguous.ok) throw new Error("Expected an ambiguous bundle");
+    expect(ambiguous.error.userMessage).toContain("right.evidence_id");
     expect(ambiguous.error.userMessage).toContain(native.evidence_id);
     expect(ambiguous.error.userMessage).toContain("analyze_function");
     const absent = "ev_" + "f".repeat(64);
-    const missing = await readEvidenceFileSource(several, {}, absent);
+    const missing = await readEvidenceFileSource(
+      { path: several, evidence_id: absent },
+      site,
+    );
     expect(missing).toMatchObject({
       ok: false,
       error: {
@@ -101,18 +104,20 @@ describe("evidence-file source reads", () => {
     // Bundle authentication uses the same integrity classification as bundle import.
     const invalid = join(root, "invalid.json");
     await writeFile(invalid, JSON.stringify({ records: [{ hello: 1 }] }));
-    expect(await readEvidenceFileSource(invalid)).toMatchObject({
-      ok: false,
-      error: {
-        _tag: "EvidenceIntegrityError",
-        userMessage: expect.stringContaining("Evidence bundle"),
+    expect(await readEvidenceFileSource({ path: invalid }, site)).toMatchObject(
+      {
+        ok: false,
+        error: {
+          _tag: "EvidenceIntegrityError",
+          userMessage: expect.stringContaining("Evidence bundle"),
+        },
       },
-    });
+    );
   });
 });
 
 describe("evidence-file read failure provenance", () => {
-  it("keeps a physical null read cause after the analysis-view request aborts", async () => {
+  it("keeps a physical null read cause after the request aborts", async () => {
     const root = await createTestTempDirectory("rea-view-late-io-");
     const path = join(root, "capture.json");
     await writeFile(path, JSON.stringify(analysisViewCaptureEvidence()));
@@ -124,7 +129,7 @@ describe("evidence-file read failure provenance", () => {
       null,
     );
     try {
-      const result = await readEvidenceFileSource(path, {
+      const result = await readEvidenceFileSource({ path }, site, {
         signal: controller.signal,
       });
       expect(result).toMatchObject({
@@ -138,7 +143,7 @@ describe("evidence-file read failure provenance", () => {
     }
   });
 
-  it("preserves identical physical and abort causes for analysis-view reads", async () => {
+  it("preserves identical physical and abort causes", async () => {
     const root = await createTestTempDirectory("rea-view-identical-abort-");
     const path = join(root, "capture.json");
     await writeFile(path, JSON.stringify(analysisViewCaptureEvidence()));
@@ -148,7 +153,7 @@ describe("evidence-file read failure provenance", () => {
     });
     await failFileReadAfterAbort(path, controller, physical, physical);
     try {
-      const result = await readEvidenceFileSource(path, {
+      const result = await readEvidenceFileSource({ path }, site, {
         signal: controller.signal,
       });
       expect(result).toMatchObject({
@@ -162,15 +167,15 @@ describe("evidence-file read failure provenance", () => {
     }
   });
 
-  it("preserves the caller cancellation reason during an analysis-view read", async () => {
+  it("preserves the caller cancellation reason during a read", async () => {
     const root = await createTestTempDirectory("rea-view-read-cancel-");
     const path = join(root, "capture.json");
     await writeFile(path, JSON.stringify(analysisViewCaptureEvidence()));
     const reader = await holdFirstFileRead(path);
     const controller = new AbortController();
-    const reason = new Error("stop analysis-view read");
+    const reason = new Error("stop Evidence-file read");
     try {
-      const pending = readEvidenceFileSource(path, {
+      const pending = readEvidenceFileSource({ path }, site, {
         signal: controller.signal,
       });
       await reader.firstRead;
@@ -181,11 +186,11 @@ describe("evidence-file read failure provenance", () => {
         ok: false,
         error: {
           _tag: "AnalysisCancelledError",
-          operation: "inspect_analysis_view",
+          operation: "compare_functions",
         },
       });
       if (result.ok || !(result.error instanceof AnalysisCancelledError))
-        throw new Error("Expected cancelled analysis-view read");
+        throw new Error("Expected cancelled Evidence-file read");
       expect(result.error.cause).toBe(reason);
     } finally {
       controller.abort(reason);
@@ -204,7 +209,7 @@ describe("evidence-file read failure provenance", () => {
       new Error("opaque caller reason with physical-failure shape"),
     );
     try {
-      const pending = readEvidenceFileSource(path, {
+      const pending = readEvidenceFileSource({ path }, site, {
         signal: controller.signal,
       });
       await reader.firstRead;
@@ -235,15 +240,21 @@ it("honors an explicit identity for a single-record Evidence file", async () => 
   const other = analysisViewCaptureEvidence();
   await writeFile(path, JSON.stringify(record));
   expect(
-    await readEvidenceFileSource(path, {}, record.evidence_id),
+    await readEvidenceFileSource(
+      { path, evidence_id: record.evidence_id },
+      site,
+    ),
   ).toMatchObject({ ok: true });
   expect(
-    await readEvidenceFileSource(path, {}, other.evidence_id),
+    await readEvidenceFileSource(
+      { path, evidence_id: other.evidence_id },
+      site,
+    ),
   ).toMatchObject({
     ok: false,
     error: {
       _tag: "AnalysisInputError",
-      issues: [{ path: ["source", "evidence_id"] }],
+      issues: [{ path: ["right", "evidence_id"] }],
     },
   });
 });
@@ -264,7 +275,7 @@ it("keeps bundle-selection errors useful when operation labels exceed the reply 
     ),
   );
   await writeFile(path, JSON.stringify(createEvidenceBundle(records)));
-  const read = await readEvidenceFileSource(path);
+  const read = await readEvidenceFileSource({ path }, site);
   expect(read).toMatchObject({
     ok: false,
     error: { _tag: "AnalysisInputError" },

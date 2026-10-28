@@ -25,9 +25,10 @@ import { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { analysisInputErrorFromIssues } from "../../domain/inputIssueProjection.js";
 import { err, ok, type Result } from "../../domain/result.js";
 import {
-  resolvePairedEvidenceRequest,
+  resolveEvidenceSources,
   type EvidenceLookup,
 } from "../EvidenceInputResolver.js";
+import type { EvidenceFileReadOptions } from "../EvidenceFileSource.js";
 import type { ExecutionOptions } from "../AnalysisProvider.js";
 import type { z } from "zod";
 import { safeParseEvidence } from "../../domain/evidenceValidation.js";
@@ -76,13 +77,19 @@ const inspectionInputFailure = (
     ]),
   );
 
+/** Comparison Evidence and the authenticated inspections it cites. */
+export interface WasmInterfaceComparisonExecution {
+  readonly evidence: Evidence;
+  readonly sources: readonly [Evidence, Evidence];
+}
+
 /** Compare only producer-owned typed facts; no raw WAT or original file is reread. */
 export const compareWasmInterfaces = async (
   rawInput: unknown,
-  options?: ExecutionOptions,
+  options: ExecutionOptions & EvidenceFileReadOptions = {},
   lookup?: EvidenceLookup,
-): Promise<Result<Evidence, AnalysisError>> => {
-  if (options?.signal?.aborted)
+): Promise<Result<WasmInterfaceComparisonExecution, AnalysisError>> => {
+  if (options.signal?.aborted)
     return err(
       new AnalysisCancelledError(OPERATION, { cause: options.signal.reason }),
     );
@@ -91,10 +98,15 @@ export const compareWasmInterfaces = async (
     return err(
       analysisInputErrorFromIssues(OPERATION, parsed.error.issues, rawInput),
     );
-  const resolved = resolvePairedEvidenceRequest(parsed.data, lookup);
+  const resolved = await resolveEvidenceSources(
+    parsed.data,
+    ["left", "right"],
+    lookup,
+    { ...options, operation: OPERATION },
+  );
   if (!resolved.ok) return resolved;
   const assertActive = () => {
-    if (options?.signal?.aborted)
+    if (options.signal?.aborted)
       throw new AnalysisCancelledError(OPERATION, {
         cause: options.signal.reason,
       });
@@ -270,7 +282,13 @@ export const compareWasmInterfaces = async (
       evidenceLinks: [left.evidence.evidence_id, right.evidence.evidence_id],
     });
     await setImmediate();
-    return completeProviderEvidence(evidence, options?.signal);
+    const completed = completeProviderEvidence(evidence, options.signal);
+    return completed.ok
+      ? ok({
+          evidence: completed.value,
+          sources: [left.evidence, right.evidence],
+        })
+      : completed;
   } catch (cause: unknown) {
     if (cause instanceof AnalysisError) return err(cause);
     throw cause;

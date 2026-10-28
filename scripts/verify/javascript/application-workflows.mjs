@@ -45,7 +45,7 @@ const [left, right] = await Promise.all([
   analyze(options.left),
   analyze(options.right),
 ]);
-const comparison = compareApplicationVersionsEvidence({ left, right });
+const comparison = await compareApplicationVersionsEvidence({ left, right });
 if (!comparison.ok) throw comparison.error;
 const comparisonResult = comparison.value.result;
 const seedValue =
@@ -56,7 +56,7 @@ const seedValue =
 const trace =
   seedValue === undefined
     ? null
-    : traceApplicationFeatureEvidence({
+    : await traceApplicationFeatureEvidence({
         application: left,
         seed: {
           kind: options["seed-kind"],
@@ -72,7 +72,7 @@ const exportShapeSelector = resolveExportShapeSelector(left, right, options);
 const exportShapeComparison =
   exportShapeSelector === null
     ? null
-    : compareJavaScriptExportShapesEvidence({
+    : await compareJavaScriptExportShapesEvidence({
         left,
         right,
         ...exportShapeSelector,

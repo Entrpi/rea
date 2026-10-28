@@ -1,18 +1,18 @@
-import { requireAuthenticationHeadroom } from "../JsonAuthenticationHeadroom.js";
-import { authenticateEvidenceBundleValue } from "../EvidenceBundleFiles.js";
-import type { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
-import type { AnalysisError } from "../../domain/analysisErrorBase.js";
+import { requireAuthenticationHeadroom } from "./JsonAuthenticationHeadroom.js";
+import { authenticateEvidenceBundleValue } from "./EvidenceBundleFiles.js";
+import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import {
   AnalysisCancelledError,
   AnalysisInputError,
-} from "../../domain/analysisErrorCore.js";
-import { INSPECT_ANALYSIS_VIEW_OPERATION } from "../../domain/analysisView/analysisViewErrors.js";
-import { err, ok, type Result } from "../../domain/result.js";
-import type { Evidence } from "../../domain/evidence.js";
-import { safeParseEvidence } from "../../domain/evidenceValidation.js";
-import { EvidenceFileError } from "../../domain/evidenceErrors.js";
-import { projectInputIssues } from "../../domain/inputIssueProjection.js";
-import { readJsonFile } from "../JsonFiles.js";
+} from "../domain/analysisErrorCore.js";
+import { err, ok, type Result } from "../domain/result.js";
+import type { Evidence } from "../domain/evidence.js";
+import type { EvidenceFileReference } from "../domain/evidenceReference.js";
+import { safeParseEvidence } from "../domain/evidenceValidation.js";
+import { EvidenceFileError } from "../domain/evidenceErrors.js";
+import { projectInputIssues } from "../domain/inputIssueProjection.js";
+import { readJsonFile } from "./JsonFiles.js";
 
 /** The request cancellation and the scope retaining descriptors whose close failed. */
 export interface EvidenceFileReadOptions {
@@ -25,11 +25,6 @@ export interface EvidenceFileSourceSite {
   readonly operation: string;
   readonly path: readonly (string | number)[];
 }
-
-const ANALYSIS_VIEW_SOURCE: EvidenceFileSourceSite = {
-  operation: INSPECT_ANALYSIS_VIEW_OPERATION,
-  path: ["source"],
-};
 
 const selectionError = (
   site: EvidenceFileSourceSite,
@@ -113,11 +108,11 @@ const listRecordIds = (records: readonly Evidence[]): string => {
 
 /** Read one Evidence record or select from an authenticated bundle without rereading the file. */
 export const readEvidenceFileSource = async (
-  path: string,
+  source: Pick<EvidenceFileReference, "path" | "evidence_id">,
+  site: EvidenceFileSourceSite,
   options: EvidenceFileReadOptions = {},
-  evidenceId?: string,
-  site: EvidenceFileSourceSite = ANALYSIS_VIEW_SOURCE,
 ): Promise<Result<Evidence, AnalysisError>> => {
+  const { path, evidence_id: evidenceId } = source;
   const { signal, resources } = options;
   const { operation } = site;
   if (signal?.aborted)

@@ -597,6 +597,18 @@ A one-shot command keeps no session Evidence, so it refuses a
 `retained-evidence` source with `details.reason: "missing"`. Select the record
 from a saved bundle instead.
 
+The other commands that take Evidence for a comparison or an application
+workflow accept the same sources in their `left`, `right` or `application`
+fields: `compare-wasm-interfaces`, `trace-application-feature`,
+`trace-javascript-semantics`, `compare-application-versions`,
+`compare-source-to-bundle` and `compare-javascript-export-shapes`. A saved
+record does not have to be copied into the request:
+
+```bash
+rea analyze-javascript-application /absolute/path/to/app --json > app-evidence.json
+rea trace-application-feature '{"application":{"kind":"evidence-file","path":"app-evidence.json"},"seed":{"kind":"module","value":"main.js","match":"exact"}}' --json
+```
+
 ## Import historical source
 
 Historical source inventories preserve exact filenames, including literal backslashes

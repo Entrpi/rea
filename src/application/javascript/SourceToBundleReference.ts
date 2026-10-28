@@ -9,8 +9,14 @@ import {
 import type { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
 import { AnalysisCancelledError } from "../../domain/analysisErrorCore.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
+import type { Evidence } from "../../domain/evidence.js";
 import { analysisInputErrorFromIssues } from "../../domain/inputIssueProjection.js";
 import { err, ok, type Result } from "../../domain/result.js";
+import {
+  resolveEvidenceSources,
+  type EvidenceLookup,
+} from "../EvidenceInputResolver.js";
+import type { EvidenceFileReadOptions } from "../EvidenceFileSource.js";
 import { readJsonFileWithSource } from "../JsonFiles.js";
 
 /** Historical facts plus the file-origin metadata supplied by the reader, if any. */
@@ -21,6 +27,36 @@ export type ResolvedSourceToBundleReference = {
     readonly path: string;
     readonly requested_path: string;
   };
+};
+
+/** Resolve the application Evidence source, then the historical reference, for one comparison. */
+export const resolveSourceToBundleSources = async (
+  input: Pick<
+    z.output<typeof compareSourceToBundleCliInputSchema>,
+    "application" | "reference"
+  >,
+  lookup: EvidenceLookup | undefined,
+  options: EvidenceFileReadOptions,
+): Promise<
+  Result<
+    ResolvedSourceToBundleReference & { readonly application: Evidence },
+    AnalysisError
+  >
+> => {
+  const resolved = await resolveEvidenceSources(
+    input,
+    ["application"],
+    lookup,
+    { ...options, operation: "compare_source_to_bundle" },
+  );
+  if (!resolved.ok) return resolved;
+  const reference = await resolveSourceToBundleReference(
+    input.reference,
+    options.signal,
+    options.resources,
+  );
+  if (!reference.ok) return reference;
+  return ok({ ...reference.value, application: resolved.value.application });
 };
 
 /** Resolve one caller-selected historical graph using the shared bounded regular-file reader. No file cache. */

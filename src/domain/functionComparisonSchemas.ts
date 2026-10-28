@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { overallStatus, summarize } from "./functionComparisonResults.js";
 import { canonicalJson } from "./comparisonSemantics.js";
-import { evidenceInputSchema } from "./evidenceReference.js";
+import { evidenceSourceInputSchema } from "./evidenceReference.js";
 import { digestSchema, prefixedDigestSchema } from "./../domain/digests.js";
 
 const comparisonStatusSchema = z.enum(["unchanged", "changed", "unknown"]);
@@ -19,8 +19,8 @@ const evidenceIdSchema = prefixedDigestSchema("ev");
 
 /** Inputs for explicit function-to-function comparison. */
 export const functionComparisonInputSchema = z.strictObject({
-  left: evidenceInputSchema,
-  right: evidenceInputSchema,
+  left: evidenceSourceInputSchema,
+  right: evidenceSourceInputSchema,
 });
 
 const textDeltaSchema = z.object({

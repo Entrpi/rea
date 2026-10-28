@@ -73,7 +73,7 @@ export const APPLICATION_TOOL_CONTRACTS = [
     name: "trace_application_feature",
     ...toolContractMetadata("trace_application_feature"),
     description:
-      "Trace a typed literal seed through every reachable part of an authenticated JavaScript Application Graph supplied as inline Evidence or exact same-session retained references. Original static, native, passive-runtime, inferred, and unknown authorities remain distinct; native addon handoffs never open a provider or execute the application.",
+      'Trace a typed literal seed through every reachable part of an authenticated JavaScript Application Graph. Name the application as complete Evidence, {kind: "retained-evidence", evidence_id} or {kind: "evidence-file", path, evidence_id?}. Original static, native, passive-runtime, inferred, and unknown authorities remain distinct; native addon handoffs never open a provider or execute the application.',
     kind: "application",
     inputSchema: traceApplicationFeatureRequestSchema,
     outputSchema: traceOutputSchema,
@@ -97,7 +97,7 @@ export const APPLICATION_TOOL_CONTRACTS = [
     name: "trace_javascript_semantics",
     ...toolContractMetadata("trace_javascript_semantics"),
     description:
-      "Trace static JavaScript data-flow, direct call/return, and closure relations from inline application Evidence or an exact same-session retained reference. Dynamic or unsupported semantics remain explicit unknowns; static reachability never claims runtime execution.",
+      'Trace static JavaScript data-flow, direct call/return, and closure relations from authenticated application Evidence. Name the application as complete Evidence, {kind: "retained-evidence", evidence_id} or {kind: "evidence-file", path, evidence_id?}. Dynamic or unsupported semantics remain explicit unknowns; static reachability never claims runtime execution.',
     kind: "application",
     inputSchema: traceJavaScriptSemanticsRequestSchema,
     outputSchema: semanticTraceOutputSchema,
@@ -118,7 +118,7 @@ export const APPLICATION_TOOL_CONTRACTS = [
     name: "compare_application_versions",
     ...toolContractMetadata("compare_application_versions"),
     description:
-      "Compare two authenticated JavaScript Application Graph versions supplied as inline Evidence or exact same-session retained references. Uses unique-only exact digest, module source digest, source-map identity, structural fingerprint, and non-module semantic-key tiers. Reports added, removed, changed, ambiguous, and unknown entities plus the complete matching changed_from graph without fuzzy or module-ordinal pairing.",
+      'Compare two authenticated JavaScript Application Graph versions. Name each side as complete Evidence, {kind: "retained-evidence", evidence_id} or {kind: "evidence-file", path, evidence_id?}. Uses unique-only exact digest, module source digest, source-map identity, structural fingerprint, and non-module semantic-key tiers. Reports added, removed, changed, ambiguous, and unknown entities plus the complete matching changed_from graph without fuzzy or module-ordinal pairing.',
     kind: "application",
     inputSchema: compareApplicationVersionsRequestSchema,
     outputSchema: comparisonOutputSchema,
@@ -145,7 +145,7 @@ export const APPLICATION_TOOL_CONTRACTS = [
     name: "compare_source_to_bundle",
     ...toolContractMetadata("compare_source_to_bundle"),
     description:
-      "Compare a cryptographically committed HistoricalSourceGraph supplied inline or as reference {kind:file,path:absolute-local-JSON-path} with authenticated JavaScript Application Graph Evidence supplied inline or by exact same-session retained reference. Omitted view preserves the full report. Optional view {kind:summary} or {kind:source-to-bundle,collection:mappings|candidates,source_paths?,mapping_ids?,statuses?,fields?,offset?,limit?} retains the full parent and returns selected facts. Query it again using inspect_analysis_view. Empty filters select none; identity fields always remain. Candidate signals are opt-in; classifications use the full comparison. Page coverage never upgrades source coverage. Uses explicit exact-digest, source-map path, current-path, suffix, and basename signals with stable weights. Classifies unchanged, modified, removed, split, merged, duplicated, and unknown; incomplete coverage and ambiguous weak signals never become absence or forced matches.",
+      'Compare a cryptographically committed HistoricalSourceGraph supplied inline or as reference {kind:file,path:absolute-local-JSON-path} with authenticated JavaScript Application Graph Evidence, named as complete Evidence, {kind: "retained-evidence", evidence_id} or {kind: "evidence-file", path, evidence_id?}. Omitted view preserves the full report. Optional view {kind:summary} or {kind:source-to-bundle,collection:mappings|candidates,source_paths?,mapping_ids?,statuses?,fields?,offset?,limit?} retains the full parent and returns selected facts. Query it again using inspect_analysis_view. Empty filters select none; identity fields always remain. Candidate signals are opt-in; classifications use the full comparison. Page coverage never upgrades source coverage. Uses explicit exact-digest, source-map path, current-path, suffix, and basename signals with stable weights. Classifies unchanged, modified, removed, split, merged, duplicated, and unknown; incomplete coverage and ambiguous weak signals never become absence or forced matches.',
     kind: "application",
     inputSchema: compareSourceToBundleRequestSchema,
     outputSchema: sourceToBundleOutputSchema,
@@ -161,7 +161,7 @@ export const APPLICATION_TOOL_CONTRACTS = [
     name: "compare_javascript_export_shapes",
     ...toolContractMetadata("compare_javascript_export_shapes"),
     description:
-      "Compare static return shapes for one exact module/export selector on each authenticated JavaScript Application Graph supplied as inline Evidence or exact same-session retained references. Variants pair only by reciprocal unique literal discriminants. Each retained variant lists observed return-property names even when values stay unknown. Presence (present, absent, or unknown-coverage) is separate from value resolution: a name present on only one paired shape is added or removed when parent-property coverage is complete on both sides, including when the static value is unresolved. Dynamic values, incomplete parent coverage, and unpaired variants remain unknown. Reports JSON Pointer changes without executing JavaScript; runtime behavior requires a separate agent-run probe.",
+      'Compare static return shapes for one exact module/export selector on each authenticated JavaScript Application Graph. Name each side as complete Evidence, {kind: "retained-evidence", evidence_id} or {kind: "evidence-file", path, evidence_id?}. Variants pair only by reciprocal unique literal discriminants. Each retained variant lists observed return-property names even when values stay unknown. Presence (present, absent, or unknown-coverage) is separate from value resolution: a name present on only one paired shape is added or removed when parent-property coverage is complete on both sides, including when the static value is unresolved. Dynamic values, incomplete parent coverage, and unpaired variants remain unknown. Reports JSON Pointer changes without executing JavaScript; runtime behavior requires a separate agent-run probe.',
     kind: "application",
     inputSchema: compareJavaScriptExportShapesRequestSchema,
     outputSchema: exportShapeComparisonOutputSchema,

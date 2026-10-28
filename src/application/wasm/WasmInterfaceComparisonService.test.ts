@@ -1,5 +1,4 @@
 import { expect, it, vi } from "vitest";
-import { setImmediate as nextTurn } from "node:timers/promises";
 import { createEvidence, parseEvidence } from "../../domain/evidence.js";
 import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
 import { wasmInterfaceComparisonSchema } from "../../contracts/wasm/wasmComparisonContracts.js";
@@ -57,7 +56,9 @@ const compare = async (
 ) => {
   const result = await compareWasmInterfaces({ left, right, scope: "both" });
   if (!result.ok) throw result.error;
-  return wasmInterfaceComparisonSchema.parse(result.value.normalized_result);
+  return wasmInterfaceComparisonSchema.parse(
+    result.value.evidence.normalized_result,
+  );
 };
 
 it("reports all five comparison states, including duplicate ambiguity and explicit selected scope", async () => {
@@ -93,7 +94,7 @@ it("reports all five comparison states, including duplicate ambiguity and explic
     scope: "imports",
   });
   if (!selected.ok) throw selected.error;
-  expect(selected.value.normalized_result).toMatchObject({
+  expect(selected.value.evidence.normalized_result).toMatchObject({
     changes: [],
     coverage: "complete-within-inputs",
   });
@@ -180,7 +181,7 @@ it("resolves exact retained references and permits cancellation between comparis
     id === left.evidence_id ? left : right,
   );
   if (!result.ok) throw result.error;
-  expect(result.value.evidence_links).toEqual([
+  expect(result.value.evidence.evidence_links).toEqual([
     left.evidence_id,
     right.evidence_id,
   ]);
@@ -303,31 +304,40 @@ it("retains the complete comparison when cancelled at the final handoff", async 
   const right = evidence(facts("changed", "i64"));
   const reason = { request: "cancel completed comparison" };
   const controller = new AbortController();
-  const pending = compareWasmInterfaces(
-    { left, right, scope: "both" },
-    { signal: controller.signal },
-  );
-  // One entry per side needs no batched yields. The initial turn resumes the
-  // comparison and queues its final handoff before this control turn resumes.
-  await nextTurn();
-  controller.abort(reason);
-  const result = await pending;
-  if (result.ok) throw new Error("Expected cancellation during final handoff");
-  expect(result.error).toMatchObject({ _tag: "AnalysisCancelledError" });
-  expect(result.error.cause).toBe(reason);
-  const partial = parseEvidence(result.error.partialObservation);
-  expect(partial).toMatchObject({
-    operation: "compare_wasm_interfaces",
-    confidence: "derived",
-    authority: "analyst-inference",
-    evidence_links: [left.evidence_id, right.evidence_id],
-  });
-  expect(
-    wasmInterfaceComparisonSchema.parse(partial.normalized_result),
-  ).toMatchObject({
-    coverage: "complete-within-inputs",
-    summary: { changed: 1, added: 0, removed: 0, unchanged: 0, unknown: 0 },
-  });
+  // Cancel while the complete report is built: after the last batch check,
+  // before the final handoff, however many turns source resolution takes. The
+  // one-time implementation is consumed first, so the nested parse is the real one.
+  const parse = vi
+    .spyOn(wasmInterfaceComparisonSchema, "parse")
+    .mockImplementationOnce((report) => {
+      controller.abort(reason);
+      return wasmInterfaceComparisonSchema.parse(report);
+    });
+  try {
+    const result = await compareWasmInterfaces(
+      { left, right, scope: "both" },
+      { signal: controller.signal },
+    );
+    if (result.ok)
+      throw new Error("Expected cancellation during final handoff");
+    expect(result.error).toMatchObject({ _tag: "AnalysisCancelledError" });
+    expect(result.error.cause).toBe(reason);
+    const partial = parseEvidence(result.error.partialObservation);
+    expect(partial).toMatchObject({
+      operation: "compare_wasm_interfaces",
+      confidence: "derived",
+      authority: "analyst-inference",
+      evidence_links: [left.evidence_id, right.evidence_id],
+    });
+    expect(
+      wasmInterfaceComparisonSchema.parse(partial.normalized_result),
+    ).toMatchObject({
+      coverage: "complete-within-inputs",
+      summary: { changed: 1, added: 0, removed: 0, unchanged: 0, unknown: 0 },
+    });
+  } finally {
+    parse.mockRestore();
+  }
 });
 
 it("does not report unexpected output-construction failures as invalid caller Evidence", async () => {

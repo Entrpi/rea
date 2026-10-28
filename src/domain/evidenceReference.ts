@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { prefixedDigestSchema } from "./digests.js";
+import { evidenceSchema } from "./evidence.js";
 import { absoluteLocalPathStringSchema } from "./localPath.js";
 
 /** Exact reference to Evidence already retained by the current session. */
@@ -20,19 +21,27 @@ export const evidenceFileReferenceSchema = z.strictObject({
       "The record to select when the file is an Evidence bundle, such as a summary's normalized_result.parent_evidence_id. A bundle holding exactly one record needs no selection.",
     ),
 });
+export type EvidenceFileReference = z.output<
+  typeof evidenceFileReferenceSchema
+>;
 
-import { evidenceSchema } from "./evidence.js";
+/** Evidence named instead of sent inline. Evidence itself is strict and has no kind. */
+export const evidenceReferenceSchema = z.discriminatedUnion("kind", [
+  retainedEvidenceReferenceSchema,
+  evidenceFileReferenceSchema,
+]);
+export type EvidenceReference = z.output<typeof evidenceReferenceSchema>;
 
-/** Portable observation or exact retained identity; semantic authentication follows admission. */
+/** Portable observation or exact retained identity, for a loader that cannot read Evidence files. */
 export const evidenceInputSchema = z.union([
   evidenceSchema,
   retainedEvidenceReferenceSchema,
 ]);
 export type EvidenceInput = z.output<typeof evidenceInputSchema>;
 
-/** Evidence input, or one record read from a local Evidence file or bundle. */
+/** Each Evidence source of a paired comparison or application workflow: inline, retained, or in a local Evidence file. */
 export const evidenceSourceInputSchema = z.union([
-  ...evidenceInputSchema.options,
+  evidenceSchema,
+  retainedEvidenceReferenceSchema,
   evidenceFileReferenceSchema,
 ]);
-export type EvidenceSourceInput = z.output<typeof evidenceSourceInputSchema>;

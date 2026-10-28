@@ -3,10 +3,9 @@ import {
   localPathStringSchema,
 } from "../../domain/localPath.js";
 import { sourceToBundleViewRequestSchema } from "../../domain/analysisView/sourceToBundleView.js";
-import { evidenceSchema } from "../../domain/evidence.js";
 import { z } from "zod";
 
-import { evidenceInputSchema } from "../../domain/evidenceReference.js";
+import { evidenceSourceInputSchema } from "../../domain/evidenceReference.js";
 import { compareApplicationVersionsInputSchema } from "../../domain/javascript/javascriptApplicationVersionComparisonSchemas.js";
 import { compareJavaScriptExportShapesInputSchema } from "../../domain/javascript/javascriptExportShapeComparisonSchemas.js";
 import { traceApplicationFeatureInputSchema } from "../../domain/javascript/javascriptFeatureTraceSchemas.js";
@@ -20,15 +19,15 @@ const traceApplicationFeatureFacts = {
   direction: traceApplicationFeatureInputSchema.shape.direction,
 } as const;
 
-/** Application trace request accepting inline or same-session application Evidence. */
+/** Application trace request; the application Evidence is inline, retained, or in an Evidence file. */
 export const traceApplicationFeatureRequestSchema = z.strictObject({
   ...traceApplicationFeatureFacts,
-  application: evidenceInputSchema,
+  application: evidenceSourceInputSchema,
 });
 
-/** Semantic trace request accepting inline or same-session application Evidence. */
+/** Semantic trace request; the application Evidence is inline, retained, or in an Evidence file. */
 export const traceJavaScriptSemanticsRequestSchema = z.strictObject({
-  application: evidenceInputSchema,
+  application: evidenceSourceInputSchema,
   query: javaScriptSemanticQueryInputSchema,
 });
 
@@ -39,11 +38,11 @@ const compareApplicationVersionsFacts = {
     compareApplicationVersionsInputSchema.shape.right_native_observations,
 } as const;
 
-/** Application comparison request accepting inline or same-session application Evidence. */
+/** Application comparison request; each side is inline, retained, or in an Evidence file. */
 export const compareApplicationVersionsRequestSchema = z.strictObject({
   ...compareApplicationVersionsFacts,
-  left: evidenceInputSchema,
-  right: evidenceInputSchema,
+  left: evidenceSourceInputSchema,
+  right: evidenceSourceInputSchema,
 });
 
 const referenceFile = z.strictObject({
@@ -64,7 +63,7 @@ export const compareSourceToBundleCliInputSchema = z.strictObject({
     compareSourceToBundleInputSchema.shape.reference,
     referenceFile,
   ]),
-  application: evidenceSchema,
+  application: evidenceSourceInputSchema,
 });
 /** The MCP host accepts absolute local paths; omitted view preserves the full report. */
 export const compareSourceToBundleRequestSchema = z.strictObject({
@@ -72,7 +71,7 @@ export const compareSourceToBundleRequestSchema = z.strictObject({
     compareSourceToBundleInputSchema.shape.reference,
     referenceFile.extend({ path: absoluteLocalPathStringSchema }),
   ]),
-  application: evidenceInputSchema,
+  application: evidenceSourceInputSchema,
   ...sourceToBundleSelection,
 });
 
@@ -87,9 +86,9 @@ const compareJavaScriptExportShapesFacts = {
     compareJavaScriptExportShapesInputSchema.shape.right_export_name,
 } as const;
 
-/** Export-shape request accepting inline or same-session application Evidence. */
+/** Export-shape request; each side is inline, retained, or in an Evidence file. */
 export const compareJavaScriptExportShapesRequestSchema = z.strictObject({
   ...compareJavaScriptExportShapesFacts,
-  left: evidenceInputSchema,
-  right: evidenceInputSchema,
+  left: evidenceSourceInputSchema,
+  right: evidenceSourceInputSchema,
 });

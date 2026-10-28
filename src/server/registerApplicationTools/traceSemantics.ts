@@ -1,6 +1,6 @@
 import type { EvidenceMcpServer } from "../EvidenceMcpServer.js";
 import { runAdmittedToolOperation } from "../admittedToolOperation.js";
-import { resolveApplicationEvidenceRequest } from "../../application/EvidenceInputResolver.js";
+import { resolveEvidenceSources } from "../../application/EvidenceInputResolver.js";
 import { recordEvidenceSources } from "../../application/investigation/recordEvidenceSources.js";
 
 import { traceJavaScriptSemanticsEvidenceValidated } from "../../application/javascript/JavaScriptSemanticTraceService.js";
@@ -27,9 +27,15 @@ export const registerTraceJavaScriptSemanticsTool = (
         contract.name,
         context.mcpReq.signal,
         async () => {
-          const resolved = resolveApplicationEvidenceRequest(
+          const resolved = await resolveEvidenceSources(
             input,
+            ["application"],
             options.evidenceById,
+            {
+              operation: contract.name,
+              signal: context.mcpReq.signal,
+              resources: options.artifactResources,
+            },
           );
           if (!resolved.ok)
             return server.delivery.toCallToolResult(resolved, contract);

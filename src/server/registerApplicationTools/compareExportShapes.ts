@@ -30,11 +30,13 @@ export const registerCompareJavaScriptExportShapesTool = (
             options.logger,
             contract.name,
             () =>
-              Promise.resolve(
-                compareJavaScriptExportShapesEvidence(
-                  input,
-                  options.evidenceById,
-                ),
+              compareJavaScriptExportShapesEvidence(
+                input,
+                options.evidenceById,
+                {
+                  signal: context.mcpReq.signal,
+                  resources: options.artifactResources,
+                },
               ),
           );
           if (!result.ok)
