@@ -207,8 +207,10 @@ Identity has two levels:
   the base.
 - Session and snapshot identity also cover the provenance that results report:
   `raw_load` adds the variant, the vector-table address, and the entry's role
-  and basis. A reused session never reports a basis or vector words that the
-  current request did not produce.
+  and basis. The vector words need no place of their own: they are the file
+  bytes at the table address, which the file digest and the base fix. A reused
+  session never reports a basis or vector words that the current request did
+  not produce.
 
 Neither level covers spellings: `0x08000000` and `0x8000000` are the same base,
 an omitted `vector_table_address` equals an explicit one at the base, and REA
