@@ -70,9 +70,10 @@ ARM ELF that loaded before this lane is refused.
 
 ### Language override
 
-A `REA_GHIDRA_LANGUAGE_ID` or `REA_GHIDRA_COMPILER_SPEC_ID` that you set still
-wins over the M-profile pin, as for
-[legacy MIPS images](ghidra-mips.md#admission-boundary). The profile then
+The M-profile pin only replaces Ghidra's header-based default, so a
+`REA_GHIDRA_LANGUAGE_ID` or `REA_GHIDRA_COMPILER_SPEC_ID` that you set still
+wins over it, as for the other pins that the
+[Ghidra provider](ghidra-provider.md) lists. The profile then
 records `language_selection: configured-v1` and is the same profile that the
 override produced before this lane. The session states which language REA would
 have pinned. The override is process-wide: unset it to let REA select the
