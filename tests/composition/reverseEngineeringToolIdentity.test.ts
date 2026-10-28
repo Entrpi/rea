@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 
-import { expect, it, vi } from "vitest";
+import { expect, expectTypeOf, it, vi } from "vitest";
 
+import type { ReverseEngineeringProcesses } from "../../src/application/reverse/ReverseEngineeringService.js";
+import { lookupExecutable } from "../../src/process/ExecutableLookup.js";
 import { OwnedCommandFailure } from "../../src/process/OwnedCommand.js";
 import type { ProviderProcessSupervisor } from "../../src/process/ProviderProcess.js";
 import type { execFileOutput } from "../../src/process/ExecFileOutput.js";
@@ -87,6 +89,7 @@ posix(
     const run = runner(() => `${banner}\ncommit: abc`);
     const service = new TestReverseEngineeringService({
       run,
+      lookup: lookupExecutable,
       environment: { REA_RIZIN_COMMAND: "rizin", PATH: dirname(executable) },
     });
     for (const command of ["iI", "iS"]) {
@@ -109,7 +112,7 @@ posix(
       });
     }
     expect(probes(run)).toBe(1);
-    // The probe and both commands spawn the resolved file, within the budget.
+    // The probe and both commands spawn the resolved path, within the budget.
     expect(run.mock.calls.map(([command]) => command)).toEqual([
       executable,
       executable,
@@ -124,6 +127,49 @@ posix(
       await digest(),
     );
     expect(probes(run)).toBe(2);
+  },
+);
+
+posix(
+  "gives a fake runner's results to its commands when an executable rizin is first on PATH",
+  async () => {
+    const { executable, path } = await fixture();
+    const results = ["first result", "second result"];
+    const run = vi.fn(
+      async (
+        _command: string,
+        _args: readonly string[],
+        _options?: ExecFileOutputOptions,
+      ) => ({ stdout: results.shift() ?? "unexpected call", stderr: "" }),
+    );
+    // As on a developer machine with Rizin installed; no lookup is injected.
+    const service = new TestReverseEngineeringService({
+      run,
+      environment: {
+        PATH: `${dirname(executable)}${delimiter}${process.env.PATH ?? ""}`,
+      },
+    });
+    for (const [command, stdout] of [
+      ["iI", "first result"],
+      ["iS", "second result"],
+    ] as const) {
+      const result = await service.executeRizinCommand({ path, command });
+      if (!result.ok) throw result.error;
+      expect(result.value.raw_result).toMatchObject({ stdout });
+      expect(result.value.parameters).not.toHaveProperty(
+        "provider_executable_path",
+      );
+    }
+    expect(
+      run.mock.calls.map(([command, args]) => [command, args.at(-2)]),
+    ).toEqual([
+      ["rizin", "iI"],
+      ["rizin", "iS"],
+    ]);
+    // The service accepts a runner only together with its lookup.
+    expectTypeOf<{
+      readonly run: typeof run;
+    }>().not.toExtend<ReverseEngineeringProcesses>();
   },
 );
 
@@ -145,6 +191,7 @@ posix.each([
     const run = runner(() => banner);
     const service = new TestReverseEngineeringService({
       run,
+      lookup: lookupExecutable,
       environment: { REA_RIZIN_COMMAND: executable },
     });
     const result = await service.executeRizinCommand({ path, command: "iI" });
@@ -182,6 +229,7 @@ posix(
     );
     const service = new TestReverseEngineeringService({
       run,
+      lookup: lookupExecutable,
       environment: { REA_RIZIN_COMMAND: executable },
     });
     for (const command of ["iI", "iS"]) {
@@ -242,6 +290,7 @@ posix(
     );
     const service = new TestReverseEngineeringService({
       run,
+      lookup: lookupExecutable,
       environment: { REA_RIZIN_COMMAND: executable },
     });
     const leaving = new AbortController();
@@ -322,6 +371,7 @@ posix.each([
     );
     const service = new TestReverseEngineeringService({
       run,
+      lookup: lookupExecutable,
       environment: { REA_RIZIN_COMMAND: executable },
     });
     const pending: Promise<unknown>[] = [];
@@ -385,6 +435,7 @@ posix("keys completed probes by launch path as well as digest", async () => {
   let selected = executable;
   const service = new TestReverseEngineeringService({
     run,
+    lookup: lookupExecutable,
     commands: {
       objdump: (input) =>
         createReverseEngineeringCommandPort({}).objdump(input),
@@ -424,15 +475,19 @@ posix.each(["cancellation", "deadline"] as const)(
     const run = runner(() => "rizin 0.9.1 @ linux-x86-64");
     const service = new TestReverseEngineeringService({
       run,
+      // The lookup stalls on the executable, as on an unresponsive PATH mount.
+      lookup: (command, directory, searchPath, bounds) =>
+        lookupExecutable(command, directory, searchPath, {
+          ...bounds,
+          stat: async (target) => {
+            if (target === executable) {
+              lookupStarted.open();
+              await release.opened;
+            }
+            return stat(target);
+          },
+        }),
       environment: { REA_RIZIN_COMMAND: executable },
-      // Only the executable's lookup stalls, as on an unresponsive PATH mount.
-      stat: async (target) => {
-        if (target === executable) {
-          lookupStarted.open();
-          await release.opened;
-        }
-        return stat(target);
-      },
     });
     const caller = new AbortController();
     const pending: Promise<unknown>[] = [];
@@ -492,6 +547,7 @@ posix(
     );
     const service = new TestReverseEngineeringService({
       run,
+      lookup: lookupExecutable,
       environment: { REA_RIZIN_COMMAND: executable },
     });
     const result = await service.executeRizinCommand(
@@ -536,6 +592,7 @@ posix(
     );
     const service = new TestReverseEngineeringService({
       runOwned,
+      lookup: lookupExecutable,
       environment: { REA_RIZIN_COMMAND: executable },
     });
     const failed = await service.executeRizinCommand({ path, command: "iI" });
