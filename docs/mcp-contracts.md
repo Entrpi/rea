@@ -26,16 +26,36 @@ can be passed directly to `compare_functions`, and `inspect_artifact` Evidence
 to `compare_artifacts`. Use `get_evidence_bundle` when the task needs broader
 retained session history or an explicit bundle for transfer.
 
-`compare_artifacts` does not need that Evidence sent back. Name each side once
-with a source that `inspect_analysis_view` also accepts:
-`{"kind": "retained-evidence", "evidence_id": "<id>"}` for a record retained in
-this session, or `{"kind": "evidence-file", "path": "/absolute/evidence.json"}`
-for a saved record or bundle. Add `evidence_id` to select one record from a
-bundle that holds more than one. Complete inline Evidence is still accepted as
-the third form. The comparison cites the records that the sources resolve to,
-so all three forms give the same comparison Evidence. A retained reference that
-the session cannot resolve is refused with `evidence_integrity_mismatch` and
-`details.reason: "missing"`.
+Comparisons and application workflows do not need that Evidence sent back.
+`compare_artifacts`, `compare_functions`, `compare_wasm_interfaces`,
+`trace_application_feature`, `trace_javascript_semantics`,
+`compare_application_versions`, `compare_source_to_bundle` and
+`compare_javascript_export_shapes` take each Evidence source (`left`, `right`
+or `application`) in one of three forms:
+
+- complete inline Evidence;
+- `{"kind": "retained-evidence", "evidence_id": "<id>"}` for a record retained
+  in this session;
+- `{"kind": "evidence-file", "path": "/absolute/evidence.json"}` for a saved
+  record or bundle, the same reference that `inspect_analysis_view` accepts.
+  Add `evidence_id` to select one record from a bundle that holds more than
+  one.
+
+The result cites the records that the sources resolve to, so all three forms
+give the same Evidence. A source is checked only against the form it names: a
+value with `kind` against the references, any other value against the
+Evidence schema, so a malformed source reports only that form's issues.
+
+Refusals that name the source's field in their issue path are
+`invalid_request`: a malformed reference, a bundle record that is absent or not
+selected (for example `["right", "evidence_id"]` when a bundle holds more than
+one record), and Evidence of a kind the tool does not take (for example
+`["right"]`). A retained reference that the session cannot resolve is refused
+with `evidence_integrity_mismatch`, `details.evidence_id` and
+`details.reason: "missing"`. An Evidence file that cannot be read, or that
+holds no valid Evidence, is refused with its file path rather than the field.
+`match_native_functions` accepts only complete Evidence and retained
+references.
 
 `compare_artifacts` can also resolve an artifact summary to its exact retained
 parent in the session. Supported historical summaries keep their original
@@ -566,8 +586,9 @@ Delivery detail never reaches the decoder or changes the source Evidence ID.
 
 `trace_application_feature`, `trace_javascript_semantics`,
 `compare_application_versions`, `compare_source_to_bundle`, and
-`compare_javascript_export_shapes` accept complete inline application Evidence
-or an exact reference to a record already retained by the current connection:
+`compare_javascript_export_shapes` accept complete inline application Evidence,
+an exact reference to a record already retained by the current connection, or
+an [Evidence file](#tool-results):
 
 ```json
 {
@@ -584,10 +605,11 @@ or an exact reference to a record already retained by the current connection:
 
 Use the `evidence_id` returned by `analyze_javascript_application` (or another
 compatible application-graph producer). Comparisons accept this form in `left`
-and `right`; each side can independently be inline or retained. Native
-observation arrays continue to take complete inline Evidence. Results and their
-Evidence remain complete inline, and both input forms pass the same semantic,
-identity, authority, and provenance checks without running the producer again.
+and `right`; each side can independently be inline, retained or an Evidence
+file. Native observation arrays continue to take complete inline Evidence.
+Results and their Evidence remain complete inline, and every input form passes
+the same semantic, identity, authority, and provenance checks without running
+the producer again.
 
 References belong to the current connection's Evidence ledger. Opening another
 target or restarting the current target preserves retained records, including
@@ -600,8 +622,9 @@ Supply complete inline Evidence, repeat its producer, or import an exported
 Evidence bundle before referencing that imported record. Export a bundle before
 closing if the investigation needs it later.
 
-CLI application workflows continue to read portable inline Evidence from files
-and run the same analysis workflows; a standalone CLI invocation cannot resolve
+CLI application workflows take the same inline Evidence and `evidence-file`
+sources and run the same analysis workflows; a relative Evidence-file path
+resolves from the working directory. A standalone CLI invocation cannot resolve
 another MCP connection's retained records. No additional lookup call, provider
 selection, or approval step is required for a same-session follow-up.
 CLI `inspect-artifact` continues to return complete portable Evidence. Save that

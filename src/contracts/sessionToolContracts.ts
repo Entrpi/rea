@@ -115,7 +115,7 @@ export const SESSION_TOOL_CONTRACTS = [
   ),
   session(
     "compare_functions",
-    "Compare two explicit analyze_function Evidence records or exact retained session references across identity, exact provider text, calls, references, strings, and address-normalized CFG topology. Missing or provider-incompatible facets remain truncated or unknown; every conclusion cites both Evidence sets.",
+    'Compare two explicit analyze_function Evidence records across identity, exact provider text, calls, references, strings, and address-normalized CFG topology. Name each side as complete Evidence, {kind: "retained-evidence", evidence_id} or {kind: "evidence-file", path, evidence_id?}. Missing or provider-incompatible facets remain truncated or unknown; every conclusion cites both Evidence sets.',
     functionComparisonInputSchema,
   ),
   session(

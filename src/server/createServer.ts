@@ -1088,6 +1088,7 @@ const registerConfiguredAnalysisTools = (
     recordEvidence,
     withAdmittedAnalysis,
     evidenceById,
+    artifactResources,
   );
   registerApkSignatureTools(
     server,

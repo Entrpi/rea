@@ -78,7 +78,7 @@ describe("JavaScript export container coverage through authenticated Evidence", 
         [absent, retained, "absent", "unknown", "added"],
         [retained, absent, "unknown", "absent", "removed"],
       ] as const) {
-        const result = compareEvidence(left, right);
+        const result = await compareEvidence(left, right);
         expect(result.summary).toEqual({
           added: 0,
           removed: 0,
@@ -125,7 +125,7 @@ describe("JavaScript export container coverage through authenticated Evidence", 
           unpaired_right_variants: 0,
           omitted_changes: 0,
         });
-        expect(compareEvidence(left, right)).toEqual(result);
+        expect(await compareEvidence(left, right)).toEqual(result);
       }
     },
   );
@@ -137,7 +137,7 @@ describe("JavaScript export container coverage controls", () => {
     async (container) => {
       const properties = `, options: ${container}, enabled: false`;
       const sources = await analyzeReturns(properties, properties);
-      const result = compareEvidence(...sources);
+      const result = await compareEvidence(...sources);
       expect(result.changes).toEqual([]);
       expect(result.summary).toEqual({
         added: 0,
@@ -160,7 +160,7 @@ describe("JavaScript export container coverage controls", () => {
         `, options: {}${before}`,
         `, options: {}${after}`,
       );
-      const result = compareEvidence(...sources);
+      const result = await compareEvidence(...sources);
       expect(result.changes).toEqual([
         expect.objectContaining({ path: "/enabled", status }),
       ]);
@@ -191,7 +191,7 @@ describe("JavaScript export container coverage controls", () => {
         [partial, complete],
         [complete, partial],
       ] as const) {
-        const result = compareEvidence(...sources);
+        const result = await compareEvidence(...sources);
         expect(result.changes).toEqual([
           expect.objectContaining({
             path: "/options/nested",
@@ -254,8 +254,8 @@ const analyzeReturn = async (root: string, properties: string) => {
   return { ...source, shape };
 };
 
-const compareEvidence = (left: Source, right: Source) => {
-  const compared = compareJavaScriptExportShapesEvidence({
+const compareEvidence = async (left: Source, right: Source) => {
+  const compared = await compareJavaScriptExportShapesEvidence({
     left: left.evidence,
     right: right.evidence,
     left_module_path: "parser.mjs",

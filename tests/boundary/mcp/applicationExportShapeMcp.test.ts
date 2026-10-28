@@ -439,7 +439,7 @@ ${returnSites}
       analyzeSourceEvidence(inventorySource),
       analyzeSourceEvidence(pairedVariantsSource),
     ]);
-    const variants = compareEvidence(inventoryLeft, inventoryRight);
+    const variants = await compareEvidence(inventoryLeft, inventoryRight);
     expect(variants.left).toMatchObject({ status: "selected" });
     expect(variants.coverage).toMatchObject({
       paired_variants: 33,
@@ -451,7 +451,7 @@ ${returnSites}
       right_omitted_fields: 0,
     });
 
-    const missing = compareEvidence(inventoryLeft, inventoryRight, {
+    const missing = await compareEvidence(inventoryLeft, inventoryRight, {
       leftExportName: "missing",
     });
     expect(missing.left).toMatchObject({
@@ -476,7 +476,7 @@ ${returnSites}
         `export default () => ({ type: "record", ${changedFieldsRight} });`,
       ),
     ]);
-    const changes = compareEvidence(changeLeft, changeRight);
+    const changes = await compareEvidence(changeLeft, changeRight);
     expect(changes.changes).toHaveLength(10_001);
     expect(changes.summary).toEqual({
       added: 0,
@@ -501,12 +501,12 @@ const analyzeSourceEvidence = async (source: string) => {
   return analyzed.value;
 };
 
-const compareEvidence = (
+const compareEvidence = async (
   left: Awaited<ReturnType<typeof analyzeSourceEvidence>>,
   right: Awaited<ReturnType<typeof analyzeSourceEvidence>>,
   selectors: { readonly leftExportName?: string } = {},
 ) => {
-  const compared = compareJavaScriptExportShapesEvidence({
+  const compared = await compareJavaScriptExportShapesEvidence({
     left,
     right,
     left_module_path: "parser.mjs",

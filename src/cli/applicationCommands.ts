@@ -5,9 +5,15 @@ import { parseCliJsonInput } from "../cliJsonInput.js";
 import { logCliCommand } from "../cliLogging.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
+import {
+  APPLICATION_EVIDENCE_SOURCE,
+  PAIRED_EVIDENCE_SOURCES,
+} from "../domain/evidenceReference.js";
+import { JAVASCRIPT_APPLICATION_WORKFLOW_PROVIDER } from "../domain/investigationProviders.js";
 import type { JsonValue } from "../domain/jsonValue.js";
+import { ok } from "../domain/result.js";
 import type { Logger } from "pino";
-import { traceJavaScriptSemanticsInputSchema } from "../domain/javascript/javascriptSemanticTraceSchemas.js";
+import { registerEvidenceSourceCommand } from "./evidenceSourceCommand.js";
 import { registerSourceToBundleCommand } from "./sourceToBundleCommand.js";
 import { analysisInputErrorFromIssues } from "../domain/inputIssueProjection.js";
 
@@ -18,62 +24,7 @@ export const registerApplicationCommands = (
   cli: ReturnType<typeof Cli.create>,
   logger: Logger,
 ): void => {
-  registerJsonCommand({
-    cli,
-    logger,
-    name: CLI_COMMANDS.traceApplicationFeature,
-    description:
-      "Trace a typed seed through authenticated application Evidence JSON",
-    inputSchema: z.unknown(),
-    workflow: async (input) => {
-      const { traceApplicationFeatureEvidence } =
-        await import("../application/javascript/JavaScriptApplicationWorkflowService.js");
-      const result = traceApplicationFeatureEvidence(input);
-      return result.ok ? { ok: true, value: result.value.evidence } : result;
-    },
-  });
-  registerJsonCommand({
-    cli,
-    logger,
-    name: CLI_COMMANDS.traceJavaScriptSemantics,
-    description:
-      "Trace bounded static semantic relations through authenticated application Evidence",
-    inputSchema: traceJavaScriptSemanticsInputSchema,
-    workflow: async (input) => {
-      const { traceJavaScriptSemanticsEvidenceValidated } =
-        await import("../application/javascript/JavaScriptSemanticTraceService.js");
-      return traceJavaScriptSemanticsEvidenceValidated(input);
-    },
-  });
-  registerJsonCommand({
-    cli,
-    logger,
-    name: CLI_COMMANDS.compareApplicationVersions,
-    description:
-      "Compare two authenticated JavaScript Application Graph versions",
-    inputSchema: z.unknown(),
-    workflow: async (input) => {
-      const { compareApplicationVersionsEvidence } =
-        await import("../application/javascript/JavaScriptApplicationWorkflowService.js");
-      const result = compareApplicationVersionsEvidence(input);
-      return result.ok ? { ok: true, value: result.value.evidence } : result;
-    },
-  });
-  registerSourceToBundleCommand(cli, logger);
-  registerJsonCommand({
-    cli,
-    logger,
-    name: CLI_COMMANDS.compareJavaScriptExportShapes,
-    description:
-      "Compare exact static JavaScript export return shapes without execution",
-    inputSchema: z.unknown(),
-    workflow: async (input) => {
-      const { compareJavaScriptExportShapesEvidence } =
-        await import("../application/javascript/JavaScriptApplicationWorkflowService.js");
-      const result = compareJavaScriptExportShapesEvidence(input);
-      return result.ok ? { ok: true, value: result.value.evidence } : result;
-    },
-  });
+  registerJavaScriptWorkflowCommands(cli, logger);
   registerObligationLedgerCommand(cli, logger);
   registerCoverageCommand(cli, logger);
   registerJsonCommand({
@@ -151,6 +102,91 @@ const registerCoverageCommand = (cli: CliInstance, logger: Logger): void =>
       return evaluateReconstructionCoverage(input);
     },
   });
+
+/** JavaScript application workflows, whose Evidence sources can be saved files. */
+const registerJavaScriptWorkflowCommands = (
+  cli: CliInstance,
+  logger: Logger,
+): void => {
+  const providerId = JAVASCRIPT_APPLICATION_WORKFLOW_PROVIDER.id;
+  registerEvidenceSourceCommand(cli, logger, {
+    name: CLI_COMMANDS.traceApplicationFeature,
+    operation: "trace_application_feature",
+    providerId,
+    description:
+      'Trace a typed seed through authenticated application Evidence, inline or {kind:"evidence-file",path,evidence_id?}',
+    inputSchema: z.unknown(),
+    sources: APPLICATION_EVIDENCE_SOURCE,
+    workflow: async (input, options) => {
+      const { traceApplicationFeatureEvidence } =
+        await import("../application/javascript/JavaScriptApplicationWorkflowService.js");
+      const result = await traceApplicationFeatureEvidence(
+        input,
+        undefined,
+        options,
+      );
+      return result.ok ? ok(result.value.evidence) : result;
+    },
+  });
+  registerEvidenceSourceCommand(cli, logger, {
+    name: CLI_COMMANDS.traceJavaScriptSemantics,
+    operation: "trace_javascript_semantics",
+    providerId,
+    description:
+      'Trace bounded static semantic relations through authenticated application Evidence, inline or {kind:"evidence-file",path,evidence_id?}',
+    inputSchema: z.unknown(),
+    sources: APPLICATION_EVIDENCE_SOURCE,
+    workflow: async (input, options) => {
+      const { traceJavaScriptSemanticsEvidence } =
+        await import("../application/javascript/JavaScriptSemanticTraceService.js");
+      const result = await traceJavaScriptSemanticsEvidence(
+        input,
+        undefined,
+        options,
+      );
+      return result.ok ? ok(result.value.evidence) : result;
+    },
+  });
+  registerEvidenceSourceCommand(cli, logger, {
+    name: CLI_COMMANDS.compareApplicationVersions,
+    operation: "compare_application_versions",
+    providerId,
+    description:
+      'Compare two authenticated JavaScript Application Graph versions, each inline or {kind:"evidence-file",path,evidence_id?}',
+    inputSchema: z.unknown(),
+    sources: PAIRED_EVIDENCE_SOURCES,
+    workflow: async (input, options) => {
+      const { compareApplicationVersionsEvidence } =
+        await import("../application/javascript/JavaScriptApplicationWorkflowService.js");
+      const result = await compareApplicationVersionsEvidence(
+        input,
+        undefined,
+        options,
+      );
+      return result.ok ? ok(result.value.evidence) : result;
+    },
+  });
+  registerSourceToBundleCommand(cli, logger);
+  registerEvidenceSourceCommand(cli, logger, {
+    name: CLI_COMMANDS.compareJavaScriptExportShapes,
+    operation: "compare_javascript_export_shapes",
+    providerId,
+    description:
+      'Compare exact static JavaScript export return shapes without execution; each side inline or {kind:"evidence-file",path,evidence_id?}',
+    inputSchema: z.unknown(),
+    sources: PAIRED_EVIDENCE_SOURCES,
+    workflow: async (input, options) => {
+      const { compareJavaScriptExportShapesEvidence } =
+        await import("../application/javascript/JavaScriptApplicationWorkflowService.js");
+      const result = await compareJavaScriptExportShapesEvidence(
+        input,
+        undefined,
+        options,
+      );
+      return result.ok ? ok(result.value.evidence) : result;
+    },
+  });
+};
 
 interface JsonCommandOptions<Schema extends z.ZodType> {
   readonly cli: CliInstance;

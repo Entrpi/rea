@@ -1,13 +1,14 @@
 import {
   resolveEvidenceInput,
-  resolvePairedEvidenceSources,
+  resolveEvidenceSources,
   type EvidenceLookup,
 } from "../EvidenceInputResolver.js";
 import { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { AnalysisInputError } from "../../domain/analysisErrorCore.js";
 import { inspectAnalysisViewValidated } from "../analysisView/AnalysisViewService.js";
-import type { EvidenceFileReadOptions } from "../analysisView/evidenceFileSource.js";
+import type { EvidenceFileReadOptions } from "../EvidenceFileSource.js";
 import type { ArtifactComparisonInput } from "../../contracts/sessionToolSchemas.js";
+import { PAIRED_EVIDENCE_SOURCES } from "../../domain/evidenceReference.js";
 import { artifactInventorySummaryViewResultSchema } from "../../domain/analysisView/analysisView.js";
 import {
   compareArtifacts,
@@ -42,7 +43,7 @@ export interface ArtifactComparisonOutcome {
 }
 
 /**
- * Select both sides through the shared paired-source owner, authenticate them,
+ * Select both sides through the shared Evidence source owner, authenticate them,
  * then resolve a summary to its exact retained parent inventory.
  */
 export const resolveArtifactComparisonSources = async (
@@ -50,10 +51,12 @@ export const resolveArtifactComparisonSources = async (
   evidenceById: EvidenceLookup | undefined,
   options: EvidenceFileReadOptions = {},
 ): Promise<Result<ArtifactComparisonSources, AnalysisError>> => {
-  const selected = await resolvePairedEvidenceSources(input, evidenceById, {
-    ...options,
-    operation: OPERATION,
-  });
+  const selected = await resolveEvidenceSources(
+    input,
+    PAIRED_EVIDENCE_SOURCES,
+    evidenceById,
+    { ...options, operation: OPERATION },
+  );
   if (!selected.ok) return selected;
   const suppliedLeft = readEvidence(selected.value.left);
   if (!suppliedLeft.ok) return suppliedLeft;

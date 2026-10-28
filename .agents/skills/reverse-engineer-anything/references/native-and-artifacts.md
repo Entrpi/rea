@@ -650,10 +650,11 @@ exports are absent. Use `inspect_macho` for Mach-O. See
 [offline binary diagnostics](https://github.com/morluto/rea/blob/main/docs/binary-diagnostics.md).
 
 For exact core-module import/export differences, use `compare_wasm_interfaces`
-with two complete inspection Evidence records (or current-session retained
-references) and explicit scope. Preserve unknown types/duplicate names; static
-interface equality is not runtime compatibility. CLI accepts complete inline
-Evidence in `rea compare-wasm-interfaces input.json --json`.
+with two inspection Evidence records (complete, current-session retained
+references or `{kind: "evidence-file", path}`) and explicit scope. Preserve
+unknown types/duplicate names; static interface equality is not runtime
+compatibility. CLI takes complete Evidence or Evidence files in
+`rea compare-wasm-interfaces input.json --json`.
 
 ## Godot PCK
 

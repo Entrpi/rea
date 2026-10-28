@@ -30,7 +30,7 @@ const registerImplicitInvocationComparisonTests = (): void => {
         return { type: "event", value: 2, stable: "kept" };
       }`,
     });
-    const execution = compareJavaScriptExportShapesEvidence({
+    const execution = await compareJavaScriptExportShapesEvidence({
       left: left.evidence,
       right: right.evidence,
       left_module_path: "parser.mjs",
@@ -155,7 +155,7 @@ describe("JavaScript export return-shape comparison", () => {
 
     const first = compare(left, right);
     const second = compare(left, right);
-    const execution = compareJavaScriptExportShapesEvidence({
+    const execution = await compareJavaScriptExportShapesEvidence({
       left: left.evidence,
       right: right.evidence,
       left_module_path: "parser.mjs",

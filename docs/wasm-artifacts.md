@@ -185,10 +185,12 @@ completeness describes observed import/export entries, independently of type
 resolution. This facet is absent in historical Evidence that did not examine
 typed interfaces.
 
-`compare_wasm_interfaces` accepts two complete `inspect_wasm_artifact` Evidence
-records, or exact retained references in the current MCP session, and required
-`scope: "imports" | "exports" | "both"`. It reads no files and needs no active
-WABT toolchain. CLI uses portable inline Evidence in one JSON document:
+`compare_wasm_interfaces` compares two `inspect_wasm_artifact` Evidence
+records under required `scope: "imports" | "exports" | "both"`. Each side is
+complete Evidence, an exact retained reference in the current MCP session, or
+a saved record or bundle named by `{"kind": "evidence-file", "path": ...}`.
+It reads no module files and needs no active WABT toolchain. The CLI takes the
+same JSON document:
 
 ```bash
 rea compare-wasm-interfaces comparison-input.json --json
@@ -196,14 +198,16 @@ rea compare-wasm-interfaces comparison-input.json --json
 
 ```json
 {
-  "left": { "kind": "retained-evidence", "evidence_id": "ev_<left-digest>" },
-  "right": { "kind": "retained-evidence", "evidence_id": "ev_<right-digest>" },
+  "left": { "kind": "evidence-file", "path": "left-inspection.json" },
+  "right": { "kind": "evidence-file", "path": "right-inspection.json" },
   "scope": "both"
 }
 ```
 
-The references above are MCP-only; put complete Evidence objects in the CLI
-input. Resolve summary delivery to its retained complete parent before comparing.
+The CLI resolves a relative Evidence-file path from its working directory; MCP
+takes an absolute path. A one-shot CLI command has no session, so use
+`{"kind": "retained-evidence", "evidence_id": ...}` only through MCP. Resolve
+summary delivery to its retained complete parent before comparing.
 Results retain both input Evidence IDs, artifact paths/digests/lengths and every
 selected occurrence. Unique names are added, removed, changed or unchanged;
 duplicate names and unsupported signatures are unknown. Incomplete or historical

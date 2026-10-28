@@ -53,7 +53,7 @@ async function verifyManagedAppManifest(context, rawManifest, manifestPath) {
   const applicationGraph =
     manifest.application_graph === undefined
       ? undefined
-      : verifyManagedAppManifestApplicationGraph({
+      : await verifyManagedAppManifestApplicationGraph({
           context,
           graphManifest: manifest.application_graph,
           bytes,
@@ -153,7 +153,7 @@ function verifyManifestMethods(context, manifest, bytes, target) {
   return { methods, inspectedMethods, assertions };
 }
 
-function verifyManagedAppManifestApplicationGraph({
+async function verifyManagedAppManifestApplicationGraph({
   context,
   graphManifest,
   bytes,
@@ -192,7 +192,7 @@ function verifyManagedAppManifestApplicationGraph({
       projectionState,
       expectedTrace.method_token,
     );
-    const traced = traceApplicationFeatureEvidence({
+    const traced = await traceApplicationFeatureEvidence({
       application: projection.evidence,
       native_observations: [],
       seed: {

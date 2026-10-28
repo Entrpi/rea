@@ -42,18 +42,21 @@ Use `update_unknown` with the current revision; reread after a stale revision
 instead of retrying blindly. Only qualifying observed evidence can verify a
 resolution.
 
+`compare_artifacts`, `compare_functions`, `compare_wasm_interfaces` and the
+JavaScript application workflows take each Evidence source (`left`, `right` or
+`application`) as `{kind: "retained-evidence", evidence_id}`,
+`{kind: "evidence-file", path, evidence_id?}` or complete Evidence. Name a
+retained record or a saved file instead of resending Evidence.
+
 Use comparisons with complete, compatible page sets when claiming equivalence
 or absence:
 
 - `compare_artifacts` compares inventory pages by occurrence path, content,
-  metadata, and graph relations. Name each side as
-  `{kind: "retained-evidence", evidence_id}` (an `inspect_artifact` result,
-  its nested inventory or its summary) or
-  `{kind: "evidence-file", path, evidence_id?}` instead of resending Evidence.
+  metadata, and graph relations. A side can be an `inspect_artifact` result,
+  its nested inventory or its summary.
 - `compare_functions` compares explicit function Evidence, not fuzzy
-  whole-binary matches. It rejects an `analyze_function` summary reply; pass
-  the summary's `parent_evidence_id` as a `retained-evidence` reference or
-  the complete dossier.
+  whole-binary matches. It rejects an `analyze_function` summary reply; name
+  the summary's `parent_evidence_id` or pass the complete dossier.
 - `compare_bundles` compares canonical bundle membership and unknown history.
 - `find_changed_behavior` combines existing comparisons; static differences
   remain candidates, not causal proof.

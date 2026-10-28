@@ -301,7 +301,10 @@ describe("historical native comparison projections", () => {
     const left = historical("open");
     const before = JSON.stringify(left);
     for (const right of [historical("close"), historical("open", true)]) {
-      const compared = compareApplicationVersionsEvidence({ left, right });
+      const compared = await compareApplicationVersionsEvidence({
+        left,
+        right,
+      });
       if (!compared.ok) throw compared.error;
       const bindings = compared.value.result.items.filter(
         ({ node_kind, match }) =>
@@ -323,7 +326,7 @@ describe("complete comparison projections", () => {
       analyzeFixture(fixtures.left),
       analyzeFixture(fixtures.right),
     ]);
-    const compared = compareApplicationVersionsEvidence({ left, right });
+    const compared = await compareApplicationVersionsEvidence({ left, right });
     if (!compared.ok) throw compared.error;
     expect(compared.value.sources[0]).toBe(left);
     expect(compared.value.sources[1]).toBe(right);
@@ -386,7 +389,7 @@ describe("complete comparison projections", () => {
       analyzeFixture(fixtures.left),
       analyzeFixture(fixtures.right),
     ]);
-    const compared = compareApplicationVersionsEvidence({ left, right });
+    const compared = await compareApplicationVersionsEvidence({ left, right });
     if (!compared.ok) throw compared.error;
     const result = compared.value.result;
     expect(result.items).toContainEqual(
@@ -451,7 +454,7 @@ describe("complete comparison projections", () => {
 describe("Application graph Evidence envelopes", () => {
   it.each(["runtime reconciliation", "managed application graph"] as const)(
     "rejects %s result links outside the authenticated Evidence envelope",
-    (sourceKind) => {
+    async (sourceKind) => {
       const sourceResult =
         sourceKind === "runtime reconciliation"
           ? reconcileJavaScriptRuntimeEvidence(
@@ -491,8 +494,10 @@ describe("Application graph Evidence envelopes", () => {
         direction: "both" as const,
       };
 
-      expect(traceApplicationFeatureEvidence(workflowInput).ok).toBe(true);
-      const rejected = traceApplicationFeatureEvidence({
+      expect((await traceApplicationFeatureEvidence(workflowInput)).ok).toBe(
+        true,
+      );
+      const rejected = await traceApplicationFeatureEvidence({
         ...workflowInput,
         application: malformed,
       });
@@ -528,7 +533,7 @@ describe("JavaScript application workflow error diagnostics", () => {
       subject: { ...subject, local_path: inconsistentPath },
     };
 
-    const result = traceApplicationFeatureEvidence({
+    const result = await traceApplicationFeatureEvidence({
       application: inconsistent,
       seed: { kind: "route", value: "/" },
       direction: "both",
@@ -584,7 +589,7 @@ describe("JavaScript application workflow error diagnostics", () => {
       },
     );
 
-    const traced = traceApplicationFeatureEvidence({
+    const traced = await traceApplicationFeatureEvidence({
       application: malformedEvidence,
       seed: { kind: "route", value: "/" },
       direction: "both",

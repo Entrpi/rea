@@ -46,7 +46,7 @@ import { OwnedFileHandle } from "../../filesystem/OwnedFileHandle.js";
 import { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
 import * as queuedInterrupts from "../../process/queuedInterrupts.js";
 import { createEvidenceBundle } from "../../domain/evidenceBundle.js";
-import * as evidenceFileSource from "./evidenceFileSource.js";
+import * as evidenceFileSource from "../EvidenceFileSource.js";
 
 it("projects retained GPU source facts while delivering the caller's rebound subject", () => {
   const sha256 = "a".repeat(64);

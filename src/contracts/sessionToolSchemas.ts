@@ -5,7 +5,10 @@ import { bundleComparisonInputSchema } from "../domain/bundleComparison.js";
 
 import { processTraceSpecificationSchema } from "../domain/process/processTraceSpecification.js";
 import { evidenceSchema } from "../domain/evidence.js";
-import { evidenceSourceInputSchema } from "../domain/evidenceReference.js";
+import {
+  PAIRED_EVIDENCE_SOURCES,
+  evidenceSourceShape,
+} from "../domain/evidenceReference.js";
 import { prefixedDigestSchema } from "./../domain/digests.js";
 import { evidenceRecordFiltersSchema } from "../domain/evidenceRecordSummary.js";
 import { residualUnknownSchema } from "../domain/residualUnknown.js";
@@ -54,10 +57,9 @@ export const processComparisonInputSchema = z.strictObject({
 });
 
 /** Name each compared artifact inventory once: inline, retained, or in a local Evidence file. */
-export const artifactComparisonInputSchema = z.strictObject({
-  left: evidenceSourceInputSchema,
-  right: evidenceSourceInputSchema,
-});
+export const artifactComparisonInputSchema = z.strictObject(
+  evidenceSourceShape(PAIRED_EVIDENCE_SOURCES),
+);
 export type ArtifactComparisonInput = z.output<
   typeof artifactComparisonInputSchema
 >;
