@@ -164,7 +164,11 @@ export class HopperProvider implements AnalysisProviderCandidate {
           "GameCube DOL analysis requires the Ghidra adapter with a caller-selected gamecube-dol format.",
         diagnostics,
       };
-    if (isHopperDeclinedArchitecture(target.architecture))
+    // A provider-language raw load names no family; the raw refusal below applies.
+    if (
+      target.architecture !== undefined &&
+      isHopperDeclinedArchitecture(target.architecture)
+    )
       return {
         status: "unsupported",
         code: "architecture_unsupported",

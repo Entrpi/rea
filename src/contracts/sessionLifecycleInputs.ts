@@ -14,6 +14,12 @@ import {
 import { architectureVariantSchema } from "../domain/architectureVariant.js";
 import { z } from "zod";
 import { analysisProviderSelectorSchema } from "../domain/providerSelection.js";
+import { providerLanguageProviderIssue } from "../domain/providerLanguage.js";
+import {
+  providerLanguageInputSchema,
+  providerLanguageSelection,
+  type ProviderLanguageInput,
+} from "./providerLanguage.js";
 
 /** Caller-supplied analysis snapshot path; must name its destination absolutely. */
 const snapshotPathSchema = absoluteLocalPathStringSchema.describe(
@@ -35,6 +41,7 @@ export const openBinaryLoadSelection = (input: {
     | NativeLoadSelection["architectureVariant"]
     | undefined;
   readonly vector_table_address?: string | undefined;
+  readonly provider_language?: ProviderLanguageInput | undefined;
 }): NativeLoadSelection => ({
   ...(input.format === undefined ? {} : { format: input.format }),
   ...(input.architecture === undefined
@@ -50,6 +57,9 @@ export const openBinaryLoadSelection = (input: {
   ...(input.vector_table_address === undefined
     ? {}
     : { vectorTableAddress: input.vector_table_address }),
+  ...(input.provider_language === undefined
+    ? {}
+    : { providerLanguage: providerLanguageSelection(input.provider_language) }),
 });
 
 /** Input contract for opening a target with an optional staged snapshot. */
@@ -64,7 +74,7 @@ export const openBinaryInputSchema = z
     architecture: binaryArchitectureSchema
       .optional()
       .describe(
-        "Caller-supplied CPU family. Required with format=raw-binary; rejected otherwise. format=gamecube-dol takes powerpc from the header, so it must be omitted.",
+        "Caller-supplied CPU family. Required with format=raw-binary unless provider_language is given; rejected otherwise. format=gamecube-dol takes powerpc from the header, so it must be omitted.",
       ),
     entry_point: rawBinaryEntryPointSchema
       .optional()
@@ -86,17 +96,35 @@ export const openBinaryInputSchema = z
       .describe(
         "Address of the M-profile vector table (0xhex) when it is not at base_address, for example after a bootloader header. Only when entry_point is omitted.",
       ),
+    provider_language: providerLanguageInputSchema
+      .optional()
+      .describe(
+        "Expert override for a raw image that no architecture describes: the provider's own language, checked against its installed catalog and recorded as caller-selected and unverified. Requires format=raw-binary, entry_point and provider_id naming the same provider; replaces architecture and architecture_variant. base_address may differ from entry_point.",
+      ),
     provider_id: analysisProviderSelectorSchema.optional(),
     snapshot_path: snapshotPathSchema.optional(),
   })
   .superRefine((value, context) => {
-    const pairing = rawBinarySelectionError(openBinaryLoadSelection(value));
-    if (pairing === undefined) return;
-    context.addIssue({
-      code: "custom",
-      path: [pairing.field],
-      message: pairing.message,
-    });
+    const selection = openBinaryLoadSelection(value);
+    const pairing = rawBinarySelectionError(selection);
+    if (pairing !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: [pairing.field],
+        message: pairing.message,
+      });
+      return;
+    }
+    const provider = providerLanguageProviderIssue(
+      selection.providerLanguage,
+      value.provider_id,
+    );
+    if (provider !== undefined)
+      context.addIssue({
+        code: "custom",
+        path: ["provider_id"],
+        message: provider,
+      });
   });
 
 /** Open only app resources when no declared executable is available. */

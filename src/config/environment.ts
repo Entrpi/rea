@@ -11,7 +11,7 @@ import { analysisProviderSelectorSchema } from "../domain/providerSelection.js";
 import {
   ghidraCompilerSpecIdSchema,
   ghidraLanguageIdSchema,
-} from "./ghidraLanguageOverride.js";
+} from "../contracts/providerLanguage.js";
 import { ghidraDisabledAnalyzersSchema } from "./ghidraDisabledAnalyzers.js";
 import {
   DEFAULT_SWIFTC_COMPILE_TIMEOUT_MS,

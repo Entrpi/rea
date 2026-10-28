@@ -18,6 +18,11 @@ import {
 } from "../domain/architectureVariant.js";
 import { analysisProviderSelectorSchema } from "../domain/providerSelection.js";
 import type { AnalysisProviderSelector } from "../domain/providerSelection.js";
+import { AnalysisInputError } from "../domain/analysisErrorCore.js";
+import {
+  ghidraCompilerSpecIdSchema,
+  ghidraLanguageIdSchema,
+} from "../contracts/providerLanguage.js";
 import type { Logger } from "pino";
 
 /** Parse decimal integer tokens before Number coercion can erase their syntax. */
@@ -50,7 +55,7 @@ export const formatSelectionOption = executableFormatHintSchema
 export const architectureSelectionOption = binaryArchitectureSchema
   .optional()
   .describe(
-    "Caller-supplied CPU family; required with --target-format raw-binary, must be omitted with gamecube-dol",
+    "Caller-supplied CPU family; required with --target-format raw-binary unless --ghidra-language-id is given, must be omitted with gamecube-dol",
   );
 
 export const entryPointSelectionOption = rawBinaryEntryPointSchema
@@ -78,6 +83,22 @@ export const vectorTableAddressSelectionOption =
       "Address of the M-profile vector table (0xhex) when --entry-point is omitted and the table is not at --base-address",
     );
 
+/**
+ * The Ghidra member of MCP's provider_language. The flag names carry the
+ * provider, and --provider must still select it.
+ */
+export const ghidraLanguageIdSelectionOption = ghidraLanguageIdSchema
+  .optional()
+  .describe(
+    "Expert override for a raw image no --architecture describes: a Ghidra language ID from the installation's catalog, such as SuperH4:LE:32:default; needs --ghidra-compiler-spec-id, --entry-point and --provider ghidra, and replaces --architecture",
+  );
+
+export const ghidraCompilerSpecIdSelectionOption = ghidraCompilerSpecIdSchema
+  .optional()
+  .describe(
+    "Compiler spec ID that the --ghidra-language-id entry declares, such as default",
+  );
+
 /** Shared CLI flags that bind a native target interpretation. */
 export const nativeOpenOptionFields = {
   "target-format": formatSelectionOption,
@@ -86,6 +107,8 @@ export const nativeOpenOptionFields = {
   "base-address": baseAddressSelectionOption,
   "architecture-variant": architectureVariantSelectionOption,
   "vector-table-address": vectorTableAddressSelectionOption,
+  "ghidra-language-id": ghidraLanguageIdSelectionOption,
+  "ghidra-compiler-spec-id": ghidraCompilerSpecIdSelectionOption,
   provider: providerSelectionOption,
 };
 
@@ -99,7 +122,35 @@ export interface NativeOpenCliFlags {
   readonly "base-address"?: string | undefined;
   readonly "architecture-variant"?: ArchitectureVariant | undefined;
   readonly "vector-table-address"?: string | undefined;
+  readonly "ghidra-language-id"?: string | undefined;
+  readonly "ghidra-compiler-spec-id"?: string | undefined;
 }
+
+/** The two Ghidra language flags form one provider language; neither stands alone. */
+const ghidraLanguageFromCli = (
+  options: NativeOpenCliFlags,
+): Pick<NativeLoadSelection, "providerLanguage"> => {
+  const languageId = options["ghidra-language-id"];
+  const compilerSpecId = options["ghidra-compiler-spec-id"];
+  if (languageId === undefined && compilerSpecId === undefined) return {};
+  if (languageId === undefined || compilerSpecId === undefined) {
+    const [missing, given] =
+      languageId === undefined
+        ? ["ghidra-language-id", "ghidra-compiler-spec-id"]
+        : ["ghidra-compiler-spec-id", "ghidra-language-id"];
+    throw new AnalysisInputError("open_binary", undefined, [
+      {
+        path: [missing],
+        reason: "missing_argument",
+        message: `--${given} requires --${missing}; together they name one Ghidra language.`,
+        expected: "string",
+      },
+    ]);
+  }
+  return {
+    providerLanguage: { provider: "ghidra", languageId, compilerSpecId },
+  };
+};
 
 /** Collect the native load flags into the selection that target admission owns. */
 export const nativeLoadSelectionFromCli = (
@@ -123,6 +174,7 @@ export const nativeLoadSelectionFromCli = (
   ...(options["vector-table-address"] === undefined
     ? {}
     : { vectorTableAddress: options["vector-table-address"] }),
+  ...ghidraLanguageFromCli(options),
 });
 
 /** Map native CLI flags onto the shared one-shot analysis options. */

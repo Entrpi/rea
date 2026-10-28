@@ -1,5 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { z } from "zod";
+import { digestSchema } from "../domain/digests.js";
 import { parseXmlDocument } from "../domain/xmlDocument.js";
 import { decodeXmlPlistText } from "../domain/propertyListXmlText.js";
 
@@ -9,6 +11,50 @@ import type { GhidraLanguageOverride } from "../config/ghidraLanguageOverride.js
 import { ConfigurationError } from "../domain/configurationErrors.js";
 import { RegularFileOperationCancelled } from "../filesystem/RegularFile.js";
 import { readBoundedFileBytes } from "../process/BoundedFileBytes.js";
+
+/**
+ * Files of a language definition that decide how Ghidra decodes, in the order
+ * the profile commits them and the raw prepare script checks them. The
+ * `.ldefs` entry names the other three, which Ghidra resolves beside it.
+ */
+export const GHIDRA_LANGUAGE_DEFINITION_FILES = [
+  { role: "ldefs", source: "the .ldefs document that declares the language" },
+  { role: "sla", source: "the compiled SLEIGH file that slafile names" },
+  { role: "pspec", source: "the processor spec that processorspec names" },
+  {
+    role: "cspec",
+    source: "the compiler spec that the selected compiler names",
+  },
+] as const;
+export type GhidraLanguageDefinitionRole =
+  (typeof GHIDRA_LANGUAGE_DEFINITION_FILES)[number]["role"];
+
+const definitionFileSchema = z.strictObject({
+  /** Path inside the installation directory, with "/" separators. */
+  path: z.string().min(1),
+  sha256: digestSchema,
+});
+
+/**
+ * Version 1 of the catalog entry a caller-selected language resolves to. A
+ * community module can change in place under the same language ID, so
+ * identity covers these bytes, not only the ID. `address_bits` is the
+ * entry's declared size; the import check requires the default address space
+ * to match it.
+ */
+export const ghidraLanguageDefinitionSchema = z.strictObject({
+  version: z.literal(1),
+  address_bits: z.int().min(1).max(64),
+  files: z.strictObject({
+    ldefs: definitionFileSchema,
+    sla: definitionFileSchema,
+    pspec: definitionFileSchema,
+    cspec: definitionFileSchema,
+  }),
+});
+export type GhidraLanguageDefinitionCommitment = z.infer<
+  typeof ghidraLanguageDefinitionSchema
+>;
 
 /** One language definition and the compiler specs it declares. */
 export interface GhidraLanguageDefinition {

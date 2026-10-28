@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { parseConfig } from "../config/parseConfig.js";
 import type {
   BinaryTarget,
+  FamilyRawBinaryTarget,
   RawBinaryLoad,
 } from "../domain/binaryTargetTypes.js";
 import {
@@ -63,7 +64,7 @@ const configFor = (environment: NodeJS.ProcessEnv) => {
 };
 
 const raw = (
-  architecture: Extract<BinaryTarget, { format: "raw-binary" }>["architecture"],
+  architecture: FamilyRawBinaryTarget["architecture"],
   entryPoint: string,
 ): BinaryTarget => ({
   path: "/tmp/raw.bin",

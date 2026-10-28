@@ -260,6 +260,8 @@ export class IdaProvider implements AnalysisProviderCandidate {
       };
     if (
       target.kind === "executable" &&
+      // A provider-language raw load names no family; the raw refusal applies.
+      target.architecture !== undefined &&
       (isElfMetadataArchitecture(target.architecture) ||
         target.architecture === "hexagon")
     )

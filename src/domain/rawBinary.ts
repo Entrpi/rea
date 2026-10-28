@@ -17,6 +17,11 @@ import {
   architectureVariantSchema,
   type ArchitectureVariant,
 } from "./architectureVariant.js";
+import {
+  providerLanguageIdentity,
+  providerLanguageIdentitySchema,
+  type ProviderLanguageSelection,
+} from "./providerLanguage.js";
 import { err, ok, type Result } from "./result.js";
 
 /** Caller-visible CPU families admitted for headerless raw binaries. */
@@ -96,13 +101,26 @@ export interface NativeLoadSelection {
   readonly baseAddress?: string;
   readonly architectureVariant?: ArchitectureVariant;
   readonly vectorTableAddress?: string;
+  readonly providerLanguage?: ProviderLanguageSelection;
 }
 
-/** Admitted headerless load identity used by target resolution and profiles. */
-export interface RawBinaryAdmission {
-  readonly architecture: HeaderArchitecture | RawOnlyArchitecture;
-  readonly load: RawBinaryLoad;
-}
+/**
+ * Admitted headerless load identity used by target resolution and profiles.
+ * A load decoded by a provider language names no family, and carries the
+ * extent its provider checks against the language's width.
+ */
+export type RawBinaryAdmission =
+  | {
+      readonly architecture: HeaderArchitecture | RawOnlyArchitecture;
+      readonly load: RawBinaryLoad;
+    }
+  | {
+      readonly architecture: null;
+      readonly load: RawBinaryLoad & {
+        readonly providerLanguage: ProviderLanguageSelection;
+        readonly lastAddress: string;
+      };
+    };
 
 /** Why a headerless load was refused, with its owning classification. */
 export interface RawBinaryAdmissionRejection {
@@ -127,12 +145,14 @@ export interface RawBinaryVectorTableRead {
 }
 
 /**
- * Whether a load is expressible with the inputs that predate base_address and
- * architecture_variant: base at a caller-selected entry and no variant. Such a
- * load keeps its earlier identity and Evidence, however its base was spelled.
+ * Whether a load is expressible with the inputs that predate base_address,
+ * architecture_variant and provider_language: a family decoder, base at a
+ * caller-selected entry and no variant. Such a load keeps its earlier
+ * identity and Evidence, however its base was spelled.
  */
 export const isLegacyRawLoad = (load: RawBinaryLoad): boolean =>
   load.architectureVariant === undefined &&
+  load.providerLanguage === undefined &&
   load.entrySource.kind === "caller" &&
   load.baseAddress === load.entryPoint;
 
@@ -149,8 +169,10 @@ export const rawEntryRoleAndBasis = (
 
 /**
  * Session and snapshot identity of a load that is not legacy-equivalent, from
- * canonical resolved values: the base, the variant, the vector table Reset was
- * read from, and the entry's address, instruction set, role and basis. Every
+ * canonical resolved values: the base, the variant or provider language, the
+ * vector table Reset was read from, and the entry's address, instruction set,
+ * role and basis. A provider language is kept as the caller named it; its
+ * provider commits what the language resolves to in the analysis profile. Every
  * load fact that summaries and Evidence report is here, provenance included,
  * so a reused session never reports what the current request did not choose.
  * Spellings are excluded; Evidence parameters keep the caller's. Coordinate
@@ -161,6 +183,7 @@ export const rawLoadIdentitySchema = z.strictObject({
   version: z.literal(1),
   base_address: rawBinaryBaseAddressSchema,
   architecture_variant: architectureVariantSchema.exactOptional(),
+  provider_language: providerLanguageIdentitySchema.exactOptional(),
   vector_table_address: rawBinaryVectorTableAddressSchema.exactOptional(),
   entries: z
     .array(
@@ -187,6 +210,13 @@ export const rawLoadIdentity = (
         ...(load.architectureVariant === undefined
           ? {}
           : { architecture_variant: load.architectureVariant }),
+        ...(load.providerLanguage === undefined
+          ? {}
+          : {
+              provider_language: providerLanguageIdentity(
+                load.providerLanguage,
+              ),
+            }),
         ...(load.entrySource.kind === "vector-table"
           ? { vector_table_address: load.entrySource.address }
           : {}),
@@ -250,11 +280,14 @@ export const admitRawBinary = (input: {
   readonly baseAddress?: unknown;
   readonly architectureVariant?: unknown;
   readonly vectorTableAddress?: unknown;
+  readonly providerLanguage?: ProviderLanguageSelection;
   readonly fileBytes: number;
 }): Result<
   RawBinaryAdmission | RawBinaryVectorTableRead,
   RawBinaryAdmissionRejection
 > => {
+  if (input.providerLanguage !== undefined)
+    return selectionRejected("provider_language is not admitted yet");
   const architecture = binaryArchitectureSchema.safeParse(input.architecture);
   if (!architecture.success)
     return selectionRejected(
@@ -443,7 +476,8 @@ export interface LoadSelectionIssue {
     | "entry_point"
     | "base_address"
     | "architecture_variant"
-    | "vector_table_address";
+    | "vector_table_address"
+    | "provider_language";
   readonly message: string;
 }
 
@@ -451,17 +485,67 @@ const RAW_ONLY_INPUTS =
   "base_address, architecture_variant and vector_table_address apply only with format=raw-binary";
 
 /**
- * Rules for the variant, base and vector-table inputs of a raw-binary
- * selection. The boundary pairing check and admission both apply them, so they
- * refuse the same selections in the same words. Legacy selections pass.
+ * Pairing rules of a provider language, which replaces the family. Narrow
+ * first: a family or variant beside it is refused rather than overridden, and
+ * the caller names the entry, since only a variant reads a vector table. A
+ * separate base is admitted; the provider-language lane verifies it.
  */
-export const rawBinaryVariantSelectionIssue = (input: {
+export const PROVIDER_LANGUAGE_PAIRING = [
+  {
+    field: "architecture",
+    refuses: (input: RawSelectionInput) => input.architecture !== undefined,
+    message: "provider_language replaces architecture; omit architecture",
+  },
+  {
+    field: "architecture_variant",
+    refuses: (input: RawSelectionInput) =>
+      input.architectureVariant !== undefined,
+    message:
+      "provider_language replaces architecture_variant; omit architecture_variant",
+  },
+  {
+    field: "vector_table_address",
+    refuses: (input: RawSelectionInput) =>
+      input.vectorTableAddress !== undefined,
+    message:
+      "vector_table_address applies only with architecture_variant; give entry_point with provider_language",
+  },
+  {
+    field: "entry_point",
+    refuses: (input: RawSelectionInput) => input.entryPoint === undefined,
+    message: "provider_language requires entry_point",
+  },
+] as const satisfies readonly {
+  readonly field: LoadSelectionIssue["field"];
+  readonly refuses: (input: RawSelectionInput) => boolean;
+  readonly message: string;
+}[];
+
+/** The raw-binary inputs that pairing rules read, before any is parsed. */
+interface RawSelectionInput {
   readonly architecture?: unknown;
   readonly entryPoint?: unknown;
   readonly baseAddress?: unknown;
   readonly architectureVariant?: unknown;
   readonly vectorTableAddress?: unknown;
-}): LoadSelectionIssue | undefined => {
+  readonly providerLanguage?: unknown;
+}
+
+/**
+ * Rules for the variant, base, vector-table and provider-language inputs of a
+ * raw-binary selection. The boundary pairing check and admission both apply
+ * them, so they refuse the same selections in the same words. Legacy
+ * selections pass.
+ */
+export const rawBinaryVariantSelectionIssue = (
+  input: RawSelectionInput,
+): LoadSelectionIssue | undefined => {
+  if (input.providerLanguage !== undefined) {
+    const rule = PROVIDER_LANGUAGE_PAIRING.find((rule) => rule.refuses(input));
+    return rule === undefined
+      ? undefined
+      : { field: rule.field, message: rule.message };
+  }
   const variant = architectureVariantRow(input.architectureVariant);
   if (variant !== undefined && variant.architecture !== input.architecture)
     return {
@@ -501,20 +585,19 @@ export const rawBinaryVariantSelectionIssue = (input: {
       };
 };
 
+const PROVIDER_LANGUAGE_RAW_ONLY =
+  "provider_language applies only with format=raw-binary";
+
 /** Describe the pairing of the selected load inputs without performing I/O. */
-export const rawBinarySelectionError = (input: {
-  readonly format?: ExecutableFormatHint;
-  readonly architecture?: unknown;
-  readonly entryPoint?: unknown;
-  readonly baseAddress?: unknown;
-  readonly architectureVariant?: unknown;
-  readonly vectorTableAddress?: unknown;
-}): LoadSelectionIssue | undefined => {
+export const rawBinarySelectionError = (
+  input: RawSelectionInput & { readonly format?: ExecutableFormatHint },
+): LoadSelectionIssue | undefined => {
   const hasArchitecture = input.architecture !== undefined;
   const hasEntry = input.entryPoint !== undefined;
   const hasBase = input.baseAddress !== undefined;
   const hasVariant = input.architectureVariant !== undefined;
   const hasVectorTable = input.vectorTableAddress !== undefined;
+  const hasProviderLanguage = input.providerLanguage !== undefined;
   const rawOnlyField = hasBase
     ? "base_address"
     : hasVariant
@@ -531,10 +614,14 @@ export const rawBinarySelectionError = (input: {
           "format=gamecube-dol takes its architecture from the DOL header; omit architecture",
       };
     return rawOnlyField === undefined
-      ? undefined
+      ? hasProviderLanguage
+        ? { field: "provider_language", message: PROVIDER_LANGUAGE_RAW_ONLY }
+        : undefined
       : { field: rawOnlyField, message: RAW_ONLY_INPUTS };
   }
   if (input.format === "raw-binary") {
+    // A provider language replaces the family, so its own rules apply.
+    if (hasProviderLanguage) return rawBinaryVariantSelectionIssue(input);
     if (!hasArchitecture)
       return {
         field: "architecture",
@@ -558,6 +645,8 @@ export const rawBinarySelectionError = (input: {
       message: "architecture and entry_point apply only with format=raw-binary",
     };
   return rawOnlyField === undefined
-    ? undefined
+    ? hasProviderLanguage
+      ? { field: "provider_language", message: PROVIDER_LANGUAGE_RAW_ONLY }
+      : undefined
     : { field: rawOnlyField, message: RAW_ONLY_INPUTS };
 };

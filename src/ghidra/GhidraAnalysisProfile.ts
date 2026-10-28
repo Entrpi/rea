@@ -114,7 +114,7 @@ const binaryLoaderPolicy = (
 ): Readonly<Record<string, JsonValue>> => ({
   target_kind: target.kind,
   target_format: target.format,
-  architecture: target.architecture,
+  architecture: target.architecture ?? null,
   available_architectures: [...target.availableArchitectures].sort(),
   import_mode: "ephemeral-source-immutable",
   ...sharedAnalysisSemantics,
@@ -230,10 +230,7 @@ export const resolveGhidraAnalysisProfile = async (
         ),
       );
     const { rawLoad } = target;
-    const language = ghidraRawBinaryLanguage(
-      target.architecture,
-      rawLoad.architectureVariant,
-    );
+    const language = ghidraRawBinaryLanguage(target);
     // A legacy-equivalent load commits exactly the parameters it always did.
     const identity = rawLoadIdentity(rawLoad);
     const processorLabels = ghidraVariantProcessorLabels(

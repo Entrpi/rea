@@ -875,3 +875,26 @@ describe("raw load identity", () => {
     expect(selected).not.toEqual(reset());
   });
 });
+
+describe("provider language admission", () => {
+  it("refuses a provider language until its admission lands", () => {
+    expect(
+      admitRawBinary({
+        architecture: undefined,
+        entryPoint: "0x8c000010",
+        providerLanguage: {
+          provider: "ghidra",
+          languageId: "SuperH4:LE:32:default",
+          compilerSpecId: "default",
+        },
+        fileBytes: 32,
+      }),
+    ).toEqual({
+      ok: false,
+      error: {
+        reason: "provider_language is not admitted yet",
+        constraint: "load_selection_rejected",
+      },
+    });
+  });
+});

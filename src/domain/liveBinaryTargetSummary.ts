@@ -13,6 +13,7 @@ import {
   rawBinaryVectorTableAddressSchema,
 } from "./rawBinary.js";
 import { architectureVariantSchema } from "./architectureVariant.js";
+import { providerLanguageIdentitySchema } from "./providerLanguage.js";
 import { ZIP_PACKAGE_FORMATS } from "./zipPackageFormat.js";
 
 const architectureSchema = z.enum(BINARY_ARCHITECTURES);
@@ -45,25 +46,42 @@ export const liveBinaryTargetSummaryVariants = [
     format: z.enum(["mach-o-universal", "pe", "dos-mz", "dos-com"]),
     architecture: headerArchitectureSchema,
   }),
-  z.object({
-    ...executable,
-    format: z.literal("raw-binary"),
-    architecture: binaryArchitectureSchema,
-    entry_point: rawBinaryEntryPointSchema.describe(
-      "Canonical code entry where execution is seeded. Raw file offset 0 is also mapped here unless base_address is present.",
+  z
+    .object({
+      ...executable,
+      format: z.literal("raw-binary"),
+      architecture: binaryArchitectureSchema
+        .nullable()
+        .describe(
+          "Caller-supplied CPU family, or null when provider_language selected the decoder instead.",
+        ),
+      entry_point: rawBinaryEntryPointSchema.describe(
+        "Canonical code entry where execution is seeded. Raw file offset 0 is also mapped here unless base_address is present.",
+      ),
+      base_address: rawBinaryBaseAddressSchema
+        .exactOptional()
+        .describe(
+          "Canonical address of raw file offset 0. Present when the load names a separate base, an architecture_variant or a provider_language.",
+        ),
+      architecture_variant: architectureVariantSchema.exactOptional(),
+      vector_table_address: rawBinaryVectorTableAddressSchema
+        .exactOptional()
+        .describe(
+          "Canonical address of the vector table whose Reset word gave entry_point. Present only when entry_point was omitted.",
+        ),
+      provider_language: providerLanguageIdentitySchema
+        .extend({ verification: z.literal("unverified") })
+        .exactOptional()
+        .describe(
+          "The provider language the caller selected in place of an architecture. REA checked it against the provider's catalog but has not verified that it decodes this image.",
+        ),
+    })
+    .refine(
+      (summary) =>
+        (summary.architecture === null) ===
+        (summary.provider_language !== undefined),
+      "A raw-binary summary has an architecture or a provider_language, not both",
     ),
-    base_address: rawBinaryBaseAddressSchema
-      .exactOptional()
-      .describe(
-        "Canonical address of raw file offset 0. Present when the load names a separate base or an architecture_variant.",
-      ),
-    architecture_variant: architectureVariantSchema.exactOptional(),
-    vector_table_address: rawBinaryVectorTableAddressSchema
-      .exactOptional()
-      .describe(
-        "Canonical address of the vector table whose Reset word gave entry_point. Present only when entry_point was omitted.",
-      ),
-  }),
   z.object({
     ...executable,
     format: z.literal("gamecube-dol"),

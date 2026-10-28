@@ -385,10 +385,7 @@ export const attestGhidraRawBinaryLoadImage = (
       "Ghidra raw-binary snapshot digest does not match the admitted target",
     );
   const { rawLoad } = target;
-  const language = ghidraRawBinaryLanguage(
-    target.architecture,
-    rawLoad.architectureVariant,
-  );
+  const language = ghidraRawBinaryLanguage(target);
   const { baseAddress, entryPoint } = rawLoad;
   const base = BigInt(baseAddress);
   const last = hexAddress(base + BigInt(snapshot.bytes) - 1n);
@@ -407,11 +404,13 @@ export const attestGhidraRawBinaryLoadImage = (
   );
   // BinaryLoader's block base is independent of the Program image base.
   check("image_base", "0x0", observations.image_base);
-  check(
-    "default_address_space",
-    language.defaultAddressSpace,
-    observations.default_address_space,
-  );
+  // A caller-selected language has no pinned space; its import check commits one.
+  if (language.defaultAddressSpace !== undefined)
+    check(
+      "default_address_space",
+      language.defaultAddressSpace,
+      observations.default_address_space,
+    );
   check("source_file_count", 1, observations.source_files.length);
   check("source_file_size", snapshot.bytes, source?.size ?? null);
   check("original_file_sha256", target.sha256, source?.original_sha256 ?? null);

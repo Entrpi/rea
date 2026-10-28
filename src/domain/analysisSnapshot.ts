@@ -105,14 +105,22 @@ const targetSchema = z.discriminatedUnion("format", [
       .exclude([...RAW_ONLY_ARCHITECTURES])
       .nullable(),
   }),
-  targetIdentitySchema.extend({
-    format: z.literal("raw-binary"),
-    kind: z.literal("executable"),
-    architecture: binaryArchitectureSchema,
-    entry_point: rawBinaryEntryPointSchema,
-    // Absent for a legacy-equivalent load, so earlier snapshots keep matching.
-    raw_load: rawLoadIdentitySchema.exactOptional(),
-  }),
+  targetIdentitySchema
+    .extend({
+      format: z.literal("raw-binary"),
+      kind: z.literal("executable"),
+      // Null only when a provider language replaces the family.
+      architecture: binaryArchitectureSchema.nullable(),
+      entry_point: rawBinaryEntryPointSchema,
+      // Absent for a legacy-equivalent load, so earlier snapshots keep matching.
+      raw_load: rawLoadIdentitySchema.exactOptional(),
+    })
+    .refine(
+      (target) =>
+        (target.architecture === null) ===
+        (target.raw_load?.provider_language !== undefined),
+      "A raw-binary snapshot target has an architecture or a provider language, not both",
+    ),
   targetIdentitySchema.extend({
     format: z.literal("gamecube-dol"),
     kind: z.literal("executable"),
@@ -376,7 +384,7 @@ export const snapshotTarget = (target: BinaryTarget): AnalysisSnapshotTarget =>
         {
           sha256: target.sha256,
           kind: target.kind,
-          architecture: target.architecture,
+          architecture: target.architecture ?? null,
           format: target.format,
           entry_point: target.rawLoad.entryPoint,
         },

@@ -2,17 +2,21 @@ import type {
   ArchitectureVariant,
   RawEntryIsaMode,
 } from "../domain/architectureVariant.js";
-import type { RawBinaryLoad } from "../domain/binaryTargetTypes.js";
-import {
-  isLegacyRawLoad,
-  type RawBinaryAdmission,
-} from "../domain/rawBinary.js";
+import type {
+  RawBinaryLoad,
+  RawBinaryTarget,
+} from "../domain/binaryTargetTypes.js";
+import { isLegacyRawLoad } from "../domain/rawBinary.js";
 
-/** Bound Ghidra language for a caller-supplied raw-binary architecture. */
+/** Bound Ghidra language for a raw-binary load. */
 export interface GhidraRawBinaryLanguage {
   readonly languageId: string;
-  readonly compilerSpecId: "default" | "gcc";
-  readonly defaultAddressSpace: "ram" | "RAM";
+  readonly compilerSpecId: string;
+  /**
+   * The language's default address space, pinned for a family or variant.
+   * Absent for a caller-selected language, whose import check commits it.
+   */
+  readonly defaultAddressSpace?: "ram" | "RAM";
 }
 
 /**
@@ -67,20 +71,25 @@ export const ghidraVariantProcessorLabels = (
  * supported generic compiler specification. These are analysis conventions,
  * not evidence of the target's original compiler. Each family has one fixed
  * byte order: m68k is big-endian and the others are little-endian. A
- * caller-named variant selects its own decoder instead of the generic one;
- * big-endian ARM and unnamed processor variants are out of scope.
+ * caller-named variant selects its own decoder instead of the generic one,
+ * and a caller-named provider language replaces the family altogether.
  */
 export const ghidraRawBinaryLanguage = (
-  architecture: RawBinaryAdmission["architecture"],
-  variant?: ArchitectureVariant,
+  target: RawBinaryTarget,
 ): GhidraRawBinaryLanguage => {
+  if (target.architecture === undefined)
+    return {
+      languageId: target.rawLoad.providerLanguage.languageId,
+      compilerSpecId: target.rawLoad.providerLanguage.compilerSpecId,
+    };
+  const variant = target.rawLoad.architectureVariant;
   if (variant !== undefined)
     return {
       languageId: GHIDRA_VARIANT_LANGUAGES[variant],
       compilerSpecId: "default",
       defaultAddressSpace: "ram",
     };
-  switch (architecture) {
+  switch (target.architecture) {
     case "6502":
       return {
         languageId: "6502:LE:16:default",

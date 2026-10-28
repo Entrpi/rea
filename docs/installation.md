@@ -1391,7 +1391,7 @@ export REA_GHIDRA_LANGUAGE_ID="x86:LE:32:default"
 export REA_GHIDRA_COMPILER_SPEC_ID="borlandcpp"   # optional; requires a language
 ```
 
-REA passes `-processor`/`-cspec`, checks both against the installation's `.ldefs`, and records them in the analysis profile. DOS imports reject an override.
+REA passes `-processor`/`-cspec`, checks both against the installation's `.ldefs`, and records them in the analysis profile. DOS and raw-binary imports reject an override. A raw image names its language per target with `provider_language` instead; see [provider languages](raw-binary.md#provider-languages).
 
 Language definitions must be well-formed XML encoded as UTF-8 or BOM-marked UTF-16, with any encoding declaration matching the bytes. Literal Unicode replacement characters (U+FFFD) are accepted; malformed source bytes are rejected.
 

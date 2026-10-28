@@ -353,10 +353,7 @@ export const createGhidraProviderClient = (input: {
   const disabledAnalyzerLimitations: string[] = [];
   const rawLanguage =
     target.format === "raw-binary"
-      ? ghidraRawBinaryLanguage(
-          target.architecture,
-          target.rawLoad.architectureVariant,
-        )
+      ? ghidraRawBinaryLanguage(target)
       : undefined;
   const targetLimitations = [
     ...(target.format === "dos-mz"

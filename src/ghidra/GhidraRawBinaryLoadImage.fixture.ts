@@ -1,14 +1,19 @@
 import { createHash } from "node:crypto";
 
 import type { NativeLoadImageObservation } from "../domain/native/nativeLoadImage.js";
-import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
+import type { ArchitectureVariant } from "../domain/architectureVariant.js";
+import type {
+  FamilyRawBinaryTarget,
+  RawBinaryTarget,
+} from "../domain/binaryTargetTypes.js";
+import { rawLoadAtEntry } from "../domain/rawBinary.fixture.js";
 
 const hash = (bytes: Buffer): string =>
   createHash("sha256").update(bytes).digest("hex");
 
 export const fixtureRawBinaryLoadImage = (): {
   snapshot: { sha256: string; bytes: number };
-  target: Extract<BinaryTarget, { format: "raw-binary" }>;
+  target: FamilyRawBinaryTarget;
   observation: NativeLoadImageObservation;
 } => {
   const bytes = Buffer.from("1eff2fe1", "hex");
@@ -66,3 +71,20 @@ export const fixtureRawBinaryLoadImage = (): {
     },
   };
 };
+
+/** A family raw target at 0x0, for bindings that read only the family and variant. */
+export const familyRawTarget = (
+  architecture: FamilyRawBinaryTarget["architecture"],
+  architectureVariant?: ArchitectureVariant,
+): RawBinaryTarget => ({
+  path: "/tmp/image.bin",
+  sha256: "a".repeat(64),
+  kind: "executable",
+  format: "raw-binary",
+  architecture,
+  availableArchitectures: [architecture],
+  rawLoad: {
+    ...rawLoadAtEntry("0x0"),
+    ...(architectureVariant === undefined ? {} : { architectureVariant }),
+  },
+});
