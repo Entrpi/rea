@@ -156,6 +156,7 @@ describe("ESP image decoding", () => {
         min_efuse_blk_rev_full: 0,
         max_efuse_blk_rev_full: 199,
         mmu_page_size: 16,
+        spi_flash_mode: 2,
       },
     });
     expect(
@@ -377,6 +378,24 @@ describe("ESP image integrity", () => {
 });
 
 describe("ESP image framing and segment limits", () => {
+  it("keeps the app descriptor's fields when the file ends in its reserved tail", () => {
+    // Segment 0's data, and with it the descriptor, starts at offset 32.
+    const decoded = image(APP.subarray(0, 32 + 200));
+    expect(decoded.metadata.descriptor).toMatchObject({
+      kind: "app",
+      offset: 32,
+      version: "1.2.3",
+      mmu_page_size: 16,
+      spi_flash_mode: 2,
+    });
+    expect(decoded.segments[0]?.availableLength).toBe(200);
+    expect(decoded.coverage).toBe("unknown");
+  });
+
+  it("does not read an app descriptor whose fields are cut off", () => {
+    expect(image(APP.subarray(0, 32 + 181)).metadata.descriptor).toBeNull();
+  });
+
   it("keeps a truncated segment as an image with unavailable integrity", () => {
     const decoded = image(APP.subarray(0, 360));
     expect(decoded.metadata).toMatchObject({
