@@ -83,6 +83,12 @@ import { hasGodotPckHeader } from "../domain/godotPckFormat.js";
 import { hasUImageMagic } from "../domain/uimageFormat.js";
 import { hasUnityFsHeader } from "../domain/unityfsFormat.js";
 import { detectHexRecordEncoding } from "../domain/firmware/hexRecords.js";
+import { hasUf2Block } from "../domain/firmware/uf2.js";
+import {
+  DFUSE_SUFFIX_BYTES,
+  hasDfuSePrefix,
+  isDfuSeFile,
+} from "../domain/firmware/dfuse.js";
 import {
   locateEspFlashLayout,
   type EspFlashSelection,
@@ -766,6 +772,22 @@ const detectArtifactFormat = async (
   if (hasUImageMagic(magic)) return "uimage";
   const hexRecords = detectHexRecordEncoding(magic);
   if (hexRecords !== undefined) return hexRecords;
+  if (hasUf2Block(magic)) return "uf2";
+  if (
+    hasDfuSePrefix(magic) &&
+    initial.size >= DFUSE_SUFFIX_BYTES &&
+    isDfuSeFile(
+      magic,
+      await readHandleRange(
+        handle,
+        initial.size - DFUSE_SUFFIX_BYTES,
+        DFUSE_SUFFIX_BYTES,
+        signal,
+      ),
+      initial.size,
+    )
+  )
+    return "dfuse";
   // A C3 or S3 dump begins with its bootloader, so a layout comes first.
   const flash = await locateEspFlashLayout(
     initial.size,
@@ -858,6 +880,8 @@ const isArchiveFormat = (
     "srec",
     "esp-image",
     "esp-flash-image",
+    "uf2",
+    "dfuse",
   ].includes(format);
 
 /** Whether the leading bytes begin any executable header family, valid or not. */

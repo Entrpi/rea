@@ -449,7 +449,9 @@ export type BinaryTarget =
           | "pkg"
           | "intel-hex"
           | "srec"
-          | "esp-image";
+          | "esp-image"
+          | "uf2"
+          | "dfuse";
       })
   | (BinaryTargetIdentity &
       NonExecutableMetadata & {

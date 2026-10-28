@@ -44,6 +44,8 @@ export const evidenceSubjectFormatSchema = z.enum([
   "srec",
   "esp-image",
   "esp-flash-image",
+  "uf2",
+  "dfuse",
 ]);
 
 /** Format-owned architecture declarations shared by Evidence and persisted executions. */

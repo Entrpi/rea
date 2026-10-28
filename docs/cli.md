@@ -314,6 +314,16 @@ rea extract-artifact ./firmware.bin --json
 See [U-Boot uImage](uimage.md) for verified CRCs, physical component ranges,
 unknown names, resource limits and retained views. Compressed bytes stay stored.
 
+Inventory and extract UF2 or DfuSe regions:
+
+```sh
+rea inspect-artifact ./firmware.uf2 --json
+rea extract-artifact ./firmware.dfu --json
+```
+
+See [UF2 and DfuSe images](uf2-dfuse.md) for recognition, families, numbering,
+the DfuSe suffix CRC and limits.
+
 Inspect local model declarations without loading weights:
 
 ```bash

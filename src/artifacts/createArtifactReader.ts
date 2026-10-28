@@ -5,6 +5,8 @@ import type { AsarHeaderAdmission } from "../config/asarHeaderAdmission.js";
 import { AsarArtifactReader } from "./AsarArtifactReader.js";
 import type { ArtifactReader } from "./ArtifactReader.js";
 import { HexRecordArtifactReader } from "./HexRecordArtifactReader.js";
+import { Uf2ArtifactReader } from "./Uf2ArtifactReader.js";
+import { DfuSeArtifactReader } from "./DfuSeArtifactReader.js";
 import { DirectoryArtifactReader } from "./DirectoryArtifactReader.js";
 import { EspImageArtifactReader } from "./EspImageArtifactReader.js";
 import {
@@ -38,6 +40,8 @@ export type ArtifactReaderFormat =
   | "uimage"
   | "intel-hex"
   | "srec"
+  | "uf2"
+  | "dfuse"
   | "mach-o-universal"
   | "dmg"
   | "esp-image"
@@ -130,6 +134,10 @@ export function createArtifactReader(
     case "intel-hex":
     case "srec":
       return new HexRecordArtifactReader(path, format, rootSource);
+    case "uf2":
+      return new Uf2ArtifactReader(path, rootSource);
+    case "dfuse":
+      return new DfuSeArtifactReader(path, rootSource);
     case "mach-o-universal":
       return new MachOSliceArtifactReader(
         path,

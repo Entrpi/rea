@@ -622,6 +622,13 @@ Cortex-M ELF executables need none of these inputs: Ghidra pins the M-profile
 decoder that `.ARM.attributes` declares, and the session names a float ABI the
 lane has not verified. See [ARM ELF guide](https://github.com/morluto/rea/blob/main/docs/ghidra-arm.md).
 
+Intel HEX, S-record, UF2 and DfuSe files are containers, not raw images:
+`inspect_artifact` lists address regions (UF2 per familyID, DfuSe per element
+with its alternate setting), and `extract_artifact` writes each region. Open an
+extracted region as `raw-binary` with its start address as `entry_point`. UF2
+numbering gaps leave coverage unknown; a DfuSe suffix CRC mismatch follows
+`integrity_policy`. See [UF2 and DfuSe](https://github.com/morluto/rea/blob/main/docs/uf2-dfuse.md).
+
 ### Function annotations in Ghidra
 
 Fresh-import sessions admit annotations; existing-project reuse is read-only.

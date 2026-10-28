@@ -95,6 +95,16 @@ export const inventoryCoverage = (
               "uImage inventory establishes the 64-byte legacy header facts and stored payload bytes. Compressed payloads are not decompressed, and the image is not executed.",
             ]
           : []),
+        ...(reader.format === "uf2"
+          ? [
+              "UF2 inventory decodes main-flash block payloads into address-contiguous regions per familyID. It does not establish CPU, byte order, memory map, or an entry point; a familyID names a target family, and gaps are unwritten, not zero.",
+            ]
+          : []),
+        ...(reader.format === "dfuse"
+          ? [
+              "DfuSe inventory lists each target element as one region at its declared address. It does not establish CPU, byte order, memory map, or an entry point; an alternate setting selects a device memory, not an address space REA can interpret.",
+            ]
+          : []),
         ...traversal.limitations,
       ],
     };
@@ -124,7 +134,9 @@ export const inventoryCoverage = (
     format === "intel-hex" ||
     format === "srec" ||
     format === "esp-image" ||
-    format === "esp-flash-image"
+    format === "esp-flash-image" ||
+    format === "uf2" ||
+    format === "dfuse"
   )
     return {
       coverage: { scope: "container-entries", status: "unknown" },

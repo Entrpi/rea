@@ -336,3 +336,12 @@ addresses are facts from the header, not proven entry points, and compressed
 payloads stay as stored. Intel HEX/S-record and FIT images are separate
 readers and are not covered here. See [U-Boot legacy uImage](uimage.md) for
 component padding, preserved names, resource policies and verification scope.
+
+## Inspect UF2 and DfuSe images
+
+Use `inspect-artifact` / `inspect_artifact` on a UF2 file for each familyID's
+address regions and its block numbering, or on a DfuSe file for its targets,
+elements and DFU suffix, then `extract-artifact` / `extract_artifact` for one
+raw file per region or element. A DfuSe suffix CRC mismatch follows
+`integrity_policy`. Decoding is portable and requires no external tool. See
+[UF2 and DfuSe images](uf2-dfuse.md).

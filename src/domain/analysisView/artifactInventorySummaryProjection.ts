@@ -20,7 +20,9 @@ export const artifactInventorySummaryProjectionIds = (
     format === "pyinstaller" ||
     format === "node-sea" ||
     format === "esp-image" ||
-    format === "esp-flash-image"
+    format === "esp-flash-image" ||
+    format === "uf2" ||
+    format === "dfuse"
   )
     return [current.evidence_id];
   const { view_digest: _digest, ...projection } = result;
