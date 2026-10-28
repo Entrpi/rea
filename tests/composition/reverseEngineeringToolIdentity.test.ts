@@ -614,3 +614,46 @@ posix(
     expect(failed.ok ? undefined : failed.error.cleanupIncomplete).toBe(false);
   },
 );
+
+posix(
+  "ends the call without running anything when hashing the executable reaches the deadline",
+  async () => {
+    const { executable, path } = await fixture();
+    const digestStarted = gate();
+    const release = gate();
+    const run = runner(() => "rizin 0.9.1 @ linux-x86-64");
+    const service = new TestReverseEngineeringService({
+      run,
+      lookup: lookupExecutable,
+      environment: { REA_RIZIN_COMMAND: executable },
+      // Only the executable's digest stalls, past the call's deadline.
+      stat: async (target) => {
+        if (target === executable) {
+          digestStarted.open();
+          await release.opened;
+        }
+        return stat(target);
+      },
+    });
+    try {
+      const result = await within(
+        service.executeRizinCommand({
+          path,
+          command: "iI",
+          command_timeout_ms: 50,
+        }),
+        "call past the digest deadline",
+      );
+      await within(digestStarted.opened, "executable digest");
+      if (result.ok) throw new Error("Expected the digest deadline to end it");
+      expect(result.error).toMatchObject({
+        _tag: "AnalysisTimeoutError",
+        timeoutMs: 50,
+      });
+      expect(result.error.diagnostics).toEqual({ phase: "executable_digest" });
+      expect(run).not.toHaveBeenCalled();
+    } finally {
+      release.open();
+    }
+  },
+);
