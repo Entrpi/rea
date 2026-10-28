@@ -98,6 +98,12 @@ export type FamilyRawBinaryTarget = Extract<
   { readonly architecture: BinaryArchitecture }
 >;
 
+/** A headerless target decoded by a caller-named provider language. */
+export type ProviderLanguageRawBinaryTarget = Exclude<
+  RawBinaryTarget,
+  FamilyRawBinaryTarget
+>;
+
 /** Referenced CodeView debug symbols from a PE debug directory. */
 export interface PeCodeViewRecord {
   readonly pdbPath: string;

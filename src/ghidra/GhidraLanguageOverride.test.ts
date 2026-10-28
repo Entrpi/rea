@@ -222,7 +222,13 @@ describe("Ghidra language catalog", () => {
       </language>
     </language_definitions>`);
     expect(catalog).toEqual([
-      { id: "x86:LE:32:default", compilerSpecIds: ["borlandcpp"] },
+      {
+        id: "x86:LE:32:default",
+        size: null,
+        slaFile: null,
+        processorSpec: null,
+        compilers: [{ id: "borlandcpp", spec: null }],
+      },
     ]);
     expect(
       admitGhidraLanguageOverride(
@@ -251,9 +257,22 @@ describe("Ghidra language catalog", () => {
     expect(parseGhidraLanguageDefinitions(X86_LDEFS)).toEqual([
       {
         id: "x86:LE:32:default",
-        compilerSpecIds: ["windows", "gcc", "borlandcpp"],
+        size: 32,
+        slaFile: null,
+        processorSpec: null,
+        compilers: [
+          { id: "windows", spec: "x86win.cspec" },
+          { id: "gcc", spec: "x86gcc.cspec" },
+          { id: "borlandcpp", spec: "x86borland.cspec" },
+        ],
       },
-      { id: "x86:LE:16:Real Mode", compilerSpecIds: ["default"] },
+      {
+        id: "x86:LE:16:Real Mode",
+        size: 16,
+        slaFile: null,
+        processorSpec: null,
+        compilers: [{ id: "default", spec: "x86-16.cspec" }],
+      },
     ]);
     expect(
       await readGhidraLanguageCatalog(installDir, new ArtifactResourceScope()),
@@ -282,11 +301,28 @@ describe("Ghidra language catalog", () => {
       ]),
     );
     await writeFile(join(module("x86"), "x86.ldefs"), X86_LDEFS);
+    const catalog = await readGhidraLanguageCatalog(
+      root,
+      new ArtifactResourceScope(),
+    );
     expect(
-      await readGhidraLanguageCatalog(root, new ArtifactResourceScope()),
+      catalog.map(
+        ({ ldefsPath: _path, ldefsSha256: _digest, ...entry }) => entry,
+      ),
     ).toEqual([
-      { id: "probe:LE:32:default", compilerSpecIds: [] },
+      {
+        id: "probe:LE:32:default",
+        size: null,
+        slaFile: null,
+        processorSpec: null,
+        compilers: [],
+      },
       ...parseGhidraLanguageDefinitions(X86_LDEFS),
+    ]);
+    expect(catalog.map((entry) => entry.ldefsPath)).toEqual([
+      join(module("probe"), "probe.ldefs"),
+      join(module("x86"), "x86.ldefs"),
+      join(module("x86"), "x86.ldefs"),
     ]);
   });
 

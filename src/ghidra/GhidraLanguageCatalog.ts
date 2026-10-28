@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import { readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { z } from "zod";
 import { digestSchema } from "../domain/digests.js";
+import { err, ok, type Result } from "../domain/result.js";
 import { parseXmlDocument } from "../domain/xmlDocument.js";
 import { decodeXmlPlistText } from "../domain/propertyListXmlText.js";
 
@@ -56,10 +58,25 @@ export type GhidraLanguageDefinitionCommitment = z.infer<
   typeof ghidraLanguageDefinitionSchema
 >;
 
-/** One language definition and the compiler specs it declares. */
+/** One language definition as its `.ldefs` entry declares it. */
 export interface GhidraLanguageDefinition {
   readonly id: string;
-  readonly compilerSpecIds: readonly string[];
+  /** Declared size in bits; null when absent or not a decimal integer. */
+  readonly size: number | null;
+  /** File names the entry gives its compiled SLEIGH and processor spec. */
+  readonly slaFile: string | null;
+  readonly processorSpec: string | null;
+  readonly compilers: readonly {
+    readonly id: string;
+    readonly spec: string | null;
+  }[];
+}
+
+/** A catalog entry with the `.ldefs` document that declares it. */
+export interface GhidraCatalogLanguage extends GhidraLanguageDefinition {
+  readonly ldefsPath: string;
+  /** SHA-256 of the `.ldefs` bytes this entry was parsed from. */
+  readonly ldefsSha256: string;
 }
 
 // Language definitions are small XML files; refuse anything implausibly large.
@@ -85,15 +102,25 @@ export const parseGhidraLanguageDefinitions = (
     if (language.parentNode !== root) continue;
     const id = language.getAttribute("id");
     if (id === null) continue;
-    const compilerSpecIds: string[] = [];
+    // Ghidra skips hidden languages outside development mode.
+    if (language.getAttribute("hidden") === "true") continue;
+    const compilers: { id: string; spec: string | null }[] = [];
     for (const compiler of Array.from(
       language.getElementsByTagName("compiler"),
     )) {
       if (compiler.parentNode !== language) continue;
       const compilerId = compiler.getAttribute("id");
-      if (compilerId !== null) compilerSpecIds.push(compilerId);
+      if (compilerId !== null)
+        compilers.push({ id: compilerId, spec: compiler.getAttribute("spec") });
     }
-    definitions.push({ id, compilerSpecIds });
+    const size = language.getAttribute("size");
+    definitions.push({
+      id,
+      size: size !== null && /^[0-9]{1,4}$/u.test(size) ? Number(size) : null,
+      slaFile: language.getAttribute("slafile"),
+      processorSpec: language.getAttribute("processorspec"),
+      compilers,
+    });
   }
   return definitions;
 };
@@ -123,7 +150,7 @@ const readLanguageDefinitionFile = (
   path: string,
   resources: ArtifactResourceScope,
   signal: AbortSignal | undefined,
-): Promise<readonly GhidraLanguageDefinition[]> =>
+): Promise<readonly GhidraCatalogLanguage[]> =>
   withArtifactRegularFile(
     path,
     resources,
@@ -136,9 +163,11 @@ const readLanguageDefinitionFile = (
       });
       // The XML byte owner validates encoding and declaration before syntax
       // parsing; a literal U+FFFD cannot diagnose invalid source bytes.
-      return bytes === undefined
-        ? []
-        : parseGhidraLanguageDefinitions(decodeXmlPlistText(bytes));
+      if (bytes === undefined) return [];
+      const ldefsSha256 = sha256(bytes);
+      return parseGhidraLanguageDefinitions(decodeXmlPlistText(bytes)).map(
+        (definition) => ({ ...definition, ldefsPath: path, ldefsSha256 }),
+      );
     },
     "follow",
   );
@@ -152,9 +181,9 @@ export const readGhidraLanguageCatalog = (
   installDir: string,
   resources: ArtifactResourceScope,
   signal?: AbortSignal,
-): Promise<readonly GhidraLanguageDefinition[]> =>
+): Promise<readonly GhidraCatalogLanguage[]> =>
   resources.run(async () => {
-    const definitions: GhidraLanguageDefinition[] = [];
+    const definitions: GhidraCatalogLanguage[] = [];
     for (const directory of await languageDirectories(installDir)) {
       let entries: string[];
       try {
@@ -202,17 +231,153 @@ export const admitGhidraLanguageOverride = (
         },
       ],
     });
+  const compilerSpecIds = language.compilers.map((compiler) => compiler.id);
   if (
     override.compilerSpecId !== undefined &&
-    !language.compilerSpecIds.includes(override.compilerSpecId)
+    !compilerSpecIds.includes(override.compilerSpecId)
   )
     return new ConfigurationError("Invalid REA environment configuration", {
       settings: [
         {
           setting: "REA_GHIDRA_COMPILER_SPEC_ID",
-          constraint: `must be one of the selected language's compiler specs: ${language.compilerSpecIds.join(", ")}`,
+          constraint: `must be one of the selected language's compiler specs: ${compilerSpecIds.join(", ")}`,
         },
       ],
     });
   return null;
 };
+
+const sha256 = (bytes: Uint8Array): string =>
+  createHash("sha256").update(bytes).digest("hex");
+
+// Ghidra 12.1.4 refuses a compiled SLEIGH file over 16 MiB (SlaFormat).
+const MAX_SLA_BYTES = 16 * 1024 * 1024;
+
+/** Ghidra resolves these names beside the `.ldefs` file; REA resolves nothing else. */
+const isSiblingFileName = (name: string): boolean =>
+  name !== "" && name !== "." && name !== ".." && !/[/\\]/u.test(name);
+
+const digestFile = (
+  path: string,
+  maxBytes: number,
+  resources: ArtifactResourceScope,
+  signal: AbortSignal | undefined,
+): Promise<string | undefined> =>
+  withArtifactRegularFile(
+    path,
+    resources,
+    signal,
+    async ({ handle: file }) => {
+      const bytes = await readBoundedFileBytes(file, maxBytes, {
+        signal,
+        cancellationFailure: (reason) =>
+          new RegularFileOperationCancelled(reason),
+      });
+      return bytes === undefined ? undefined : sha256(bytes);
+    },
+    "follow",
+  );
+
+/**
+ * Resolve a caller-selected language to the one catalog entry that defines it
+ * and digest the files Ghidra loads for it: the `.ldefs` document, and the
+ * `.sla`, `.pspec` and `.cspec` it names. A refusal names what the caller can
+ * correct; a failed read throws. The digests are of the bytes read here, so
+ * the raw prepare script compares them with the files Ghidra loaded.
+ */
+export const resolveGhidraLanguageDefinition = (
+  installDir: string,
+  selection: { readonly languageId: string; readonly compilerSpecId: string },
+  providerVersion: string,
+  resources: ArtifactResourceScope,
+  signal?: AbortSignal,
+): Promise<Result<GhidraLanguageDefinitionCommitment, string>> =>
+  resources.run(async () => {
+    const { languageId, compilerSpecId } = selection;
+    const catalog = await readGhidraLanguageCatalog(
+      installDir,
+      resources,
+      signal,
+    );
+    const installPath = (path: string): string =>
+      relative(installDir, path).split(sep).join("/");
+    const matches = catalog.filter((language) => language.id === languageId);
+    const language = matches[0];
+    if (language === undefined)
+      return err(
+        `${languageId} is not a language defined by Ghidra ${providerVersion}`,
+      );
+    if (matches.length > 1)
+      return err(
+        `${languageId} is defined by more than one .ldefs entry (${matches
+          .map((match) => installPath(match.ldefsPath))
+          .join(", ")}); REA cannot tell which one Ghidra loads`,
+      );
+    const compiler = language.compilers.find(
+      (candidate) => candidate.id === compilerSpecId,
+    );
+    if (compiler === undefined)
+      return err(
+        `compiler_spec_id must be one of ${languageId}'s compiler specs: ${language.compilers
+          .map((candidate) => candidate.id)
+          .join(", ")}`,
+      );
+    if (language.size === null || language.size < 1 || language.size > 64)
+      return err(
+        `${languageId} declares no address size from 1 to 64 bits in its .ldefs entry`,
+      );
+    const directory = dirname(language.ldefsPath);
+    const siblings = new Set(await readdir(directory));
+    const named = [
+      ["sla", language.slaFile, MAX_SLA_BYTES],
+      ["pspec", language.processorSpec, MAX_LDEFS_BYTES],
+      ["cspec", compiler.spec, MAX_LDEFS_BYTES],
+    ] as const;
+    const files: Partial<
+      Record<
+        GhidraLanguageDefinitionRole,
+        { readonly path: string; readonly sha256: string }
+      >
+    > = {
+      ldefs: {
+        path: installPath(language.ldefsPath),
+        sha256: language.ldefsSha256,
+      },
+    };
+    for (const [role, name, maxBytes] of named) {
+      if (name === null || !isSiblingFileName(name))
+        return err(
+          `${languageId} names its ${role} file ${JSON.stringify(name)}; REA resolves definition files only beside the .ldefs file`,
+        );
+      if (!siblings.has(name))
+        return err(
+          role === "sla"
+            ? `${languageId} has no compiled SLEIGH file ${name}. Ghidra would compile it into its installation when it loads the language, and REA does not change the installation; compile the module first`
+            : `${languageId} names ${role} file ${name}, which is not beside its .ldefs file`,
+        );
+      const path = join(directory, name);
+      const digest = await digestFile(path, maxBytes, resources, signal);
+      if (digest === undefined)
+        return err(
+          `${languageId}'s ${role} file ${name} is larger than ${String(maxBytes)} bytes`,
+        );
+      files[role] = { path: installPath(path), sha256: digest };
+    }
+    return ok(
+      ghidraLanguageDefinitionSchema.parse({
+        version: 1,
+        address_bits: language.size,
+        files,
+      }),
+    );
+  });
+
+/** Content digests of a committed definition; paths do not move coordinates. */
+export const ghidraLanguageDefinitionDigests = (
+  definition: GhidraLanguageDefinitionCommitment,
+): Readonly<Record<GhidraLanguageDefinitionRole, string>> => ({
+  ldefs: definition.files.ldefs.sha256,
+  sla: definition.files.sla.sha256,
+  pspec: definition.files.pspec.sha256,
+  cspec: definition.files.cspec.sha256,
+});

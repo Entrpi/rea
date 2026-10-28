@@ -67,6 +67,17 @@ export const ghidraVariantProcessorLabels = (
   variant === undefined ? undefined : "not-applied-v1";
 
 /**
+ * The label policy of a raw load: a variant's, and also not applied for a
+ * caller-selected language, whose `.pspec` labels and entries are unverified.
+ */
+export const ghidraRawProcessorLabels = (
+  load: RawBinaryLoad,
+): "not-applied-v1" | undefined =>
+  load.providerLanguage === undefined
+    ? ghidraVariantProcessorLabels(load.architectureVariant)
+    : "not-applied-v1";
+
+/**
  * Map caller-visible CPU families to generic Ghidra languages with a
  * supported generic compiler specification. These are analysis conventions,
  * not evidence of the target's original compiler. Each family has one fixed

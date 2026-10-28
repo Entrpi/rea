@@ -24,6 +24,7 @@ import {
 } from "./binaryTargetTypes.js";
 import {
   admittedRawLoad,
+  providerLanguageRawTarget,
   rawLoadAtEntry,
   vectorTableWords,
 } from "./rawBinary.fixture.js";
@@ -292,39 +293,19 @@ describe("analysis snapshot M-profile raw identity", () => {
 });
 
 describe("analysis snapshot provider-language raw identity", () => {
-  const target = (
-    compilerSpecId: string,
-    baseAddress?: string,
-  ): Extract<BinaryTarget, { format: "raw-binary" }> => {
-    const rawLoad = admittedRawLoad({
-      architecture: undefined,
-      entryPoint: "0x8c000010",
-      ...(baseAddress === undefined ? {} : { baseAddress }),
-      providerLanguage: {
+  const target = (compilerSpecId: string, baseAddress?: string) =>
+    providerLanguageRawTarget(
+      {
         provider: "ghidra",
         languageId: "SuperH4:LE:32:default",
         compilerSpecId,
       },
-      fileBytes: 0x20,
-    });
-    if (
-      rawLoad.providerLanguage === undefined ||
-      rawLoad.lastAddress === undefined
-    )
-      throw new Error("expected a provider-language load");
-    return {
-      path: "/fixture/firmware.bin",
-      sha256: ANALYSIS_SNAPSHOT_TARGET.sha256,
-      kind: "executable",
-      format: "raw-binary",
-      availableArchitectures: [],
-      rawLoad: {
-        ...rawLoad,
-        providerLanguage: rawLoad.providerLanguage,
-        lastAddress: rawLoad.lastAddress,
+      {
+        entryPoint: "0x8c000010",
+        ...(baseAddress === undefined ? {} : { baseAddress }),
+        sha256: ANALYSIS_SNAPSHOT_TARGET.sha256,
       },
-    };
-  };
+    );
 
   it("commits a null architecture and the caller's language", () => {
     const snapshot = snapshotTarget(target("default", "0x8C000000"));
