@@ -3,6 +3,8 @@ import { createEvidence, parseEvidence } from "../../domain/evidence.js";
 import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
 import { wasmInterfaceComparisonSchema } from "../../contracts/wasm/wasmComparisonContracts.js";
 import { compareWasmInterfaces } from "./WasmInterfaceComparisonService.js";
+import { wasmArtifactSchema } from "../../domain/wasm/wasmArtifact.js";
+import * as wasmInterfaceModule from "../../domain/wasm/wasmInterface.js";
 import {
   WASM_INTERFACE_REPRESENTATION_BYTES,
   wasmInterfaceEntryRepresentationBytes,
@@ -56,9 +58,7 @@ const compare = async (
 ) => {
   const result = await compareWasmInterfaces({ left, right, scope: "both" });
   if (!result.ok) throw result.error;
-  return wasmInterfaceComparisonSchema.parse(
-    result.value.evidence.normalized_result,
-  );
+  return wasmInterfaceComparisonSchema.parse(result.value.normalized_result);
 };
 
 it("reports all five comparison states, including duplicate ambiguity and explicit selected scope", async () => {
@@ -94,7 +94,7 @@ it("reports all five comparison states, including duplicate ambiguity and explic
     scope: "imports",
   });
   if (!selected.ok) throw selected.error;
-  expect(selected.value.evidence.normalized_result).toMatchObject({
+  expect(selected.value.normalized_result).toMatchObject({
     changes: [],
     coverage: "complete-within-inputs",
   });
@@ -165,7 +165,7 @@ it("requires the producer's file subject format even for authentic Evidence", as
   ).toMatchObject({ ok: false, error: { _tag: "AnalysisInputError" } });
 });
 
-it("resolves exact retained references and permits cancellation between comparison batches", async () => {
+it("resolves exact retained references", async () => {
   const left = evidence(facts("f"));
   const right = evidence(facts("f", "i64"));
   const references = {
@@ -181,26 +181,109 @@ it("resolves exact retained references and permits cancellation between comparis
     id === left.evidence_id ? left : right,
   );
   if (!result.ok) throw result.error;
-  expect(result.value.evidence.evidence_links).toEqual([
+  expect(result.value.evidence_links).toEqual([
     left.evidence_id,
     right.evidence_id,
   ]);
+});
+
+/** 2001 exports per side: both loops pass several batch checkpoints. */
+const largeInterface = (): WasmInterface => {
   const large = facts("f");
   large.entries.push(
     ...Array.from({ length: 2000 }, (_, i) => facts(`f${i}`).entries[0]!),
   );
+  return large;
+};
+
+/** Queue the abort once a hook has seen `after` entries; only a later checkpoint can dispatch it. */
+const abortAfter = (
+  after: number,
+  controller: AbortController,
+  reason: unknown,
+) => {
+  let seen = 0;
+  return {
+    entry: () => {
+      if (++seen === after) setImmediate(() => controller.abort(reason));
+    },
+    seen: () => seen,
+  };
+};
+
+it("observes cancellation at a batch checkpoint while grouping entries", async () => {
   const controller = new AbortController();
-  const reason = { request: "cancel between interface batches" };
-  const pending = compareWasmInterfaces(
-    { left: evidence(large), right: evidence(large), scope: "both" },
-    { signal: controller.signal },
-  );
-  setImmediate(() => controller.abort(reason));
-  const cancelled = await pending;
-  if (cancelled.ok) throw new Error("Expected cancellation between batches");
-  expect(cancelled.error).toMatchObject({ _tag: "AnalysisCancelledError" });
-  expect(cancelled.error.cause).toBe(reason);
-  expect(cancelled.error.partialObservation).toBeUndefined();
+  const reason = { request: "cancel between grouping batches" };
+  const hook = abortAfter(300, controller, reason);
+  const parseArtifact = wasmArtifactSchema.safeParse.bind(wasmArtifactSchema);
+  // Count each entry the grouping loop reads; no export matches "imports", so
+  // the classification loop has no groups and no checkpoints of its own.
+  const parse = vi
+    .spyOn(wasmArtifactSchema, "safeParse")
+    .mockImplementation((value) => {
+      const parsed = parseArtifact(value);
+      const entries = parsed.data?.interface?.entries;
+      if (entries === undefined) return parsed;
+      parsed.data!.interface!.entries = new Proxy(entries, {
+        get: (target, key, receiver) => {
+          if (typeof key === "string" && /^\d+$/u.test(key)) hook.entry();
+          return Reflect.get(target, key, receiver) as unknown;
+        },
+      });
+      return parsed;
+    });
+  try {
+    const cancelled = await compareWasmInterfaces(
+      {
+        left: evidence(largeInterface()),
+        right: evidence(largeInterface()),
+        scope: "imports",
+      },
+      { signal: controller.signal },
+    );
+    if (cancelled.ok) throw new Error("Expected cancellation between batches");
+    expect(cancelled.error).toMatchObject({ _tag: "AnalysisCancelledError" });
+    expect(cancelled.error.cause).toBe(reason);
+    expect(cancelled.error.partialObservation).toBeUndefined();
+    // The first batch completed and the loop stopped before its last entry.
+    expect(hook.seen()).toBeGreaterThanOrEqual(300);
+    expect(hook.seen()).toBeLessThan(4002);
+  } finally {
+    parse.mockRestore();
+  }
+});
+
+it("observes cancellation at a batch checkpoint while classifying groups", async () => {
+  const controller = new AbortController();
+  const reason = { request: "cancel between classification batches" };
+  const hook = abortAfter(300, controller, reason);
+  const representationBytes =
+    wasmInterfaceModule.wasmInterfaceEntryRepresentationBytes;
+  // Each group charges its left and right entry before its checkpoint.
+  const charge = vi
+    .spyOn(wasmInterfaceModule, "wasmInterfaceEntryRepresentationBytes")
+    .mockImplementation((entry) => {
+      hook.entry();
+      return representationBytes(entry);
+    });
+  try {
+    const cancelled = await compareWasmInterfaces(
+      {
+        left: evidence(largeInterface()),
+        right: evidence(largeInterface()),
+        scope: "both",
+      },
+      { signal: controller.signal },
+    );
+    if (cancelled.ok) throw new Error("Expected cancellation between batches");
+    expect(cancelled.error).toMatchObject({ _tag: "AnalysisCancelledError" });
+    expect(cancelled.error.cause).toBe(reason);
+    expect(cancelled.error.partialObservation).toBeUndefined();
+    expect(hook.seen()).toBeGreaterThanOrEqual(300);
+    expect(hook.seen()).toBeLessThan(4002);
+  } finally {
+    charge.mockRestore();
+  }
 });
 
 /** One inventory under the comparison cap; two of them exceed it together. */
@@ -304,13 +387,13 @@ it("retains the complete comparison when cancelled at the final handoff", async 
   const right = evidence(facts("changed", "i64"));
   const reason = { request: "cancel completed comparison" };
   const controller = new AbortController();
-  // Cancel while the complete report is built: after the last batch check,
-  // before the final handoff, however many turns source resolution takes. The
+  // Queue the abort while the complete report is built, after the last batch
+  // checkpoint: only the service's own final yield can dispatch it. The
   // one-time implementation is consumed first, so the nested parse is the real one.
   const parse = vi
     .spyOn(wasmInterfaceComparisonSchema, "parse")
     .mockImplementationOnce((report) => {
-      controller.abort(reason);
+      setImmediate(() => controller.abort(reason));
       return wasmInterfaceComparisonSchema.parse(report);
     });
   try {

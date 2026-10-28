@@ -1,5 +1,6 @@
 import {
   evidenceReferenceSchema,
+  namesEvidenceReference,
   type EvidenceInput,
   type EvidenceReference,
 } from "../domain/evidenceReference.js";
@@ -96,13 +97,7 @@ const resolveEvidenceSource = async <Field extends string>(
   options: EvidenceSourceOptions,
 ): Promise<Result<unknown, AnalysisError>> => {
   const source = request[field];
-  // Evidence is a strict object without kind, so only a reference has one.
-  if (
-    typeof source !== "object" ||
-    source === null ||
-    !Object.hasOwn(source, "kind")
-  )
-    return ok(source);
+  if (!namesEvidenceReference(source)) return ok(source);
   const reference = evidenceReferenceSchema.safeParse(source);
   if (!reference.success)
     return err(

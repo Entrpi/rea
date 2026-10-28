@@ -2,11 +2,18 @@ import { z } from "zod";
 
 import { AnalysisInputError } from "../../domain/analysisErrorCore.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
+import { APPLICATION_EVIDENCE_SOURCE } from "../../domain/evidenceReference.js";
+import { parseAnalysisInput } from "../AnalysisInput.js";
+import {
+  resolveEvidenceSources,
+  type EvidenceLookup,
+} from "../EvidenceInputResolver.js";
+import type { EvidenceFileReadOptions } from "../EvidenceFileSource.js";
 import {
   applicationGraphEvidenceInputError,
   parseApplicationGraphEvidence,
 } from "./JavaScriptApplicationEvidenceGraph.js";
-import type { Evidence } from "../../domain/evidence.js";
+import type { ApplicationWorkflowExecution } from "./JavaScriptApplicationWorkflowService.js";
 import { queryJavaScriptSemanticGraph } from "../../domain/javascript/javascriptSemanticQuery.js";
 import {
   traceJavaScriptSemanticsInputSchema,
@@ -17,10 +24,38 @@ import { createJavaScriptSemanticTraceEvidence } from "./JavaScriptApplicationWo
 
 const OPERATION = "trace_javascript_semantics" as const;
 
-/** Trace semantic relations from input already parsed by a trusted adapter. */
-export const traceJavaScriptSemanticsEvidenceValidated = (
-  input: z.output<typeof traceJavaScriptSemanticsInputSchema>,
-): Result<Evidence, AnalysisError> => {
+// Validate the request frame without cloning the application payload before its owner reads it.
+const semanticTraceFrameSchema = z.strictObject({
+  ...traceJavaScriptSemanticsInputSchema.shape,
+  application: z.unknown().nonoptional(),
+});
+
+/** Resolve the application Evidence, then trace bounded static semantic relations through it. */
+export const traceJavaScriptSemanticsEvidence = async (
+  rawInput: unknown,
+  lookup?: EvidenceLookup,
+  options: EvidenceFileReadOptions = {},
+): Promise<
+  Result<
+    ApplicationWorkflowExecution<JavaScriptSemanticTraceResult>,
+    AnalysisError
+  >
+> => {
+  const request = parseAnalysisInput(
+    OPERATION,
+    rawInput,
+    semanticTraceFrameSchema,
+    options.signal,
+  );
+  if (!request.ok) return request;
+  const selected = await resolveEvidenceSources(
+    request.value,
+    APPLICATION_EVIDENCE_SOURCE,
+    lookup,
+    { ...options, operation: OPERATION },
+  );
+  if (!selected.ok) return selected;
+  const input = selected.value;
   const sourceResult = parseApplicationGraphEvidence(input.application, [
     "application",
   ]);
@@ -36,7 +71,7 @@ export const traceJavaScriptSemanticsEvidenceValidated = (
           path: ["application"],
           reason: "invalid_value",
           expected:
-            "inline Evidence from analyze_javascript_application with a semantic graph",
+            "analyze_javascript_application Evidence with a semantic graph",
         },
       ]),
     );
@@ -47,16 +82,15 @@ export const traceJavaScriptSemanticsEvidenceValidated = (
     evidence_links: [source.evidence.evidence_id],
   };
   const { allowed_relations, ...queryParameters } = input.query;
-  return ok(
-    createJavaScriptSemanticTraceEvidence(
-      {
-        application_evidence_id: source.evidence.evidence_id,
-        query:
-          allowed_relations === undefined
-            ? queryParameters
-            : { ...queryParameters, allowed_relations },
-      },
-      result,
-    ),
+  const evidence = createJavaScriptSemanticTraceEvidence(
+    {
+      application_evidence_id: source.evidence.evidence_id,
+      query:
+        allowed_relations === undefined
+          ? queryParameters
+          : { ...queryParameters, allowed_relations },
+    },
+    result,
   );
+  return ok({ evidence, result, sources: [source.evidence] });
 };

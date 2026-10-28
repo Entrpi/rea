@@ -8,6 +8,7 @@ import { AnalysisInputError } from "../../domain/analysisErrorCore.js";
 import { inspectAnalysisViewValidated } from "../analysisView/AnalysisViewService.js";
 import type { EvidenceFileReadOptions } from "../EvidenceFileSource.js";
 import type { ArtifactComparisonInput } from "../../contracts/sessionToolSchemas.js";
+import { PAIRED_EVIDENCE_SOURCES } from "../../domain/evidenceReference.js";
 import { artifactInventorySummaryViewResultSchema } from "../../domain/analysisView/analysisView.js";
 import {
   compareArtifacts,
@@ -52,7 +53,7 @@ export const resolveArtifactComparisonSources = async (
 ): Promise<Result<ArtifactComparisonSources, AnalysisError>> => {
   const selected = await resolveEvidenceSources(
     input,
-    ["left", "right"],
+    PAIRED_EVIDENCE_SOURCES,
     evidenceById,
     { ...options, operation: OPERATION },
   );

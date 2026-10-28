@@ -5,6 +5,7 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { expect, it } from "vitest";
+import type { z } from "zod";
 
 import { ARTIFACT_COMPARISON_EXAMPLE } from "../../../src/contracts/artifactComparisonExample.js";
 import {
@@ -13,6 +14,7 @@ import {
 } from "../../../src/contracts/javascript/javascriptApplicationWorkflowExamples.js";
 import { JAVASCRIPT_EXPORT_SHAPE_COMPARISON_EXAMPLE } from "../../../src/contracts/javascript/javascriptExportShapeComparisonExample.js";
 import { toolContract } from "../../../src/contracts/toolContracts.js";
+import { analysisInputErrorFromIssues } from "../../../src/domain/inputIssueProjection.js";
 import { toolRegistrationOptions } from "../../../src/server/toolRegistrationOptions.js";
 import { advertisedSchemaErrors } from "../../fixtures/mcpAdvertisedSchemaValidity.js";
 
@@ -102,6 +104,33 @@ const sides: readonly (readonly [string, unknown, boolean])[] = [
   ["empty side", {}, false],
 ];
 
+/** Malformed sources and the only issues each may report. */
+const malformedSides: readonly (readonly [
+  unknown,
+  readonly (readonly [readonly string[], string])[],
+])[] = [
+  [
+    { ...evidence, provider: { ...evidence.provider, name: 3 } },
+    [[["provider", "name"], "invalid_type"]],
+  ],
+  [{ kind: "retained-evidence" }, [[["evidence_id"], "missing_argument"]]],
+];
+
+/** The projected issue paths and reasons a caller sees for one refused request. */
+const refusalIssues = (
+  contract: { readonly name: string; readonly inputSchema: z.ZodType },
+  request: Readonly<Record<string, unknown>>,
+) => {
+  const parsed = contract.inputSchema.safeParse(request);
+  if (parsed.success)
+    throw new Error(`${contract.name} accepted ${JSON.stringify(request)}`);
+  return analysisInputErrorFromIssues(
+    contract.name,
+    parsed.error.issues,
+    request,
+  ).issues.map(({ path, reason }) => [path, reason]);
+};
+
 it("advertises one source contract and rejects the same sources the parser rejects", async () => {
   const server = new McpServer({ name: "evidence-sources", version: "0" });
   const client = new Client({ name: "evidence-sources", version: "0" });
@@ -159,6 +188,12 @@ it("advertises one source contract and rejects the same sources the parser rejec
           ).toBe(accepted);
           expect(validate(request), `${label}: ${form}`).toBe(accepted);
         }
+        // A malformed source reports only the issues of the form it names.
+        for (const [side, issues] of malformedSides)
+          expect(
+            refusalIssues(contract, { ...input, [field]: side }),
+            label,
+          ).toEqual(issues.map(([path, reason]) => [[field, ...path], reason]));
       }
     }
   } finally {

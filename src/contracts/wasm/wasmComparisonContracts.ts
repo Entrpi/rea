@@ -1,15 +1,16 @@
 import { evidenceResultOf } from "../toolOutputSchemaPrimitives.js";
 import { z } from "zod";
-import { evidenceSourceInputSchema } from "../../domain/evidenceReference.js";
+import {
+  PAIRED_EVIDENCE_SOURCES,
+  evidenceSourceShape,
+} from "../../domain/evidenceReference.js";
 import { wasmInterfaceSchema } from "../../domain/wasm/wasmInterface.js";
 import { toolContractMetadata } from "../toolEffects.js";
 import type { ToolContract } from "../toolContractTypes.js";
 
 export const compareWasmInterfacesInputSchema = z.strictObject({
-  left: evidenceSourceInputSchema.describe(
-    "Exact complete inspect_wasm_artifact Evidence, retained session reference or Evidence file",
-  ),
-  right: evidenceSourceInputSchema.describe(
+  ...evidenceSourceShape(
+    PAIRED_EVIDENCE_SOURCES,
     "Exact complete inspect_wasm_artifact Evidence, retained session reference or Evidence file",
   ),
   scope: z
