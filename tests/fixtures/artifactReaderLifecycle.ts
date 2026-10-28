@@ -129,22 +129,25 @@ const descriptorCases = ({ image, createReader }: LifecycleFixture): void => {
 
   it("retains failed descriptor cleanup for retry", async () => {
     const reader = createReader(await fixture(image()));
-    const [entry] = await entries(reader);
-    const stream = await reader.open(entry!);
-    const failure = new Error("artifact close denied");
-    const close = vi
-      .spyOn(OwnedFileHandle.prototype, "close")
-      .mockRejectedValueOnce(failure);
     try {
-      await expect(reader.close()).rejects.toBe(failure);
-      await expect(reader.open(entry!)).rejects.toMatchObject({
-        reason: "unavailable",
-      });
-      expect(stream.closed).toBe(true);
-      await reader.close();
-      expect(close).toHaveBeenCalledTimes(2);
+      const [entry] = await entries(reader);
+      const stream = await reader.open(entry!);
+      const failure = new Error("artifact close denied");
+      const close = vi
+        .spyOn(OwnedFileHandle.prototype, "close")
+        .mockRejectedValueOnce(failure);
+      try {
+        await expect(reader.close()).rejects.toBe(failure);
+        await expect(reader.open(entry!)).rejects.toMatchObject({
+          reason: "unavailable",
+        });
+        expect(stream.closed).toBe(true);
+        await reader.close();
+        expect(close).toHaveBeenCalledTimes(2);
+      } finally {
+        close.mockRestore();
+      }
     } finally {
-      close.mockRestore();
       await reader.close();
     }
   });
