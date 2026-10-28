@@ -47,11 +47,12 @@ import {
   IDA_PROVIDER_IDENTITY,
 } from "./IdaProviderCapabilities.js";
 import { IdaSessionClient } from "./IdaSessionClient.js";
-import { privateRuntimeRootCapability } from "../process/PrivateRuntimeRoot.js";
+import { inspectIdaWorkspaceReadiness } from "./IdaWorkspaceReadiness.js";
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import type { ProviderInspectionScope } from "../application/ProviderInspectionScope.js";
+import type { ProviderRejectionCode } from "../domain/providerSelection.js";
 
 /** Ghidra owns these lanes; IDA names the family it declines rather than guessing. */
 const IDA_DECLINED_ARCHITECTURE_LABELS: Record<
@@ -204,6 +205,20 @@ export class IdaProvider implements AnalysisProviderCandidate {
       registration_path: this.config.idaMcpConfigPath ?? null,
       live_connection_probed: false,
     };
+    const unavailableCapabilities = (
+      reason: string,
+      code: ProviderRejectionCode,
+    ) =>
+      capabilities.map((capability) =>
+        capability.available
+          ? {
+              ...capability,
+              available: false as const,
+              reason,
+              availabilityCode: code,
+            }
+          : capability,
+      );
     if (!config.ok) {
       const failure = projectAnalysisError(config.error);
       return {
@@ -220,11 +235,18 @@ export class IdaProvider implements AnalysisProviderCandidate {
             configuration_remediation: failure.remediation.action,
           },
         },
-        capabilities,
+        capabilities: unavailableCapabilities(
+          failure.message,
+          this.config.idaMcpConfigPath === undefined
+            ? "not_configured"
+            : "open_options_invalid",
+        ),
       };
     }
     if (config.value.mode === "headless") {
-      const privacy = privateRuntimeRootCapability();
+      const { privacy, unusable } = await inspectIdaWorkspaceReadiness(
+        config.value.workspaceRoot,
+      );
       if (!privacy.available)
         return {
           availability: {
@@ -241,7 +263,27 @@ export class IdaProvider implements AnalysisProviderCandidate {
               },
             },
           },
-          capabilities,
+          capabilities: unavailableCapabilities(privacy.reason, privacy.code),
+        };
+      if (unusable !== undefined)
+        return {
+          availability: {
+            status: "unavailable" as const,
+            code: "open_options_invalid" as const,
+            reason: unusable,
+            diagnostics: {
+              ...registrationDiagnostics,
+              mode: "headless",
+              workspace_root: config.value.workspaceRoot ?? null,
+              private_workspace_available: false,
+              configuration_remediation:
+                "Set workspaceRoot to an existing directory REA can create entries in, or omit it to use the system temporary directory; see docs/ida-provider.md.",
+            },
+          },
+          capabilities: unavailableCapabilities(
+            unusable,
+            "open_options_invalid",
+          ),
         };
     }
     return {
