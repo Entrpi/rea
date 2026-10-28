@@ -8,7 +8,8 @@ const execute = promisify(execFile);
  * The ilp32 storage of each function in tests/conformance/c/riscv-float-abi.c,
  * as Ghidra prints it, with the words `rea_riscv_abi_caller`'s call site puts
  * there. Ghidra joins a register pair most-significant word first. A word is
- * an unsigned 32-bit value, or "frame" for the address of a caller local. A
+ * an unsigned 32-bit value, "frame" for the address of a caller local, or
+ * `{ frame: [...] }` for such an address whose memory holds those words. A
  * literal is how the typed caller's pseudocode should print the argument.
  */
 export const RISCV_ILP32_ABI = {
@@ -94,8 +95,32 @@ export const RISCV_ILP32_ABI = {
         "a0:4 (auto)",
         { a0: "frame" },
       ],
-      ["value", "rea_riscv_abi_large *", "a1:4", { a1: "frame" }],
+      [
+        "value",
+        "rea_riscv_abi_large *",
+        "a1:4",
+        { a1: { frame: [0, 0x402b0000, 0, 0x402d0000, 0x41780000] } },
+      ],
       ["scale", "float", "a2:4", { a2: 0x41840000 }, "16.5"],
+    ],
+  },
+  // A long double is 16 bytes: passed and returned through caller memory too.
+  rea_riscv_abi_quad: {
+    return: ["long double *", "a0:4"],
+    parameters: [
+      [
+        "__return_storage_ptr__",
+        "long double *",
+        "a0:4 (auto)",
+        { a0: "frame" },
+      ],
+      [
+        "value",
+        "long double *",
+        "a1:4",
+        { a1: { frame: [0, 0, 0, 0x40036800] } },
+      ],
+      ["sel", "int", "a2:4"],
     ],
   },
   // Variadic doubles take aligned pairs, a2:a3 and a6:a7, so a1 and a5 are
@@ -152,13 +177,14 @@ const ordered = (locations) =>
 
 /** How the decompiler prints a call-site word: small values in decimal. */
 const printed = (word) =>
-  word === "frame" || word === undefined
+  typeof word !== "number"
     ? undefined
     : word < 10
       ? String(word)
       : `0x${word.toString(16)}`;
 const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-const WILDCARD = "[^,()]+";
+// Any argument the table does not pin, including one with a cast.
+const WILDCARD = "(?:\\([^()]*\\))?[^,()]+";
 
 /** Every call site word sits where the function's storage says it does. */
 export function assertRiscvIlp32TableConsistent() {
@@ -235,6 +261,7 @@ export function parseRiscvCallSites(listing) {
       calls.push({
         target: mnemonic === "jalr" ? "indirect" : /<([^>]+)>/u.exec(text)?.[1],
         words,
+        memory: new Map(memory),
       });
       for (const register of [
         ...LOCATION_ORDER.slice(0, 8),
@@ -326,10 +353,15 @@ export async function inspectRiscvCallSites(path) {
   };
 }
 
-const matchesWord = (actual, expected) =>
-  expected === "frame"
-    ? actual?.stack !== undefined
-    : actual?.word === expected;
+const matchesWord = (call, actual, expected) =>
+  typeof expected === "number"
+    ? actual?.word === expected
+    : actual?.stack !== undefined &&
+      (expected === "frame" ||
+        expected.frame.every(
+          (word, index) =>
+            call.memory.get(actual.stack + 4 * index)?.word === word,
+        ));
 
 /** The compiler's call sites place every known word where the table says. */
 export function assertRiscvIlp32CallSites(calls) {
@@ -350,8 +382,8 @@ export function assertRiscvIlp32CallSites(calls) {
     assert.ok(call !== undefined, `No call site for ${target}`);
     for (const [location, expected] of Object.entries(words))
       assert.ok(
-        matchesWord(call.words[location], expected),
-        `${target}: ${location} holds ${JSON.stringify(call.words[location])}, not ${String(expected)}`,
+        matchesWord(call, call.words[location], expected),
+        `${target}: ${location} holds ${JSON.stringify(call.words[location])}, not ${JSON.stringify(expected)}`,
       );
   }
 }

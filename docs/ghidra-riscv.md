@@ -106,7 +106,11 @@ has accepted it yet.
     dynamic storage, to every non-thunk function, every external function and
     every function definition. Thunks follow their targets. The script fails,
     and writes no report, if the derived prototype or any function still
-    places a value in a floating-point register.
+    places a value in a floating-point register, or if the prototype does not
+    pass a 16-byte value by reference.
+  - One derivation serves every policy. A policy row says how it changes the
+    default prototype's floating-point entries and preserved registers; every
+    policy passes values of 9 bytes or more by reference.
   - The profile commits `riscv_calling_convention: ilp32-prototype-v1`. The
     bridge reports the policy and its function and definition counts, and REA
     requires that report exactly when the profile commits the policy.
@@ -173,17 +177,17 @@ has accepted it yet.
 Policy `ilp32-prototype-v1`, prototype `__rea_ilp32`. XLEN is 32 bits and no
 floating-point register passes a value.
 
-| Topic                      | psABI rule                                                                                                                                                                                        | `__rea_ilp32`                                                                                                                     |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Integer and pointer values | `a0`–`a7`, then the stack in 4-byte-aligned slots                                                                                                                                                 | The default integer and stack entries, unchanged                                                                                  |
-| `float`                    | One integer register, or a stack slot                                                                                                                                                             | The `fa0`–`fa7` entries and the `float` rule are removed, so a `float` takes the next integer register                            |
-| `double` and 8-byte values | A register pair with the low word in the lower register. Named arguments need no aligned pair. With one register left, the low word goes in `a7` and the high word on the stack                   | The default `join` rule with stack spill: Ghidra writes `a2:4,a1:4` for a pair and `Stack[0x0]:4,a7:4` for the split              |
-| Aggregates up to 8 bytes   | One or two integer registers, laid out as in memory, also when every member is floating-point                                                                                                     | The homogeneous-float-aggregate rule is removed; the `join` rule applies                                                          |
-| Aggregates over 8 bytes    | By reference: the caller passes the address of a copy                                                                                                                                             | The default rule that converts structures and unions of 9 bytes or more to pointers                                               |
-| Return values              | As the first argument of the same type: `a0`, or `a0` and `a1`. Larger values go to a caller buffer whose address is an implicit first argument in `a0`                                           | The `fa0`/`fa1` return entries and floating-point rules are removed; Ghidra's hidden-return fallback supplies the pointer in `a0` |
-| Variadic arguments         | The integer convention. A variadic argument with 8-byte alignment and size takes an aligned (even-numbered) register pair, or the stack; after the first stack argument, the rest go on the stack | The default variadic rule (`join` with alignment), unchanged                                                                      |
-| Preserved registers        | `s0`–`s11` and `sp`; `gp` and `tp` are not allocated. No floating-point register is preserved                                                                                                     | The default preserved list without `fs0`–`fs11`, which join the killed-by-call list                                               |
-| Scalars over 8 bytes       | By reference (`long double` is 16 bytes)                                                                                                                                                          | Not modelled: the default rules convert only structures and unions to pointers                                                    |
+| Topic                      | psABI rule                                                                                                                                                                                        | `__rea_ilp32`                                                                                                                       |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Integer and pointer values | `a0`–`a7`, then the stack in 4-byte-aligned slots                                                                                                                                                 | The default integer and stack entries, unchanged                                                                                    |
+| `float`                    | One integer register, or a stack slot                                                                                                                                                             | The `fa0`–`fa7` entries and the `float` rule are removed, so a `float` takes the next integer register                              |
+| `double` and 8-byte values | A register pair with the low word in the lower register. Named arguments need no aligned pair. With one register left, the low word goes in `a7` and the high word on the stack                   | The default `join` rule with stack spill: Ghidra writes `a2:4,a1:4` for a pair and `Stack[0x0]:4,a7:4` for the split                |
+| Aggregates up to 8 bytes   | One or two integer registers, laid out as in memory, also when every member is floating-point                                                                                                     | The homogeneous-float-aggregate rule is removed; the `join` rule applies                                                            |
+| Aggregates over 8 bytes    | By reference: the caller passes the address of a copy                                                                                                                                             | The default rule that converts structures and unions of 9 bytes or more to pointers                                                 |
+| Return values              | As the first argument of the same type: `a0`, or `a0` and `a1`. Larger values go to a caller buffer whose address is an implicit first argument in `a0`                                           | The `fa0`/`fa1` return entries and floating-point rules are removed; Ghidra's hidden-return fallback supplies the pointer in `a0`   |
+| Variadic arguments         | The integer convention. A variadic argument with 8-byte alignment and size takes an aligned (even-numbered) register pair, or the stack; after the first stack argument, the rest go on the stack | The default variadic rule (`join` with alignment), unchanged                                                                        |
+| Preserved registers        | `s0`–`s11` and `sp`; `gp` and `tp` are not allocated. No floating-point register is preserved                                                                                                     | The default preserved list without `fs0`–`fs11`, which join the killed-by-call list                                                 |
+| Scalars over 8 bytes       | By reference (`long double` is 16 bytes), and returned through a caller buffer                                                                                                                    | A rule before the final join converts any value of 9 bytes or more to a pointer; a return that size already goes to a caller buffer |
 
 Ghidra recovers the arguments of a variadic call from the registers the caller
 writes, not from their types. A padding register that still holds an earlier
@@ -206,7 +210,8 @@ yet. ABI_FLEN is 32 bits.
 | Variadic arguments                                      | The integer convention, as in ilp32                                                              |
 | Preserved registers                                     | `s0`–`s11`, `sp`, and `fs0`–`fs11` for values of 32 bits or fewer                                |
 
-The planned prototype limits the default floating-point entries to 4 bytes.
+The planned prototype limits the default floating-point entries to 4 bytes and
+keeps the shared rule that passes values of 9 bytes or more by reference.
 Observed on Ghidra 12.1.4, a `double` then takes an integer pair and a structure
 of two floats takes `fa0` and `fa1`. Ghidra's model has no rule for a structure
 of one float and one integer: it joins `struct { float; int; }` into `a1:a0`
@@ -299,8 +304,9 @@ For the soft-float builds the lane also checks:
 - `fence.i` and `csrr` decode, as ESP32-C3's Zifencei and Zicsr declare.
 - An LLVM objdump reading of `rea_riscv_abi_caller` finds each call-site word
   where the [ilp32 policy](#ilp32) puts it: an unaligned `double` in `a1`/`a2`,
-  the `a7`/stack split, two floats in an integer pair, a large structure by
-  reference, aligned variadic pairs, and an indirect call.
+  the `a7`/stack split, two floats in an integer pair, a large structure and a
+  `long double` passed by reference (the pointed-to copies hold the source
+  values), aligned variadic pairs, and an indirect call.
 - `inspect_native_api` reports `__rea_ilp32` with exactly that storage for the
   typed build, and one integer word per location for the stripped build.
 - The caller's pseudocode passes the source constants through that storage and

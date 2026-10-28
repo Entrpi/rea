@@ -237,6 +237,11 @@ try {
           "rea_riscv_float",
           "rea_riscv_probe",
         ];
+    for (const name of [...names, "rea_riscv_global"])
+      assert.ok(
+        fixture.symbols[name],
+        `${name} missing from the readelf symbols`,
+      );
     for (const name of names) {
       // A stripped image has no names; the typed twin's addresses locate it.
       const procedure = procedures.find((value) =>

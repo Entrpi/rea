@@ -1,4 +1,7 @@
-export type RiscvWord = number | "frame";
+export type RiscvWord =
+  | number
+  | "frame"
+  | { readonly frame: readonly number[] };
 export type RiscvAbiParameter = readonly [
   name: string,
   type: string,
@@ -25,6 +28,8 @@ export interface RiscvCallSite {
   readonly words: Readonly<
     Record<string, { word?: number; stack?: number } | undefined>
   >;
+  /** Caller memory at the call, by offset from the caller's incoming `sp`. */
+  readonly memory: ReadonlyMap<number, { word?: number; stack?: number }>;
 }
 export function riscvStorageLocations(storage: string): readonly string[];
 export function assertRiscvIlp32TableConsistent(): void;

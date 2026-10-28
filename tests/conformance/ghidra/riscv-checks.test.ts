@@ -10,144 +10,165 @@ import {
 } from "./riscv-checks.mjs";
 
 // `llvm-objdump -d --no-show-raw-insn` of rea_riscv_abi_caller in the soft-float
-// fixture, built by LLVM 21 at -O0 (tabs and runs of spaces collapsed). The real
+// fixture, built by LLVM 19 at -O0 (tabs and runs of spaces collapsed). The real
 // lane disassembles its own build; this tests the oracle, not Ghidra.
 const LISTING = `
-113b4: addi sp, sp, -0xb0
-113b6: sw ra, 0xac(sp)
-113b8: sw s0, 0xa8(sp)
-113ba: addi s0, sp, 0xb0
-113bc: sw a0, -0xc(s0)
-113c0: lw a2, -0xc(s0)
-113c4: lui a0, 0x3fc00
-113c8: lui a1, 0x40200
-113cc: jal 0x110f4 <rea_riscv_abi_pick>
-113ce: sw a0, -0x10(s0)
-113d2: lw a2, -0xc(s0)
-113d6: li a0, 0x0
-113d8: sw a0, -0x9c(s0)
-113dc: lui a1, 0x400a0
-113e0: jal 0x11130 <rea_riscv_abi_wide>
-113e2: lw a4, -0x9c(s0)
-113e6: sw a1, -0x14(s0)
-113ea: sw a0, -0x18(s0)
-113ee: lw a0, -0xc(s0)
-113f2: lui a2, 0x40130
-113f6: lui a3, 0x40b00
-113fa: lui a5, 0x40188
-113fe: mv a1, a4
-11400: jal 0x1117e <rea_riscv_abi_mixed>
-11402: lw a7, -0x9c(s0)
-11406: sw a1, -0x1c(s0)
-1140a: sw a0, -0x20(s0)
-1140e: lw a6, -0xc(s0)
-11412: mv a1, sp
-11414: lui a0, 0x401d0
-11418: sw a0, 0x0(a1)
-1141a: li a0, 0x1
-1141c: li a1, 0x2
-1141e: sw a1, -0xa0(s0)
-11422: li a2, 0x3
-11424: li a3, 0x4
-11426: li a4, 0x5
-11428: li a5, 0x6
-1142a: jal 0x111e6 <rea_riscv_abi_split>
-1142c: sw a1, -0x24(s0)
-11430: sw a0, -0x28(s0)
-11434: lui a0, 0x41080
-11438: sw a0, -0x38(s0)
-1143c: lui a0, 0x41180
-11440: sw a0, -0x34(s0)
-11444: lw a1, -0x34(s0)
-11448: lw a0, -0x38(s0)
-1144c: lui a2, 0x41280
-11450: jal 0x11256 <rea_riscv_abi_pair>
-11452: sw a1, -0x2c(s0)
-11456: sw a0, -0x30(s0)
-1145a: lui a0, 0x41380
-1145e: sw a0, -0x48(s0)
-11462: li a0, 0xc
-11464: sw a0, -0x44(s0)
-11468: lw a2, -0xc(s0)
-1146c: lw a1, -0x44(s0)
-11470: lw a0, -0x48(s0)
-11474: jal 0x11296 <rea_riscv_abi_tagged>
-11476: mv a2, a0
-11478: lw a0, -0x9c(s0)
-1147c: sw a2, -0xa4(s0)
-11480: mv a2, a1
-11482: lw a1, -0xa4(s0)
-11486: sw a2, -0x3c(s0)
-1148a: sw a1, -0x40(s0)
-1148e: lui a1, 0x402b0
-11492: sw a1, -0x74(s0)
-11496: sw a0, -0x78(s0)
-1149a: lui a1, 0x402d0
-1149e: sw a1, -0x6c(s0)
-114a2: sw a0, -0x70(s0)
-114a6: lui a1, 0x41780
-114aa: sw a1, -0x68(s0)
-114ae: sw a0, -0x64(s0)
-114b2: lw a0, -0x64(s0)
-114b6: sw a0, -0x7c(s0)
-114ba: lw a0, -0x68(s0)
-114be: sw a0, -0x80(s0)
-114c2: lw a0, -0x6c(s0)
-114c6: sw a0, -0x84(s0)
-114ca: lw a0, -0x70(s0)
-114ce: sw a0, -0x88(s0)
-114d2: lw a0, -0x74(s0)
-114d6: sw a0, -0x8c(s0)
-114da: lw a0, -0x78(s0)
-114de: sw a0, -0x90(s0)
-114e2: addi a0, s0, -0x60
-114e6: addi a1, s0, -0x90
-114ea: lui a2, 0x41840
-114ee: jal 0x112d2 <rea_riscv_abi_large>
-114f0: lw a0, -0xa0(s0)
-114f4: lw a6, -0x9c(s0)
-114f8: lw a4, -0xc(s0)
-114fc: mv a2, sp
-114fe: li a1, 0x13
-11500: sw a1, 0x0(a2)
-11502: lui a3, 0x40318
-11506: lui a7, 0x40328
-1150a: mv a2, a6
-1150c: jal 0x11316 <rea_riscv_abi_variadic>
-1150e: sw a0, -0x94(s0)
-11512: lui a0, 0x12
-11516: lw a3, 0x5a8(a0)
-1151a: lw a2, -0xc(s0)
-1151e: lui a0, 0x41a40
-11522: lui a1, 0x41ac0
-11526: jalr a3
-11528: sw a0, -0x98(s0)
-1152c: lw a0, -0x10(s0)
-11530: lw a1, -0x14(s0)
-11534: xor a0, a0, a1
-11536: lw a1, -0x1c(s0)
-1153a: xor a0, a0, a1
-1153c: lw a1, -0x24(s0)
-11540: xor a0, a0, a1
-11542: lw a1, -0x30(s0)
-11546: xor a0, a0, a1
-11548: lw a1, -0x3c(s0)
-1154c: xor a0, a0, a1
-1154e: lw a1, -0x54(s0)
-11552: xor a0, a0, a1
-11554: lw a1, -0x94(s0)
-11558: xor a0, a0, a1
-1155a: lw a1, -0x98(s0)
-1155e: xor a0, a0, a1
-11560: lw ra, 0xac(sp)
-11562: lw s0, 0xa8(sp)
-11564: addi sp, sp, 0xb0
-11566: ret
+11408: addi sp, sp, -0xe0
+1140a: sw ra, 0xdc(sp)
+1140c: sw s0, 0xd8(sp)
+1140e: addi s0, sp, 0xe0
+11410: sw a0, -0xc(s0)
+11414: lw a2, -0xc(s0)
+11418: lui a0, 0x3fc00
+1141c: lui a1, 0x40200
+11420: jal 0x110f4 <rea_riscv_abi_pick>
+11422: sw a0, -0x10(s0)
+11426: lw a2, -0xc(s0)
+1142a: li a0, 0x0
+1142c: sw a0, -0xd4(s0)
+11430: lui a1, 0x400a0
+11434: jal 0x11130 <rea_riscv_abi_wide>
+11436: lw a4, -0xd4(s0)
+1143a: sw a1, -0x14(s0)
+1143e: sw a0, -0x18(s0)
+11442: lw a0, -0xc(s0)
+11446: lui a2, 0x40130
+1144a: lui a3, 0x40b00
+1144e: lui a5, 0x40188
+11452: mv a1, a4
+11454: jal 0x1117e <rea_riscv_abi_mixed>
+11456: lw a7, -0xd4(s0)
+1145a: sw a1, -0x1c(s0)
+1145e: sw a0, -0x20(s0)
+11462: lw a6, -0xc(s0)
+11466: mv a1, sp
+11468: lui a0, 0x401d0
+1146c: sw a0, 0x0(a1)
+1146e: li a0, 0x1
+11470: li a1, 0x2
+11472: sw a1, -0xd8(s0)
+11476: li a2, 0x3
+11478: li a3, 0x4
+1147a: li a4, 0x5
+1147c: li a5, 0x6
+1147e: jal 0x111e6 <rea_riscv_abi_split>
+11480: sw a1, -0x24(s0)
+11484: sw a0, -0x28(s0)
+11488: lui a0, 0x41080
+1148c: sw a0, -0x38(s0)
+11490: lui a0, 0x41180
+11494: sw a0, -0x34(s0)
+11498: lw a1, -0x34(s0)
+1149c: lw a0, -0x38(s0)
+114a0: lui a2, 0x41280
+114a4: jal 0x11256 <rea_riscv_abi_pair>
+114a6: sw a1, -0x2c(s0)
+114aa: sw a0, -0x30(s0)
+114ae: lui a0, 0x41380
+114b2: sw a0, -0x48(s0)
+114b6: li a0, 0xc
+114b8: sw a0, -0x44(s0)
+114bc: lw a2, -0xc(s0)
+114c0: lw a1, -0x44(s0)
+114c4: lw a0, -0x48(s0)
+114c8: jal 0x11296 <rea_riscv_abi_tagged>
+114ca: mv a2, a0
+114cc: lw a0, -0xd4(s0)
+114d0: sw a2, -0xdc(s0)
+114d4: mv a2, a1
+114d6: lw a1, -0xdc(s0)
+114da: sw a2, -0x3c(s0)
+114de: sw a1, -0x40(s0)
+114e2: lui a1, 0x402b0
+114e6: sw a1, -0x74(s0)
+114ea: sw a0, -0x78(s0)
+114ee: lui a1, 0x402d0
+114f2: sw a1, -0x6c(s0)
+114f6: sw a0, -0x70(s0)
+114fa: lui a0, 0x41780
+114fe: sw a0, -0x68(s0)
+11502: lw a0, -0x64(s0)
+11506: sw a0, -0x7c(s0)
+1150a: lw a0, -0x68(s0)
+1150e: sw a0, -0x80(s0)
+11512: lw a0, -0x6c(s0)
+11516: sw a0, -0x84(s0)
+1151a: lw a0, -0x70(s0)
+1151e: sw a0, -0x88(s0)
+11522: lw a0, -0x74(s0)
+11526: sw a0, -0x8c(s0)
+1152a: lw a0, -0x78(s0)
+1152e: sw a0, -0x90(s0)
+11532: addi a0, s0, -0x60
+11536: addi a1, s0, -0x90
+1153a: lui a2, 0x41840
+1153e: jal 0x112d2 <rea_riscv_abi_large>
+11540: lw a0, -0xd4(s0)
+11544: lw a2, -0xc(s0)
+11548: lui a1, 0x40037
+1154c: addi a1, a1, -0x800
+11550: sw a1, -0xc4(s0)
+11554: sw a0, -0xc8(s0)
+11558: sw a0, -0xcc(s0)
+1155c: sw a0, -0xd0(s0)
+11560: addi a0, s0, -0xc0
+11564: addi a1, s0, -0xd0
+11568: jal 0x11316 <rea_riscv_abi_quad>
+1156a: lw a0, -0xd8(s0)
+1156e: lw a6, -0xd4(s0)
+11572: lw a1, -0xc0(s0)
+11576: lw a2, -0xbc(s0)
+1157a: lw a3, -0xb8(s0)
+1157e: lw a4, -0xb4(s0)
+11582: sw a4, -0x94(s0)
+11586: sw a3, -0x98(s0)
+1158a: sw a2, -0x9c(s0)
+1158e: sw a1, -0xa0(s0)
+11592: lw a4, -0xc(s0)
+11596: mv a2, sp
+11598: li a1, 0x13
+1159a: sw a1, 0x0(a2)
+1159c: lui a3, 0x40318
+115a0: lui a7, 0x40328
+115a4: mv a2, a6
+115a6: jal 0x1136a <rea_riscv_abi_variadic>
+115a8: sw a0, -0xa4(s0)
+115ac: lui a0, 0x12
+115b0: lw a3, 0x648(a0)
+115b4: lw a2, -0xc(s0)
+115b8: lui a0, 0x41a40
+115bc: lui a1, 0x41ac0
+115c0: jalr a3
+115c2: sw a0, -0xa8(s0)
+115c6: lw a0, -0x10(s0)
+115ca: lw a1, -0x14(s0)
+115ce: xor a0, a0, a1
+115d0: lw a1, -0x1c(s0)
+115d4: xor a0, a0, a1
+115d6: lw a1, -0x24(s0)
+115da: xor a0, a0, a1
+115dc: lw a1, -0x30(s0)
+115e0: xor a0, a0, a1
+115e2: lw a1, -0x3c(s0)
+115e6: xor a0, a0, a1
+115e8: lw a1, -0x54(s0)
+115ec: xor a0, a0, a1
+115ee: lw a1, -0x94(s0)
+115f2: xor a0, a0, a1
+115f4: lw a1, -0xa4(s0)
+115f8: xor a0, a0, a1
+115fa: lw a1, -0xa8(s0)
+115fe: xor a0, a0, a1
+11600: lw ra, 0xdc(sp)
+11602: lw s0, 0xd8(sp)
+11604: addi sp, sp, 0xe0
+11606: ret
 `;
 
-// Ghidra 12.1.4 HighFunction prototypes of the LLVM 19 typed build, printed as
-// `name return | parameter:type@storage`. DERIVED uses __rea_ilp32; DEFAULT is
-// Ghidra's stock ilp32d prototype on the same image.
+// Ghidra 12.1.4 HighFunction prototypes of the same build, printed as
+// `name return | parameter:type@storage`. DERIVED uses __rea_ilp32. The two
+// stock lines are Ghidra's ilp32d prototype, and the ilp32 prototype before it
+// passed values over 8 bytes by reference.
 const DERIVED = `
 rea_riscv_abi_pick float@a0:4 | a:float@a0:4 | b:float@a1:4 | sel:int@a2:4
 rea_riscv_abi_wide double@a1:4,a0:4 | a:double@a1:4,a0:4 | sel:int@a2:4
@@ -156,10 +177,13 @@ rea_riscv_abi_split double@a1:4,a0:4 | a:int@a0:4 | b:int@a1:4 | c:int@a2:4 | d:
 rea_riscv_abi_pair rea_riscv_abi_pair@a1:4,a0:4 | value:rea_riscv_abi_pair@a1:4,a0:4 | scale:float@a2:4
 rea_riscv_abi_tagged rea_riscv_abi_tagged@a1:4,a0:4 | value:rea_riscv_abi_tagged@a1:4,a0:4 | tag:int@a2:4
 rea_riscv_abi_large rea_riscv_abi_large *@a0:4 | __return_storage_ptr__:rea_riscv_abi_large *@a0:4 (auto) | value:rea_riscv_abi_large *@a1:4 | scale:float@a2:4
+rea_riscv_abi_quad long double *@a0:4 | __return_storage_ptr__:long double *@a0:4 (auto) | value:long double *@a1:4 | sel:int@a2:4
 rea_riscv_abi_variadic uint@a0:4 | count:int@a0:4
 `;
 const DEFAULT_PICK =
   "rea_riscv_abi_pick float@fa0:4 | a:float@fa0:4 | b:float@fa1:4 | sel:int@a0:4";
+const JOINED_QUAD =
+  "rea_riscv_abi_quad long double *@a0:4 | __return_storage_ptr__:long double *@a0:4 (auto) | value:long double@a4:4,a3:4,a2:4,a1:4 | sel:int@a5:4";
 const STRIPPED = `
 rea_riscv_abi_pick undefined4@a0:4 | param_1:undefined4@a0:4 | param_2:undefined4@a1:4 | param_3:int@a2:4
 rea_riscv_abi_wide undefined8@a1:4,a0:4 | param_1:undefined4@a0:4 | param_2:undefined4@a1:4 | param_3:int@a2:4
@@ -168,6 +192,7 @@ rea_riscv_abi_split undefined8@a1:4,a0:4 | param_1:uint@a0:4 | param_2:uint@a1:4
 rea_riscv_abi_pair undefined8@a1:4,a0:4 | param_1:undefined4@a0:4 | param_2:undefined4@a1:4 | param_3:undefined4@a2:4
 rea_riscv_abi_tagged undefined8@a1:4,a0:4 | param_1:undefined4@a0:4 | param_2:undefined4@a1:4 | param_3:undefined4@a2:4
 rea_riscv_abi_large void@<VOID> | param_1:undefined4 *@a0:4 | param_2:undefined4 *@a1:4 | param_3:undefined4@a2:4
+rea_riscv_abi_quad void@<VOID> | param_1:undefined4 *@a0:4 | param_2:undefined4 *@a1:4 | param_3:undefined4@a2:4
 rea_riscv_abi_variadic uint@a0:4 | param_1:int@a0:4
 `;
 
@@ -210,8 +235,9 @@ const TYPED_CALLER = `
   local_30 = rea_riscv_abi_pair((rea_riscv_abi_pair)0x4118000041080000,10.5);
   local_40 = rea_riscv_abi_tagged((rea_riscv_abi_tagged)0xc41380000,local_c);
   rea_riscv_abi_large(&rStack_60,&local_90,16.5);
-  uVar1 = rea_riscv_abi_variadic(2,0x13,0,0x40318000,local_c);
-  fVar2 = (*rea_riscv_abi_callback)(20.5,21.5,local_c);
+  rea_riscv_abi_quad((long_double *)&local_c0,(long_double *)&local_d0,local_c);
+  local_a4 = rea_riscv_abi_variadic(2,0x13,0,0x40318000,local_c);
+  fVar1 = (*rea_riscv_abi_callback)(20.5,21.5,local_c);
 `;
 const DEFAULT_CALLER = `
   fVar2 = rea_riscv_abi_pick(in_fa0,in_fa1,0x3fc00000);
@@ -226,9 +252,10 @@ const STRIPPED_CALLER = `
   local_30 = FUN_ram_00011256(0x41080000,0x41180000,0x41280000);
   local_40 = FUN_ram_00011296(0x41380000,0xc,local_c);
   FUN_ram_000112d2(auStack_60,&local_90,0x41840000);
-  uVar1 = FUN_ram_00011316(2,0x13,0,0x40318000,local_c);
-  uVar2 = (*(code *)PTR_FUN_ram_000110f4_ram_00012598)
-                    (0x41a40000,0x41ac0000,local_c,PTR_FUN_ram_000110f4_ram_00012598);
+  FUN_ram_00011316(&local_c0,&local_d0,local_c);
+  local_a4 = FUN_ram_0001136a(2,0x13,0,0x40318000,local_c);
+  uVar1 = (*(code *)PTR_FUN_ram_000110f4_ram_00012648)
+                    (0x41a40000,0x41ac0000,local_c,PTR_FUN_ram_000110f4_ram_00012648);
 `;
 const ADDRESSES = {
   rea_riscv_abi_pick: "0x110f4",
@@ -238,7 +265,8 @@ const ADDRESSES = {
   rea_riscv_abi_pair: "0x11256",
   rea_riscv_abi_tagged: "0x11296",
   rea_riscv_abi_large: "0x112d2",
-  rea_riscv_abi_variadic: "0x11316",
+  rea_riscv_abi_quad: "0x11316",
+  rea_riscv_abi_variadic: "0x1136a",
 };
 
 describe("RISC-V ilp32 conformance checks", () => {
@@ -261,12 +289,13 @@ describe("RISC-V ilp32 conformance checks", () => {
       "rea_riscv_abi_pair",
       "rea_riscv_abi_tagged",
       "rea_riscv_abi_large",
+      "rea_riscv_abi_quad",
       "rea_riscv_abi_variadic",
       "indirect",
     ]);
     expect(() => assertRiscvIlp32CallSites(calls)).not.toThrow();
     // The variadic pairs skip a1, which still holds the stack argument.
-    expect(calls[7]?.words).toMatchObject({
+    expect(calls[8]?.words).toMatchObject({
       a1: { word: 19 },
       a3: { word: 0x40318000 },
       a7: { word: 0x40328000 },
@@ -279,6 +308,11 @@ describe("RISC-V ilp32 conformance checks", () => {
     expect(() => assertRiscvIlp32CallSites(parseRiscvCallSites(moved))).toThrow(
       /rea_riscv_abi_pick: a1/u,
     );
+    // The long double copy that a1 points at must hold 22.5L's words.
+    const copied = LISTING.replace("lui a1, 0x40037", "lui a1, 0x40038");
+    expect(() =>
+      assertRiscvIlp32CallSites(parseRiscvCallSites(copied)),
+    ).toThrow(/rea_riscv_abi_quad: a1/u);
   });
 
   it("accepts the derived prototypes and refuses Ghidra's stock ilp32d model", () => {
@@ -286,12 +320,13 @@ describe("RISC-V ilp32 conformance checks", () => {
     expect(() =>
       assertRiscvIlp32Storage(boundaries(STRIPPED), { stripped: true }),
     ).not.toThrow();
-    expect(() =>
-      assertRiscvIlp32Storage({
-        ...boundaries(DERIVED),
-        ...boundaries(DEFAULT_PICK),
-      }),
-    ).toThrow();
+    for (const stock of [DEFAULT_PICK, JOINED_QUAD])
+      expect(() =>
+        assertRiscvIlp32Storage({
+          ...boundaries(DERIVED),
+          ...boundaries(stock),
+        }),
+      ).toThrow();
     expect(() =>
       assertRiscvIlp32Storage(boundaries(DERIVED, "__stdcall")),
     ).toThrow();
