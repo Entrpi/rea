@@ -37,6 +37,29 @@ export const GHIDRA_VARIANT_LANGUAGES = {
 } as const satisfies Record<ArchitectureVariant, string>;
 
 /**
+ * Observed with Ghidra 12.1.4 on the verifier's Cortex-M55 image: WLS and LE
+ * decode with LLVM's mnemonics, but WLS branched 2 bytes short, LE branched 4
+ * bytes past the loop start, and LE had no fall-through, so the code after the
+ * loop was not disassembled.
+ */
+const GHIDRA_LOW_OVERHEAD_LOOPS =
+  "Ghidra 12.1.4 decodes the ARMv8.1-M low-overhead-loop branches WLS and LE, but their targets can be wrong and LE has no fall-through, so code after such a loop may be left undisassembled.";
+
+/**
+ * Limitations of each variant's Ghidra decoder, whatever container holds the
+ * code; every lane that loads a variant reports them. A new variant states
+ * its own, even when there are none.
+ */
+export const GHIDRA_VARIANT_LIMITATIONS = {
+  "armv6-m": [],
+  "armv7-m": [],
+  "armv7e-m": [],
+  "armv8-m.base": [],
+  "armv8-m.main": [],
+  "armv8.1-m.main": [GHIDRA_LOW_OVERHEAD_LOOPS],
+} as const satisfies Record<ArchitectureVariant, readonly string[]>;
+
+/**
  * Ghidra context register and value that select each entry instruction set,
  * and the versioned profile commitment that the entry is seeded with them.
  */
@@ -153,20 +176,13 @@ const callerLanguageLimitation = (
   `The caller selected the Ghidra language ${selection.languageId} with compiler spec ${selection.compilerSpecId} (verification: unverified). REA checked that the installation defines it, that the image fits its declared address size, and that its default address space is byte-addressed and its only loaded space, but not that it decodes this image. Entry alignment is left to the language's decoder.`;
 
 /**
- * Observed with Ghidra 12.1.4, where WLS and LE decode with LLVM's mnemonics.
- * In the raw verifier's Cortex-M55 image, WLS branched 2 bytes short, LE
- * branched 4 bytes past the loop start, and LE had no fall-through, so the code
- * after the loop was not disassembled. In the ELF verifier's, WLS branched to
- * its target and LE 2 bytes past the loop start, again without a fall-through.
+ * What a variant's decoder gets wrong, for every lane that decodes the
+ * variant. `GHIDRA_VARIANT_LIMITATIONS` owns the texts.
  */
-const GHIDRA_LOW_OVERHEAD_LOOPS =
-  "Ghidra 12.1.4 decodes the ARMv8.1-M low-overhead-loop branches WLS and LE, but their targets can be wrong and LE has no fall-through, so code after such a loop may be left undisassembled.";
-
-/** What a variant's decoder gets wrong, for every lane that decodes the variant. */
 export const ghidraVariantDecoderLimitations = (
   variant: ArchitectureVariant | undefined,
 ): readonly string[] =>
-  variant === "armv8.1-m.main" ? [GHIDRA_LOW_OVERHEAD_LOOPS] : [];
+  variant === undefined ? [] : GHIDRA_VARIANT_LIMITATIONS[variant];
 
 /** Limitations that every result from a raw-binary session carries. */
 export const ghidraRawBinaryLimitations = (

@@ -241,7 +241,9 @@ This is decision D1 of the embedded-target work, raised in
   which admits raw 6502.
 - **Owner and consumers.** `src/domain/architectureVariant.ts` owns the
   vocabulary; `GHIDRA_VARIANT_LANGUAGES` owns the Ghidra mapping, which
-  follows the GNU architecture names in Ghidra 12.1.4's `ARM.ldefs`; raw
+  follows the GNU architecture names in Ghidra 12.1.4's `ARM.ldefs`, and
+  `GHIDRA_VARIANT_LIMITATIONS` the decoder limitations that every lane
+  reports for a variant; raw
   admission owns the load, its legacy equivalence, the entry's role and basis,
   and its `raw_load` identity; the Ghidra profile owns the coordinate context
   and the label policy. Consumers are the CLI and MCP inputs, target summaries,

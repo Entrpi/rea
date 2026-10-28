@@ -10,6 +10,7 @@ import {
 import {
   GHIDRA_RAW_ENTRY_CONTEXT,
   GHIDRA_VARIANT_LANGUAGES,
+  GHIDRA_VARIANT_LIMITATIONS,
   ghidraRawBinaryLanguage,
   ghidraRawBinaryLimitations,
   ghidraRawProcessorLabels,
@@ -86,6 +87,11 @@ describe("raw-binary variant Ghidra binding", () => {
   it.each(ARCHITECTURE_VARIANT_NAMES)(
     "reports Ghidra's low-overhead-loop flow only for armv8.1-m.main: %s",
     (variant) => {
+      const loopFlow = (text: string) => text.includes("low-overhead-loop");
+      // Every lane that loads the variant reads this table.
+      expect(GHIDRA_VARIANT_LIMITATIONS[variant].some(loopFlow)).toBe(
+        variant === "armv8.1-m.main",
+      );
       const limitations = ghidraRawBinaryLimitations(
         admittedRawLoad({
           architecture: "arm",
@@ -96,9 +102,10 @@ describe("raw-binary variant Ghidra binding", () => {
         }),
         ghidraRawBinaryLanguage(familyRawTarget("arm", variant)),
       );
-      expect(
-        limitations.some((text) => text.includes("low-overhead-loop")),
-      ).toBe(variant === "armv8.1-m.main");
+      expect(limitations).toEqual(
+        expect.arrayContaining([...GHIDRA_VARIANT_LIMITATIONS[variant]]),
+      );
+      expect(limitations.some(loopFlow)).toBe(variant === "armv8.1-m.main");
     },
   );
 });
