@@ -79,6 +79,16 @@ export const inventoryCoverage = (
               "Intel HEX/S-record inventory decodes data records into address-contiguous regions. It does not establish CPU, byte order, memory map, or that a declared start address is executable; gaps are unwritten, not zero.",
             ]
           : []),
+        ...(reader.format === "uf2"
+          ? [
+              "UF2 inventory decodes main-flash block payloads into address-contiguous regions per familyID. It does not establish CPU, byte order, memory map, or an entry point; a familyID names a target family, and gaps are unwritten, not zero.",
+            ]
+          : []),
+        ...(reader.format === "dfuse"
+          ? [
+              "DfuSe inventory lists each target element as one region at its declared address. It does not establish CPU, byte order, memory map, or an entry point; an alternate setting selects a device memory, not an address space REA can interpret.",
+            ]
+          : []),
         ...traversal.limitations,
       ],
     };
@@ -105,7 +115,9 @@ export const inventoryCoverage = (
     format === "unityfs" ||
     format === "node-sea" ||
     format === "intel-hex" ||
-    format === "srec"
+    format === "srec" ||
+    format === "uf2" ||
+    format === "dfuse"
   )
     return {
       coverage: { scope: "container-entries", status: "unknown" },

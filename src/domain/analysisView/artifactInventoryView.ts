@@ -269,7 +269,9 @@ export const projectArtifactInventoryView = (
     inventory.manifest.root_format === "pyinstaller" ||
     inventory.manifest.root_format === "node-sea" ||
     inventory.manifest.root_format === "intel-hex" ||
-    inventory.manifest.root_format === "srec";
+    inventory.manifest.root_format === "srec" ||
+    inventory.manifest.root_format === "uf2" ||
+    inventory.manifest.root_format === "dfuse";
   const counts = inventoryCounts(source);
   const limitations = uniqueSorted([
     ...parent.limitations,

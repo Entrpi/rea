@@ -77,6 +77,12 @@ import { hasDiskImageSignature } from "../domain/apple/diskImageFormat.js";
 import { hasGodotPckHeader } from "../domain/godotPckFormat.js";
 import { hasUnityFsHeader } from "../domain/unityfsFormat.js";
 import { detectHexRecordEncoding } from "../domain/firmware/hexRecords.js";
+import { hasUf2Block } from "../domain/firmware/uf2.js";
+import {
+  DFUSE_SUFFIX_BYTES,
+  hasDfuSePrefix,
+  isDfuSeFile,
+} from "../domain/firmware/dfuse.js";
 import {
   hasZipSignature,
   locateTrailingZipArchive,
@@ -670,6 +676,22 @@ const detectArtifactFormat = async (
   if (hasUnityFsHeader(magic)) return "unityfs";
   const hexRecords = detectHexRecordEncoding(magic);
   if (hexRecords !== undefined) return hexRecords;
+  if (hasUf2Block(magic)) return "uf2";
+  if (
+    hasDfuSePrefix(magic) &&
+    initial.size >= DFUSE_SUFFIX_BYTES &&
+    isDfuSeFile(
+      magic,
+      await readHandleRange(
+        handle,
+        initial.size - DFUSE_SUFFIX_BYTES,
+        DFUSE_SUFFIX_BYTES,
+        signal,
+      ),
+      initial.size,
+    )
+  )
+    return "dfuse";
   // Binary plists, including keyed archives, often use other extensions.
   if (hasBinaryPlistSignature(magic)) return "plist";
   const named = namedArtifactFormat(lower);
@@ -737,9 +759,17 @@ const isArchiveFormat = (
   >,
 ): format is Extract<BinaryTarget, { kind: "archive" }>["format"] =>
   isZipPackageFormat(format) ||
-  ["asar", "godot-pck", "unityfs", "dmg", "pkg", "intel-hex", "srec"].includes(
-    format,
-  );
+  [
+    "asar",
+    "godot-pck",
+    "unityfs",
+    "dmg",
+    "pkg",
+    "intel-hex",
+    "srec",
+    "uf2",
+    "dfuse",
+  ].includes(format);
 
 /** Whether the leading bytes begin any executable header family, valid or not. */
 const claimsLeadingExecutableHeader = async (

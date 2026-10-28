@@ -1,0 +1,310 @@
+import { createHash } from "node:crypto";
+
+import { expect, it } from "vitest";
+
+import {
+  DFUSE_MAX_FILE_BYTES,
+  createDfuSeDecoder,
+  isDfuSeFile,
+  type DfuSeImage,
+} from "./dfuse.js";
+import { dfuseFile, type DfuSeFixture } from "./dfuse.fixture.js";
+
+const decode = (bytes: Uint8Array, chunkSize = 64) => {
+  const decoder = createDfuSeDecoder(bytes.length);
+  if (!decoder.ok) throw new Error(decoder.error.message);
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const written = decoder.value.write(
+      bytes.subarray(offset, offset + chunkSize),
+    );
+    if (!written.ok) return written;
+  }
+  return decoder.value.finish();
+};
+
+const image = (bytes: Uint8Array): DfuSeImage => {
+  const decoded = decode(bytes);
+  if (!decoded.ok) throw new Error(decoded.error.message);
+  return decoded.value;
+};
+
+const recognized = (bytes: Uint8Array): boolean =>
+  isDfuSeFile(bytes.subarray(0, 4096), bytes.subarray(-16), bytes.length);
+
+const elementFacts = ({ elements }: DfuSeImage) =>
+  elements.map(({ bytes, ...facts }) => ({ ...facts, length: bytes.length }));
+
+/** One target, as dfu-util's dfuse-pack.py writes it for `-b 0x08000000:<16 bytes>`. */
+const DFUSE_PACK_EQUIVALENT: DfuSeFixture = {
+  targets: [
+    {
+      alternateSetting: 0,
+      name: "ST...",
+      elements: [{ address: 0x0800_0000, data: [...Array(16).keys()] }],
+    },
+  ],
+  deviceVersion: 0,
+};
+
+it("matches an independently packed file and its suffix CRC", () => {
+  const bytes = dfuseFile(DFUSE_PACK_EQUIVALENT);
+  // Oracle: dfuse-pack.py's build() and compute_crc() run under Python 3.
+  expect(bytes.length).toBe(325);
+  expect(createHash("sha256").update(bytes).digest("hex")).toBe(
+    "65ad96452f1f82cc8b44d30dfe94f268f4fd230a32b30a8826a639b269f7034d",
+  );
+  const decoded = image(bytes);
+  expect(decoded.metadata).toEqual({
+    kind: "dfuse",
+    format_version: 1,
+    image_size: 309,
+    target_count: 1,
+    element_count: 1,
+    empty_element_count: 0,
+    overlapping_element_count: 0,
+    data_bytes: 16,
+    device_version: 0,
+    product_id: 0xdf11,
+    vendor_id: 0x0483,
+    dfu_version: 0x011a,
+    suffix_crc: 0x7a37_11da,
+    computed_crc: 0x7a37_11da,
+  });
+  expect(elementFacts(decoded)).toEqual([
+    {
+      targetIndex: 0,
+      alternateSetting: 0,
+      targetName: "ST...",
+      elementIndex: 0,
+      address: 0x0800_0000,
+      dataOffset: 293,
+      length: 16,
+    },
+  ]);
+  expect(decoded.limitations).toEqual([]);
+});
+
+it("keeps each target's alternate setting and name on its elements", () => {
+  const decoded = image(
+    dfuseFile({
+      targets: [
+        {
+          alternateSetting: 0,
+          name: "Internal Flash",
+          elements: [
+            { address: 0x0800_0000, data: [1, 2, 3, 4] },
+            { address: 0x0800_4000, data: [5, 6] },
+          ],
+        },
+        {
+          alternateSetting: 1,
+          elements: [{ address: 0x1fff_c000, data: [0xaa, 0x55] }],
+        },
+        {
+          alternateSetting: 2,
+          name: Uint8Array.from([0x4f, 0xe9, 0, 0x58]),
+          elements: [{ address: 0x1fff_7800, data: [] }],
+        },
+      ],
+    }),
+  );
+  expect(
+    decoded.elements.map((element) => [
+      element.targetIndex,
+      element.alternateSetting,
+      element.targetName,
+      element.elementIndex,
+      element.address,
+      [...element.bytes],
+    ]),
+  ).toEqual([
+    [0, 0, "Internal Flash", 0, 0x0800_0000, [1, 2, 3, 4]],
+    [0, 0, "Internal Flash", 1, 0x0800_4000, [5, 6]],
+    [1, 1, null, 0, 0x1fff_c000, [0xaa, 0x55]],
+  ]);
+  expect(decoded.metadata).toMatchObject({
+    target_count: 3,
+    element_count: 4,
+    empty_element_count: 1,
+    data_bytes: 8,
+  });
+  // A named target's field is read to its first NUL, one character per byte.
+  const named = image(
+    dfuseFile({
+      targets: [
+        {
+          alternateSetting: 3,
+          name: Uint8Array.from([0x4f, 0xe9, 0, 0x58]),
+          elements: [{ address: 0, data: [1] }],
+        },
+      ],
+    }),
+  );
+  expect(named.elements[0]?.targetName).toBe("Oé");
+});
+
+it("reports a suffix CRC mismatch as facts without refusing the file", () => {
+  const decoded = image(dfuseFile({ ...DFUSE_PACK_EQUIVALENT, crc: 0 }));
+  expect(decoded.metadata).toMatchObject({
+    suffix_crc: 0,
+    computed_crc: 0x7a37_11da,
+  });
+  expect(decoded.elements).toHaveLength(1);
+});
+
+it("names overlapping elements within one alternate setting only", () => {
+  const decoded = image(
+    dfuseFile({
+      targets: [
+        {
+          alternateSetting: 0,
+          elements: [
+            { address: 0x0800_0000, data: [1, 2, 3, 4] },
+            { address: 0x0800_0002, data: [3, 4] },
+          ],
+        },
+        {
+          alternateSetting: 1,
+          elements: [{ address: 0x0800_0000, data: [9] }],
+        },
+      ],
+    }),
+  );
+  expect(decoded.metadata.overlapping_element_count).toBe(1);
+  expect(decoded.limitations).toEqual([
+    "1 DfuSe element(s) overlap an earlier element of the same alternate setting; each stays a separate entry and no bytes were merged: target 0 element 1 (0x08000002-0x08000003) overlaps target 0 element 0 (0x08000000-0x08000003) in alternate setting 0.",
+  ]);
+});
+
+it("recognizes a file only by the DfuSe prefix together with the DFU suffix", () => {
+  const bytes = dfuseFile(DFUSE_PACK_EQUIVALENT);
+  expect(recognized(bytes)).toBe(true);
+  const changed = (offset: number, value: number): Buffer => {
+    const copy = Buffer.from(bytes);
+    copy[offset] = value;
+    return copy;
+  };
+  expect(recognized(changed(5, 2))).toBe(false);
+  expect(recognized(changed(0, 0x64))).toBe(false);
+  expect(recognized(changed(bytes.length - 10, 0x00))).toBe(false);
+  expect(recognized(changed(bytes.length - 8, 0x58))).toBe(false);
+  expect(recognized(changed(bytes.length - 5, 15))).toBe(false);
+  expect(recognized(bytes.subarray(0, bytes.length - 1))).toBe(false);
+  // The CRC is checked after recognition, so a mismatch still recognizes.
+  expect(recognized(dfuseFile({ ...DFUSE_PACK_EQUIVALENT, crc: 1 }))).toBe(
+    true,
+  );
+});
+
+it.each([
+  [
+    "a target without its signature",
+    {
+      targets: [{ alternateSetting: 0, signature: "Tarxet", elements: [] }],
+    },
+    'byte offset 11: target 0 does not begin with the "Target" signature',
+  ],
+  [
+    "an element larger than its target",
+    {
+      targets: [
+        {
+          alternateSetting: 0,
+          elements: [{ address: 0, data: [1, 2], declaredSize: 3 }],
+        },
+      ],
+    },
+    "byte offset 289: target 0 element 0 declares 3 bytes, but its target ends at byte 295",
+  ],
+  [
+    "a target larger than the image",
+    {
+      targets: [
+        {
+          alternateSetting: 0,
+          declaredSize: 100,
+          elements: [{ address: 0, data: [1] }],
+        },
+      ],
+    },
+    "byte offset 277: target 0 declares 100 bytes, but the image ends at byte 294",
+  ],
+  [
+    "fewer elements than the target size",
+    {
+      targets: [
+        {
+          alternateSetting: 0,
+          declaredElements: 0,
+          elements: [{ address: 0, data: [1] }],
+        },
+      ],
+    },
+    "byte offset 285: target 0 declares 9 bytes, but its 0 element(s) end 9 bytes earlier",
+  ],
+  [
+    "an image size that disagrees with the suffix",
+    { targets: [], imageSize: 12 },
+    "byte offset 6: DFUImageSize declares 12 bytes, but the DFU suffix begins at byte 11",
+  ],
+  [
+    "bytes between the last target and the suffix",
+    { targets: [], gap: Uint8Array.from([0]) },
+    "byte offset 11: 0 target(s) end at byte 11, but the DFU suffix begins at byte 12",
+  ],
+  [
+    "more targets than the image holds",
+    { targets: [], declaredTargets: 1 },
+    "byte offset 11: target 0 prefix needs 274 bytes, but the image ends at byte 11",
+  ],
+  [
+    "more elements than the target holds",
+    {
+      targets: [
+        {
+          alternateSetting: 0,
+          declaredElements: 2,
+          elements: [{ address: 0, data: [1] }],
+        },
+      ],
+    },
+    "byte offset 294: target 0 element 1 header lies beyond the target's end at byte 294",
+  ],
+  [
+    "an element that wraps the address space",
+    {
+      targets: [
+        {
+          alternateSetting: 0,
+          elements: [{ address: 0xffff_ffff, data: [1, 2] }],
+        },
+      ],
+    },
+    "byte offset 285: target 0 element 0 at 0xffffffff with 2 bytes wraps past 0xffffffff",
+  ],
+] as const)("refuses %s with its byte offset", (_name, fixture, message) => {
+  expect(decode(dfuseFile(fixture))).toEqual({
+    ok: false,
+    error: { kind: "format", message },
+  });
+});
+
+it("refuses files above the fixed ceiling and more elements than retained", () => {
+  expect(createDfuSeDecoder(DFUSE_MAX_FILE_BYTES + 1)).toMatchObject({
+    ok: false,
+    error: { kind: "limit", boundary: "file-size" },
+  });
+  const elements = Array.from({ length: 65_537 }, (_, address) => ({
+    address,
+    data: [],
+  }));
+  expect(
+    decode(
+      dfuseFile({ targets: [{ alternateSetting: 0, elements }] }),
+      1 << 20,
+    ),
+  ).toMatchObject({
+    ok: false,
+    error: { kind: "limit", boundary: "capacity" },
+  });
+});

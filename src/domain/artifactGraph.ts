@@ -1,4 +1,5 @@
 import {
+  artifactDfuCrc32PairSchema,
   artifactIntegrityClaimSchema,
   artifactSha256PairSchema,
   artifactMd5PairSchema,
@@ -89,6 +90,8 @@ const artifactFormatSchema = z.enum([
   "node-sea",
   "intel-hex",
   "srec",
+  "uf2",
+  "dfuse",
   "unknown",
 ]);
 
@@ -99,6 +102,8 @@ const artifactContentFormatSchema = artifactFormatSchema.extract([
   "unityfs",
   "intel-hex",
   "srec",
+  "uf2",
+  "dfuse",
   "mach-o-universal",
   "mach-o",
   "elf",
@@ -182,6 +187,7 @@ const integrityContradictionBaseSchema = z.object({
 export const integrityContradictionSchema = z.union([
   integrityContradictionBaseSchema.extend(artifactSha256PairSchema.shape),
   integrityContradictionBaseSchema.extend(artifactMd5PairSchema.shape),
+  integrityContradictionBaseSchema.extend(artifactDfuCrc32PairSchema.shape),
 ]);
 
 /**

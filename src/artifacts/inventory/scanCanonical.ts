@@ -48,6 +48,7 @@ import {
   type PendingIntegrityContradiction,
 } from "./scanReader.js";
 import type { ArtifactInventoryOptions } from "./types.js";
+import type { ArtifactContainerIntegrityPair } from "../../domain/artifactIntegrity.js";
 
 export interface TransferredArtifactInventorySource {
   readonly owner: ArtifactResourceOwner;
@@ -141,6 +142,7 @@ const scanCanonical = async (
       caseCollisionLimitation,
       unknownParentOccurrences,
       traversal,
+      rootContradiction,
     } = await scanReader(
       reader,
       ownedReaders,
@@ -165,6 +167,7 @@ const scanCanonical = async (
         caseCollisionLimitation,
         unknownParentOccurrences,
         traversal,
+        rootContradiction,
       }),
     };
   } catch (cause: unknown) {
@@ -195,6 +198,7 @@ const scanCanonical = async (
           pendingContradictions: [],
           caseCollisionLimitation: undefined,
           unknownParentOccurrences: new Set(),
+          rootContradiction: undefined,
           traversal: {
             status: "unknown",
             limitations: [
@@ -395,6 +399,7 @@ interface SnapshotBuildInput {
   readonly caseCollisionLimitation: string | undefined;
   readonly unknownParentOccurrences: ReadonlySet<MutableOccurrence>;
   readonly traversal: ArtifactReaderTraversal;
+  readonly rootContradiction: ArtifactContainerIntegrityPair | undefined;
 }
 
 const buildInventorySnapshot = async (
@@ -423,6 +428,18 @@ const buildInventorySnapshot = async (
     )
       occurrence.parent_occurrence_id = rootOccurrence.occurrence_id;
   input.occurrences.unshift(rootOccurrence);
+  if (input.rootContradiction !== undefined) {
+    rootOccurrence.hash_status = "mismatched";
+    rootOccurrence.limitations.push(
+      "Declared integrity metadata contradicts observed bytes.",
+    );
+    input.pendingContradictions.push({
+      occurrence: rootOccurrence,
+      integrity: input.rootContradiction,
+      entryKind: "file",
+      unpacked: false,
+    });
+  }
 
   const occurrenceById = new Map(
     input.occurrences.map((occurrence) => [

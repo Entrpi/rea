@@ -1,5 +1,6 @@
 import type { HexRecordsMetadata } from "../artifactFormatMetadata.js";
 import { err, ok, type Result } from "../result.js";
+import { mergeArenaRuns, type RunConflict } from "./addressRuns.js";
 import {
   COLON,
   CR,
@@ -457,66 +458,12 @@ const mergeRuns = (
   { regions: HexRecordRegion[]; duplicateBytes: number },
   HexRecordFailure
 > => {
-  const ordered = [...runs].sort((left, right) => left.address - right.address);
-  const regions: HexRecordRegion[] = [];
-  let duplicateBytes = 0;
-  let first = 0;
-  while (first < ordered.length) {
-    let next = first + 1;
-    let end = runEnd(ordered[first]);
-    while (next < ordered.length && (ordered[next]?.address ?? 0) <= end) {
-      end = Math.max(end, runEnd(ordered[next]));
-      next += 1;
-    }
-    const region = mergeRegion(ordered.slice(first, next), end, arena);
-    if (!region.ok) return region;
-    regions.push(region.value.region);
-    duplicateBytes += region.value.duplicateBytes;
-    first = next;
-  }
-  return ok({ regions, duplicateBytes });
-};
-
-const runEnd = (run: RecordRun | undefined): number =>
-  run === undefined ? 0 : run.address + run.length;
-
-/** Copy one contiguous group; written addresses always form [start, written). */
-const mergeRegion = (
-  group: readonly RecordRun[],
-  end: number,
-  arena: Uint8Array,
-): Result<
-  { region: HexRecordRegion; duplicateBytes: number },
-  HexRecordFailure
-> => {
-  const start = group[0]?.address ?? 0;
-  const bytes = new Uint8Array(end - start);
-  let written = start;
-  let duplicateBytes = 0;
-  for (const run of group) {
-    const overlapEnd = Math.min(written, runEnd(run));
-    for (let address = run.address; address < overlapEnd; address += 1) {
-      const existing = bytes[address - start] ?? 0;
-      const incoming = arena[run.offset + address - run.address] ?? 0;
-      if (existing !== incoming)
-        return err(conflict(group, run, address, [existing, incoming]));
-    }
-    duplicateBytes += Math.max(overlapEnd - run.address, 0);
-    if (runEnd(run) > written) {
-      bytes.set(
-        arena.subarray(
-          run.offset + written - run.address,
-          run.offset + run.length,
-        ),
-        written - start,
-      );
-      written = runEnd(run);
-    }
-  }
+  const merged = mergeArenaRuns(runs, arena);
+  if (!merged.ok) return err(conflict(merged.error));
   return ok({
-    region: {
+    regions: merged.value.ranges.map(({ start, bytes, runs: group }) => ({
       start,
-      end: end - 1,
+      end: start + bytes.length - 1,
       bytes,
       recordCount: group.reduce((sum, run) => sum + run.recordCount, 0),
       firstLine: group.reduce(
@@ -524,27 +471,18 @@ const mergeRegion = (
         Number.MAX_SAFE_INTEGER,
       ),
       lastLine: group.reduce((line, run) => Math.max(line, run.lastLine), 0),
-    },
-    duplicateBytes,
+    })),
+    duplicateBytes: merged.value.duplicateBytes,
   });
 };
 
-const conflict = (
-  group: readonly RecordRun[],
-  run: RecordRun,
-  address: number,
-  [existing, incoming]: readonly [number, number],
-): HexRecordFailure => {
-  // The first covering run in address order supplied the retained byte.
-  const writer =
-    group.find(
-      (candidate) =>
-        candidate !== run &&
-        candidate.address <= address &&
-        address < runEnd(candidate),
-    ) ?? run;
-  return {
-    kind: "format",
-    message: `address 0x${hex(address, 8)} written with different values at ${lineSpan(writer)} (0x${hex(existing, 2)}) and ${lineSpan(run)} (0x${hex(incoming, 2)})`,
-  };
-};
+const conflict = ({
+  address,
+  writer,
+  run,
+  existing,
+  incoming,
+}: RunConflict<RecordRun>): HexRecordFailure => ({
+  kind: "format",
+  message: `address 0x${hex(address, 8)} written with different values at ${lineSpan(writer)} (0x${hex(existing, 2)}) and ${lineSpan(run)} (0x${hex(incoming, 2)})`,
+});

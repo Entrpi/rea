@@ -6,6 +6,7 @@ import {
   immutableJsonSnapshotMember,
 } from "./immutableJson.js";
 import {
+  artifactDfuCrc32PairSchema,
   artifactIntegrityPairOf,
   artifactSha256PairSchema,
   artifactMd5PairSchema,
@@ -54,6 +55,7 @@ const inspectionContradictionBaseSchema = z.strictObject({
 const inspectionContradictionSchema = z.union([
   inspectionContradictionBaseSchema.extend(artifactSha256PairSchema.shape),
   inspectionContradictionBaseSchema.extend(artifactMd5PairSchema.shape),
+  inspectionContradictionBaseSchema.extend(artifactDfuCrc32PairSchema.shape),
 ]);
 
 const nextProbeSchema = z.strictObject({
@@ -317,9 +319,17 @@ const probesFor = (
           },
         ]
       : [];
-  if (format === "intel-hex" || format === "srec")
+  if (
+    format === "intel-hex" ||
+    format === "srec" ||
+    format === "uf2" ||
+    format === "dfuse"
+  )
     return inventory.occurrences.some(
-      (row) => row.format_metadata?.kind === "hex-record-region",
+      (row) =>
+        row.format_metadata?.kind === "hex-record-region" ||
+        row.format_metadata?.kind === "uf2-region" ||
+        row.format_metadata?.kind === "dfuse-element",
     )
       ? [
           {

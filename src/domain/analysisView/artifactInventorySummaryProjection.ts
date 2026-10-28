@@ -18,7 +18,9 @@ export const artifactInventorySummaryProjectionIds = (
     format === "godot-pck" ||
     format === "unityfs" ||
     format === "pyinstaller" ||
-    format === "node-sea"
+    format === "node-sea" ||
+    format === "uf2" ||
+    format === "dfuse"
   )
     return [current.evidence_id];
   const { view_digest: _digest, ...projection } = result;
