@@ -25,6 +25,8 @@ export interface DfuSeFixture {
   readonly declaredTargets?: number;
   /** Replaces DFUImageSize, which otherwise counts the prefix and targets. */
   readonly imageSize?: number;
+  /** Count the suffix in DFUImageSize too, as dfu-util's dfuse-pack.py does. */
+  readonly imageSizeIncludesSuffix?: boolean;
   /** Bytes between the last target and the suffix. */
   readonly gap?: Uint8Array;
   readonly dfuVersion?: number;
@@ -61,6 +63,7 @@ const targetBytes = (target: DfuSeFixtureTarget): Buffer => {
 /**
  * A DfuSe file written from ST UM0391 and the DFU 1.1 suffix, with the suffix
  * CRC computed as dfu-util's dfuse-pack.py does: the inverted zlib CRC-32.
+ * DFUImageSize excludes the suffix unless `imageSizeIncludesSuffix` is set.
  */
 export const dfuseFile = (fixture: DfuSeFixture): Buffer => {
   const targets = Buffer.concat(fixture.targets.map(targetBytes));
@@ -69,7 +72,11 @@ export const dfuseFile = (fixture: DfuSeFixture): Buffer => {
   prefix.write("DfuSe", 0, "latin1");
   prefix.writeUInt8(1, 5);
   prefix.writeUInt32LE(
-    fixture.imageSize ?? prefix.length + targets.length + gap.length,
+    fixture.imageSize ??
+      prefix.length +
+        targets.length +
+        gap.length +
+        (fixture.imageSizeIncludesSuffix === true ? 16 : 0),
     6,
   );
   prefix.writeUInt8(fixture.declaredTargets ?? fixture.targets.length, 10);

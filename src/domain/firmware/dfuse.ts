@@ -163,12 +163,14 @@ const parseDfuSe = (bytes: Uint8Array): Result<DfuSeImage, DfuSeFailure> => {
         "the file does not begin with a DfuSe prefix and end with a DFU 1.1a suffix",
       ),
     );
+  // UM0391 calls DFUImageSize the file length, which dfu-util's dfuse-pack.py
+  // writes; ST's DfuFileMgr, MicroPython's dfu.py and pydfu exclude the suffix.
   const imageSize = readUint32(bytes, 6);
-  if (imageSize !== suffixStart)
+  if (imageSize !== suffixStart && imageSize !== bytes.length)
     return err(
       formatFailure(
         6,
-        `DFUImageSize declares ${String(imageSize)} bytes, but the DFU suffix begins at byte ${String(suffixStart)}`,
+        `DFUImageSize declares ${String(imageSize)} bytes, but the DFU suffix begins at byte ${String(suffixStart)} and the file holds ${String(bytes.length)} bytes`,
       ),
     );
   const targetCount = bytes[10] ?? 0;

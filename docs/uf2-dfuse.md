@@ -114,19 +114,23 @@ Root `format_metadata` (`dfuse`) records:
 | `suffix_crc`, `computed_crc`                               | The stored `dwCRC`, and the same CRC computed over every byte before it         |
 
 The DFU suffix CRC is CRC-32 without the final inversion, as dfu-util stores
-and checks it.
+and checks it. Producers disagree on `DFUImageSize`: UM0391 calls it the file
+length, which dfu-util's `dfuse-pack.py` writes, while ST's DfuFileMgr,
+MicroPython's `dfu.py` and pydfu leave the 16-byte suffix out. REA accepts
+either value and keeps the declared one in `image_size`.
 
 ## DfuSe facts, limitations and failures
 
-| Situation                                                                                   | Outcome                                                                   |
-| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `dwCRC` differs from the computed CRC                                                       | Follows `integrity_policy`, below                                         |
-| A target without the `Target` signature                                                     | Fails with its byte offset                                                |
-| `DFUImageSize`, a target size or an element size that disagrees with the bytes that hold it | Fails with the byte offset and the declared and available sizes           |
-| An element whose address range wraps past `0xFFFFFFFF`                                      | Fails with its byte offset                                                |
-| Overlapping elements of one alternate setting                                               | Kept as separate entries; a limitation names them; coverage is unaffected |
-| The same addresses in different alternate settings                                          | Separate entries; an alternate setting selects a device memory            |
-| Elements of 0 bytes                                                                         | Counted in `empty_element_count`; no entry                                |
+| Situation                                                                          | Outcome                                                                   |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `dwCRC` differs from the computed CRC                                              | Follows `integrity_policy`, below                                         |
+| A target without the `Target` signature                                            | Fails with its byte offset                                                |
+| `DFUImageSize` that equals neither the file length nor the bytes before the suffix | Fails with the declared size, the suffix offset and the file length       |
+| A target size or an element size that disagrees with the bytes that hold it        | Fails with the byte offset and the declared and available sizes           |
+| An element whose address range wraps past `0xFFFFFFFF`                             | Fails with its byte offset                                                |
+| Overlapping elements of one alternate setting                                      | Kept as separate entries; a limitation names them; coverage is unaffected |
+| The same addresses in different alternate settings                                 | Separate entries; an alternate setting selects a device memory            |
+| Elements of 0 bytes                                                                | Counted in `empty_element_count`; no entry                                |
 
 A CRC mismatch is an integrity contradiction, never proof of a cause. With the
 default `integrity_policy` `fail`, inspection and extraction fail with
@@ -166,9 +170,12 @@ Fixtures written from the UF2 specification and from ST UM0391 cover block and
 element layouts, numbering, families, rewrites and conflicts, invalid and
 partial blocks, not-main-flash and file-container blocks, structural faults,
 overlaps, both integrity policies, resource refusals, inventory, extraction and
-reader identity checks. One DfuSe fixture is byte-identical to the output of a
-Python 3 transcription of dfu-util's `dfuse-pack.py`, including its CRC. CLI and
-stdio MCP tests exercise the same artifact provider and advertised schemas.
+reader identity checks. Two DfuSe fixtures are byte-identical, CRC included,
+to what the `build()` functions of dfu-util's `dfuse-pack.py` and MicroPython's
+`tools/dfu.py` produce for the same image, one for each `DFUImageSize`
+convention. Those functions were transcribed and run under Python 3; the
+scripts themselves were not run. CLI and stdio MCP tests exercise the same
+artifact provider and advertised schemas.
 
 `npm run verify:uf2` runs esptool's `merge-bin --format uf2` on generated
 inputs at known addresses, with and without MD5 and with 256-byte payloads, and

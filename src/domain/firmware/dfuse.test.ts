@@ -34,7 +34,7 @@ const recognized = (bytes: Uint8Array): boolean =>
 const elementFacts = ({ elements }: DfuSeImage) =>
   elements.map(({ bytes, ...facts }) => ({ ...facts, length: bytes.length }));
 
-/** One target, as dfu-util's dfuse-pack.py writes it for `-b 0x08000000:<16 bytes>`. */
+/** One 16-byte image at 0x08000000 in target "ST...", as the packers below write it. */
 const DFUSE_PACK_EQUIVALENT: DfuSeFixture = {
   targets: [
     {
@@ -46,9 +46,24 @@ const DFUSE_PACK_EQUIVALENT: DfuSeFixture = {
   deviceVersion: 0,
 };
 
-it("matches an independently packed file and its suffix CRC", () => {
+it("decodes files packed with and without the suffix in DFUImageSize", () => {
+  // Oracle: dfu-util's dfuse-pack.py build() and compute_crc(), transcribed
+  // and run under Python 3. It counts the suffix in DFUImageSize.
+  const packed = dfuseFile({
+    ...DFUSE_PACK_EQUIVALENT,
+    imageSizeIncludesSuffix: true,
+  });
+  expect(createHash("sha256").update(packed).digest("hex")).toBe(
+    "4d9f8c231291504484745f0b0586031c8f804d141e964cb33a9b82965f8a69d0",
+  );
+  expect(image(packed).metadata).toMatchObject({
+    image_size: 325,
+    suffix_crc: 0x2c4c_4f44,
+    computed_crc: 0x2c4c_4f44,
+  });
   const bytes = dfuseFile(DFUSE_PACK_EQUIVALENT);
-  // Oracle: dfuse-pack.py's build() and compute_crc() run under Python 3.
+  // Oracle: MicroPython's tools/dfu.py build() and compute_crc(), transcribed
+  // and run under Python 3. Like ST's DfuFileMgr, it leaves the suffix out.
   expect(bytes.length).toBe(325);
   expect(createHash("sha256").update(bytes).digest("hex")).toBe(
     "65ad96452f1f82cc8b44d30dfe94f268f4fd230a32b30a8826a639b269f7034d",
@@ -243,9 +258,9 @@ it.each([
     "byte offset 285: target 0 declares 9 bytes, but its 0 element(s) end 9 bytes earlier",
   ],
   [
-    "an image size that disagrees with the suffix",
+    "an image size that matches neither packer convention",
     { targets: [], imageSize: 12 },
-    "byte offset 6: DFUImageSize declares 12 bytes, but the DFU suffix begins at byte 11",
+    "byte offset 6: DFUImageSize declares 12 bytes, but the DFU suffix begins at byte 11 and the file holds 27 bytes",
   ],
   [
     "bytes between the last target and the suffix",
