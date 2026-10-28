@@ -530,16 +530,12 @@ export const attestGhidraRawBinaryLoadImage = (
           : {}),
         observations,
         checks,
+        // What the load maps, labels and models, and where Reset came from,
+        // are session limitations, which every result of the session carries.
         limitations: [
           "Raw binary is a headerless interpretation explicitly selected by the caller, not format identification from file bytes.",
-          "Verification covers complete original/modified source identity, initialized and loaded non-overlay file bytes in the default address space, the committed base, entry and entry context, and the bound Ghidra language with its fixed byte order. File offset 0 is mapped at the base.",
-          "Ghidra's processor-defined labels, such as the Cortex vector names at addresses 0x0-0x40, are not applied, so the committed entry is the only external entry. Verification requires exactly that entry.",
-          ...(rawLoad.entrySource.kind === "vector-table"
-            ? [
-                "The entry is the Reset vector that admission read from the file, with bit 0 cleared. The initial stack pointer is recorded as observed and is not validated.",
-              ]
-            : []),
-          "The file is the only segment. SRAM, peripheral and system blocks are not created, vectors other than Reset are neither labels nor entries, and reset, memory-mapped I/O and boot sequences are not emulated. No original executable bytes are changed.",
+          "Verification covers complete original/modified source identity, initialized and loaded non-overlay file bytes in the default address space, the committed base, entry and entry context, and the bound Ghidra language with its fixed byte order. File offset 0 is mapped at the base. No original executable bytes are changed.",
+          "Verification requires the committed entry to be the only external entry.",
           "Mapping ends are inclusive; a mismatching digest identifies its source range, not the first differing byte.",
         ],
       }),
