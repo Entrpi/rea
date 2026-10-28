@@ -1,4 +1,5 @@
 import { hasGodotPckHeader } from "../../domain/godotPckFormat.js";
+import { hasUImageMagic } from "../../domain/uimageFormat.js";
 import { hasUnityFsHeader } from "../../domain/unityfsFormat.js";
 import { detectHexRecordEncoding } from "../../domain/firmware/hexRecords.js";
 import { recognizeEspImage } from "../../domain/firmware/espImage.js";
@@ -282,6 +283,7 @@ export const rootOccurrenceFor = (
       "asar",
       "godot-pck",
       "unityfs",
+      "uimage",
       "dmg",
       "pkg",
       "pyinstaller",
@@ -583,6 +585,7 @@ const artifactRoleForFormat = (
   if (
     format === "godot-pck" ||
     format === "unityfs" ||
+    format === "uimage" ||
     format === "intel-hex" ||
     format === "srec" ||
     format === "esp-image"
@@ -605,6 +608,7 @@ export const classifyArtifactBytes = (
   if (hasZipSignature(prefix)) return "zip";
   if (hasGodotPckHeader(prefix)) return "godot-pck";
   if (hasUnityFsHeader(prefix)) return "unityfs";
+  if (hasUImageMagic(prefix)) return "uimage";
   const hexRecords = detectHexRecordEncoding(prefix);
   if (hexRecords !== undefined) return hexRecords;
   if (recognizeEspImage(prefix, fileSize) === "esp-image") return "esp-image";
