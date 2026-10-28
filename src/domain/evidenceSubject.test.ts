@@ -5,8 +5,13 @@ import { BINARY_ARCHITECTURES } from "./binaryTargetTypes.js";
 import { evidenceBundleSchema } from "./evidenceBundle.js";
 import { evidenceSchema } from "./evidence.js";
 import { evidenceSubjectFormatSchema } from "./evidenceSubject.js";
+import { DECLARED_ARCHITECTURE_ROWS } from "./targetFormats.js";
 
 const evidenceSubject = evidenceSchema.shape.subject;
+const declaredArchitectures = new Map<
+  string,
+  (typeof DECLARED_ARCHITECTURE_ROWS)[number]["architecture"]
+>(DECLARED_ARCHITECTURE_ROWS.map((row) => [row.id, row.architecture]));
 const snapshotSubject =
   analysisSnapshotSchema.shape.entries.element.shape.execution.shape.subject;
 const digest = "a".repeat(64);
@@ -31,12 +36,13 @@ describe("persisted observation subject declarations", () => {
           path: "/tmp/fixture",
           sha256: digest,
         });
+        const declared = declaredArchitectures.get(format);
         const allowed =
           architecture !== "unsupported" &&
-          (format === "gamecube-dol"
-            ? architecture === "powerpc"
-            : format === "raw-binary" ||
-              (architecture !== "6502" && architecture !== "m68k"));
+          (declared === undefined
+            ? architecture !== "6502" && architecture !== "m68k"
+            : declared === "caller-selected" ||
+              architecture === declared.fixed);
         expect(evidence.success, JSON.stringify(declaration)).toBe(allowed);
         expect(snapshot.success, JSON.stringify(declaration)).toBe(allowed);
         const manifest = evidenceBundleSchema.shape.artifacts.element.safeParse(

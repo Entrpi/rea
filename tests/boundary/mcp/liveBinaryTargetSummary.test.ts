@@ -2,7 +2,7 @@ import { AjvJsonSchemaValidator } from "@modelcontextprotocol/client/validators/
 import { expect, it } from "vitest";
 
 import type { BinaryTarget } from "../../../src/domain/binaryTargetTypes.js";
-import { ZIP_PACKAGE_FORMATS } from "../../../src/domain/zipPackageFormat.js";
+import { targetFormatIds } from "../../../src/domain/targetFormats.js";
 import { binaryTargetSummary } from "../../../src/application/binary/BinaryTargetSummary.js";
 import { toolContract } from "../../../src/contracts/toolContracts.js";
 import { toolOutputSchemaWithMetadata } from "../../../src/contracts/toolSchemaMetadata.js";
@@ -98,11 +98,17 @@ const targets: readonly BinaryTarget[] = [
       entryPoint: 0x80003100,
     },
   },
-  { ...identity, kind: "database", format: "analysis-database" },
-  ...([...ZIP_PACKAGE_FORMATS, "asar", "godot-pck", "dmg", "pkg"] as const).map(
-    (format) => ({ ...identity, kind: "archive" as const, format }),
-  ),
-  ...(["plist", "javascript", "source-map"] as const).map((format) => ({
+  ...targetFormatIds("target", "database").map((format) => ({
+    ...identity,
+    kind: "database" as const,
+    format,
+  })),
+  ...targetFormatIds("target", "archive").map((format) => ({
+    ...identity,
+    kind: "archive" as const,
+    format,
+  })),
+  ...targetFormatIds("target", "artifact").map((format) => ({
     ...identity,
     kind: "artifact" as const,
     format,
@@ -146,9 +152,7 @@ it.each(["draft-2020-12", "draft-07"] as const)(
         kind: target.kind,
         format: target.format,
         architecture: target.architecture ?? null,
-        ...(target.format === "raw-binary" || target.format === "gamecube-dol"
-          ? { entry_point: target.entryPoint }
-          : {}),
+        ...("entryPoint" in target ? { entry_point: target.entryPoint } : {}),
       });
       expect(
         sessionOutputSchemas.open_binary.safeParse({ result: summary }).success,
