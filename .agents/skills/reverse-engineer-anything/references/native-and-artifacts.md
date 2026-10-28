@@ -682,9 +682,11 @@ A whole-flash dump opens as `esp-flash-image`. `root_format_metadata` holds
 `partitions_outside_dump`, and a `boot_selection` for every table whose
 `basis` names the bootloader's branch (`no-otadata` without otadata,
 `unknown` when a record is missing) with its `assumptions`;
-`running_partition` is always `unknown`. With `detail: "summary"` each
-image is a compact `summary` (chip, entry point, segment count, load
-ranges, integrity); complete detail keeps every segment. Partition rows
+`running_partition` is always `unknown`. Each image names its entry
+`path`. With `detail: "summary"` the root kind is `esp-flash-image-summary`
+and each image is a compact `summary` (chip, entry point, segment count,
+classified load ranges, signature block count, descriptor identity,
+integrity); complete detail keeps every segment. Partition rows
 (`partitions/<label>.bin`) carry the declared `type`, `subtype`, names,
 `flash_address`, `size` and flags; `encrypted` is a storage flag, not
 proof of ciphertext. `written_offset`/`written_end` bound the bytes that

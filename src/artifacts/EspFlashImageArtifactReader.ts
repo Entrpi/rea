@@ -452,6 +452,7 @@ const layoutMetadata = (
       bootloaderRegion === undefined || bootloaderFacts === undefined
         ? null
         : {
+            path: bootloaderRegion.path,
             flash_address: bootloaderRegion.flashAddress,
             region_size: bootloaderRegion.length,
             facts: bootloaderFacts,
@@ -472,7 +473,13 @@ const layoutMetadata = (
     apps: [...images].flatMap(([region, image]) =>
       region.partition === undefined
         ? []
-        : [{ partition_index: region.partition.index, facts: image }],
+        : [
+            {
+              path: region.path,
+              partition_index: region.partition.index,
+              facts: image,
+            },
+          ],
     ),
     otadata:
       facts.otadata === null

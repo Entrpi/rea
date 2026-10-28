@@ -87,6 +87,7 @@ describe("ESP flash layout inventory", () => {
       flash_offset: { value: 0, source: "default" },
       chip: { target: "esp32c3", isa: "riscv" },
       bootloader: {
+        path: "bootloader.bin",
         flash_address: 0,
         region_size: 0x8000,
         facts: {
@@ -114,15 +115,24 @@ describe("ESP flash layout inventory", () => {
     });
     const apps = (
       root(snapshot) as {
-        apps: { partition_index: number; facts: { status: string } }[];
+        apps: {
+          path: string;
+          partition_index: number;
+          facts: { status: string };
+        }[];
       }
     ).apps;
+    // Each image names its entry, so no lookup by index is needed.
     expect(
-      apps.map(({ partition_index, facts }) => [partition_index, facts.status]),
+      apps.map(({ path, partition_index, facts }) => [
+        path,
+        partition_index,
+        facts.status,
+      ]),
     ).toEqual([
-      [3, "esp-image"],
-      [4, "esp-image"],
-      [5, "erased"],
+      ["partitions/factory.bin", 3, "esp-image"],
+      ["partitions/ota_0.bin", 4, "esp-image"],
+      ["partitions/ota_1.bin", 5, "erased"],
     ]);
     const factory = snapshot.occurrences.find(
       ({ logical_path }) => logical_path === "partitions/factory.bin",

@@ -146,7 +146,8 @@ while the rest stay readable.
 
 ### App partitions and the bootloader
 
-Each app partition and the bootloader region carry ESP image `facts`:
+Each app partition and the bootloader region carry their entry's `path`
+and ESP image `facts`:
 `status` is `esp-image`, `erased` (the image header bytes are erased flash,
 as in an empty OTA slot) or `unrecognized` (ciphertext or other data). For an
 image they hold the [ESP image](esp-image.md) root facts, `segments`,
@@ -155,12 +156,18 @@ the region. Extract a partition and inspect it as an ESP image for its
 segments as entries.
 
 The summary view (`inspect_artifact` with `detail: "summary"`, or the
-inventory summary of `inspect_analysis_view`) gives each of these images a
+inventory summary of `inspect_analysis_view`) reports the root facts under
+their own kind, `esp-flash-image-summary`, and gives each of these images a
 `summary` instead of its `facts`: `status`, `chip`, `entry_addr`,
-`segment_count`, `load_ranges` (the load address and declared length of each
-segment that is mapped, loaded or unclassified), the `checksum` and
-`appended_sha256` statuses, `coverage` and `limitations`. The default
-complete detail keeps the full facts, every segment included.
+`segment_count`, `load_ranges` (the load address, declared length and
+classification of each segment that is mapped, loaded or unclassified),
+`signature_block_count`, the `descriptor` kind with the fields that tell
+builds apart (an app's `project_name`, `version`, `idf_ver`,
+`secure_version` and `app_elf_sha256`; a bootloader's `version`, `idf_ver`
+and `secure_version`), the `checksum` and `appended_sha256` statuses,
+`coverage` and `limitations`. The default complete detail keeps the full
+facts, every segment included, and the summary's `inventory_evidence_ids`
+name the Evidence that holds them.
 
 `erased` is the bootloader's view: with no image header at the start of the
 slot, it finds no app there. An erased slot can still hold data further in,

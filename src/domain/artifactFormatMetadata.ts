@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+const offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 export const uint32 = z.number().int().min(0).max(0xffff_ffff);
 
 /** Parsed source fields owned by the PCK adapter, independent of content hashes. */
@@ -140,7 +140,7 @@ const espChipFactsSchema = z.strictObject({
 });
 
 /** `esp_app_desc_t` fields, as ESP-IDF names them; strings stop at NUL. */
-const espAppDescriptorSchema = z.strictObject({
+export const espAppDescriptorSchema = z.strictObject({
   kind: z.literal("app"),
   offset,
   secure_version: uint32,
@@ -157,7 +157,7 @@ const espAppDescriptorSchema = z.strictObject({
 });
 
 /** `esp_bootloader_desc_t` fields, as ESP-IDF names them. */
-const espBootloaderDescriptorSchema = z.strictObject({
+export const espBootloaderDescriptorSchema = z.strictObject({
   kind: z.literal("bootloader"),
   offset,
   secure_version: uint8,
@@ -334,7 +334,7 @@ export const espFlashPartitionDeclaration = (
 });
 
 /** ESP image facts for a region of a dump; offsets are relative to the region. */
-const espFlashImageFactsSchema = z.strictObject({
+export const espFlashImageFactsSchema = z.strictObject({
   /** An ESP image, erased flash, or bytes that are not one, such as ciphertext. */
   status: z.enum(["esp-image", "erased", "unrecognized"]),
   image: espImageMetadataSchema.nullable(),
@@ -372,9 +372,13 @@ export const espFlashImageMetadataSchema = z.strictObject({
   }),
   /** From the bootloader's `chip_id`; null without a located bootloader. */
   chip: espChipFactsSchema.nullable(),
-  /** The image at its chip's ROM offset, through the partition table. */
+  /**
+   * The image at its chip's ROM offset, through the partition table; `path`
+   * is its entry.
+   */
   bootloader: z
     .strictObject({
+      path: z.string(),
       flash_address: uint32,
       region_size: offset,
       facts: espFlashImageFactsSchema,
@@ -402,9 +406,13 @@ export const espFlashImageMetadataSchema = z.strictObject({
    * no entry. A partition past the dump's end is an entry with no bytes.
    */
   partitions_outside_dump: z.array(espFlashPartitionMetadataSchema),
-  /** ESP image facts for each app partition the dump holds. */
+  /** ESP image facts for each app partition the dump holds, by its entry. */
   apps: z.array(
-    z.strictObject({ partition_index: uint8, facts: espFlashImageFactsSchema }),
+    z.strictObject({
+      path: z.string(),
+      partition_index: uint8,
+      facts: espFlashImageFactsSchema,
+    }),
   ),
   /** The otadata partition the bootloader uses: the last one declared. */
   otadata: z
