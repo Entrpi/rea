@@ -30,6 +30,7 @@ it.each(["full", "compact"] as const)(
     const { call } = await connectLocalToolsMcp({
       REA_MCP_TOOL_FAMILIES: "session,artifact,application",
       REA_MCP_INPUT_SCHEMA_PROFILE: profile,
+      REA_MCP_OUTPUT_SCHEMA_PROFILE: profile,
     });
     let outputRoot: string | undefined;
     try {
