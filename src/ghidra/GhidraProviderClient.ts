@@ -203,6 +203,9 @@ export const createGhidraProviderClient = (input: {
       }),
     );
   const call0 = isGhidraXtensaCall0Target(target);
+  // The call0 report binds in both directions, so every Xtensa session checks it.
+  const xtensa =
+    target.kind === "executable" && target.architecture === "xtensa";
   if (
     call0 !==
     (committedProfile.parameters.xtensa_call0_prototype ===
@@ -801,7 +804,7 @@ export const createGhidraProviderClient = (input: {
         seeds !== undefined ||
         disabledAnalyzers !== undefined ||
         softFloat ||
-        call0
+        xtensa
       ) {
         const started = await startSession(operation, options);
         if (!started.ok) return started;

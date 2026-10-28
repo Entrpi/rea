@@ -548,7 +548,7 @@ const registerCall0Cases = () => {
       reason: "a call0 prototype reported by a windowed session",
       value: target(),
       reported: CALL0_REPORT,
-      operation: "health",
+      operation: "list_procedures",
     },
   ] as const)("rejects $reason", async ({ value, reported, operation }) => {
     const { counts, client } = await call0Session(value, reported);

@@ -53,8 +53,9 @@ export const XTENSA_C_FIXTURE_VALUES = {
 /**
  * Source-owned call0 code in ESP8266 IRAM. GNU as `--abi-call0` and objdump
  * from Espressif's esp-14.2.0_20251107 toolchain produced and decoded these
- * bytes once. The caller keeps its argument plus 5 in callee-saved a12
- * across call0:
+ * bytes once. Each caller keeps its argument plus 5 in callee-saved a12
+ * across a call: to the leaf, and through a register to 0x40002000, an
+ * address outside the image, as ESP8266 code calls mask ROM:
  *
  *   0x40100000 78563412  rea_xtensa_call0_literal: .word 0x12345678
  *   0x40100004 12c1f0    rea_xtensa_call0_entry:   addi    a1, a1, -16
@@ -71,9 +72,22 @@ export const XTENSA_C_FIXTURE_VALUES = {
  *   0x4010001e 0000                                (alignment)
  *   0x40100020 7b22      rea_xtensa_call0_leaf:    addi.n  a2, a2, 7
  *   0x40100022 0df0                                ret.n
+ *   0x40100024 00200040  rea_xtensa_call0_rom_address: .word 0x40002000
+ *   0x40100028 12c1f0    rea_xtensa_call0_rom_caller:  addi    a1, a1, -16
+ *   0x4010002b 0901                                    s32i.n  a0, a1, 0
+ *   0x4010002d c911                                    s32i.n  a12, a1, 4
+ *   0x4010002f c2c205                                  addi    a12, a2, 5
+ *   0x40100032 31fcff                                  l32r    a3, 0x40100024
+ *   0x40100035 c00300                                  callx0  a3
+ *   0x40100038 ca22                                    add.n   a2, a2, a12
+ *   0x4010003a c811                                    l32i.n  a12, a1, 4
+ *   0x4010003c 0801                                    l32i.n  a0, a1, 0
+ *   0x4010003e 12c110                                  addi    a1, a1, 16
+ *   0x40100041 0df0                                    ret.n
  */
 export const XTENSA_CALL0_FIXTURE_TEXT = Buffer.from(
-  "7856341212c1f00901c9115bc221fcffc50000ca22c811080112c1100df000007b220df0",
+  "7856341212c1f00901c9115bc221fcffc50000ca22c811080112c1100df000007b220df0" +
+    "0020004012c1f00901c911c2c20531fcffc00300ca22c811080112c1100df0",
   "hex",
 );
 const CALL0_BASE = 0x40100000;
@@ -81,18 +95,33 @@ export const XTENSA_CALL0_FIXTURE_SYMBOLS = {
   rea_xtensa_call0_literal: { address: CALL0_BASE, size: 4, type: "OBJECT" },
   rea_xtensa_call0_entry: { address: CALL0_BASE + 4, size: 26, type: "FUNC" },
   rea_xtensa_call0_leaf: { address: CALL0_BASE + 0x20, size: 4, type: "FUNC" },
+  rea_xtensa_call0_rom_address: {
+    address: CALL0_BASE + 0x24,
+    size: 4,
+    type: "OBJECT",
+  },
+  rea_xtensa_call0_rom_caller: {
+    address: CALL0_BASE + 0x28,
+    size: 27,
+    type: "FUNC",
+  },
 };
 /** Instruction addresses the lane inspects, from the annotation above. */
 export const XTENSA_CALL0_FIXTURE_INSTRUCTIONS = {
   l32r: CALL0_BASE + 0xd,
   call0: CALL0_BASE + 0x10,
   ret: CALL0_BASE + 0x1c,
+  callx0: CALL0_BASE + 0x35,
 };
-/** The literal and addend of the windowed fixture, and the kept addend. */
+/**
+ * The literal and addend of the windowed fixture, the kept addend, and the
+ * mask-ROM address the second caller calls.
+ */
 export const XTENSA_CALL0_FIXTURE_VALUES = {
   literal: XTENSA_FIXTURE_LITERAL,
   addend: XTENSA_FIXTURE_ADDEND,
   kept: 5,
+  rom: 0x40002000,
 };
 /** What `../c/xtensa-call0.c` keeps, passes and adds. */
 export const XTENSA_CALL0_C_FIXTURE_VALUES = {

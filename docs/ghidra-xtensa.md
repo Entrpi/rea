@@ -67,12 +67,12 @@ specification, so the import and the post-import check still commit to it.
 ## Call0 images
 
 Under the call0 ABI, a callee preserves `a12`-`a15` and may change `a8`-`a11`.
-Ghidra 12.1.4's default Xtensa prototype, `__stdcall`, models windowed calls
-instead. Its preserved registers are `a0`, `a1`, `a8`-`a11` and the window
-temporaries, so values that call0 code keeps in `a12`-`a15` across a call have
-unknown effect there. `xtensa.cspec` defines the call0 model as `__call0`, but a
-program cannot make it the default: the Decompiler option "Prototype Evaluation"
-selects only the model of the function being decompiled
+Ghidra 12.1.4's default Xtensa prototype, `__stdcall`, lists `a0`, `a1`,
+`a8`-`a11` and `t2`-`t7` as preserved instead, matching its window fixups, which
+save registers in `t2`-`t7`. `xtensa.cspec` defines the call0 model as
+`__call0`, with the same parameter and return registers, but a program cannot
+make it the default: the Decompiler option "Prototype Evaluation" selects only
+the model of the function being decompiled
 (`ProgramCompilerSpec.getPrototypeEvaluationModel`).
 
 For an image whose `.xtensa.info` declares `ABI=1`, REA therefore runs a script
@@ -83,18 +83,24 @@ profile commits `xtensa_call0_prototype: call0-prototype-v1`, and the bridge
 reports how many functions and function definitions use `__call0`; REA delivers
 that count as a limitation. A session that does not report the prototype for a
 call0 image, or reports it for a windowed image, fails before any analysis
-result is returned. A caller-supplied existing Ghidra project cannot be opened
-for a call0 image, because REA cannot apply the prototype to it.
+result is returned. As for windowed images, the pinned language refuses a
+caller-supplied existing Ghidra project.
 
 Measured by REA: when a call0 caller keeps a value in `a12` across a call,
 Ghidra 12.1.4 with the default prototype computes it into a variable before the
 call. With `__call0` it folds the value into the expression that uses it, for
-example `return iVar1 + param_1 + 5;` for the lane's fixture.
+example `return iVar1 + param_1 + 5;` for the lane's fixture. Both forms compute
+the same value; the fold shows that the decompiler treats `a12` as preserved.
 
-Derived from the Ghidra 12.1.4 sources, not reproduced by REA: a call to an
-address with no function in the program, such as an ESP8266 mask-ROM routine
-outside the image, keeps the default prototype. Ghidra has no program option for
-the model of a called function it cannot resolve.
+Measured by REA: a call to an address with no function in the program keeps the
+default prototype, even after REA assigns `__call0`. The lane's fixture calls
+the mask-ROM address `0x40002000` through `callx0`, as ESP8266 code calls ROM
+routines, and the value it keeps in `a12` is computed before that call. Derived
+from the Ghidra 12.1.4 sources, not reproduced by REA: the same applies to a call
+through an untyped function pointer, because Ghidra has no program option for the
+model of a call it cannot resolve to a function or function definition.
+Auto-analysis also runs with the default prototype, before REA assigns
+`__call0`.
 
 ## Evidence
 
@@ -176,12 +182,15 @@ executes target code. It checks:
 
 A second annotated fixture holds call0 code at ESP8266 IRAM addresses and
 declares `ABI=1`. The lane checks its `.xtensa.info` ABI against `readelf`, the
-call0 lane and committed prototype in every result, the reported prototype count,
-`l32r`, `call0` and `ret.n` decoding, and the `__call0` calling convention that
-`analyze_function` reports. In decompiled code the caller must keep its `a12`
-value across `call0` and add it to the callee's result. The same bytes declared
-`ABI=0` are the control: with the default prototype, decompiled code must compute
-that value before the call.
+call0 lane and committed prototype in every result and in a saved and reopened
+snapshot, the reported prototype count, `l32r`, `call0`, `callx0` and `ret.n`
+decoding, and the `__call0` calling convention that `analyze_function` reports.
+In decompiled code the first caller must keep its `a12` value across `call0` to
+the leaf and add it to the callee's result. The second caller makes the same
+call through `callx0` to the mask-ROM address, where the program has no
+function, and its `a12` value must still be computed before the call. The same
+bytes declared `ABI=0` are the control: with the default prototype, both callers
+must compute that value before the call.
 
 With `REA_XTENSA_CC` set to an Espressif compiler such as
 `xtensa-esp32-elf-gcc`, the lane also builds `tests/conformance/c/xtensa.c`. It
@@ -193,6 +202,12 @@ ESP8266 compiler such as `xtensa-lx106-elf-gcc`. For each build the lane checks
 that `readelf` and REA read `ABI=1`, that the caller passes `value ^ 0x5a` and 5
 and adds `value ^ 0x5a` to the result without a copy made before the call, and
 that `analyze_function` reports `__call0`.
+
+The call0 lane ran on Linux x64 with Ghidra 12.1.4, JDK 21 and GNU readelf 2.44,
+with `xtensa-esp32-elf-gcc` 14.2.0 (crosstool-NG esp-14.2.0_20251107) and
+Debian's `xtensa-lx106-elf-gcc` 13.3.0 with binutils 2.44. These freestanding
+fixtures are the only call0 code it examines: no ESP8266 SDK or Arduino build
+and no firmware from a device.
 
 REA also measured Ghidra 12.1.4 on ESP-IDF 5.5.2 `hello_world` builds (Espressif
 GCC 14.2.0, default `-Og`), with Ghidra's DWARF analyzer disabled so that

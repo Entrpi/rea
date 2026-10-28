@@ -339,6 +339,10 @@ export function assertXtensaCall0FixtureInstructions(instructions, addresses) {
     [BigInt(addresses.leaf)],
   );
   assert.equal(at("ret").flow.kind, "return");
+  assert.equal(at("callx0").status, "decoded", "callx0 was not decoded");
+  assert.equal(at("callx0").mnemonic?.toLowerCase(), "callx0");
+  assert.equal(at("callx0").bytes, "c00300");
+  assert.equal(at("callx0").flow.kind, "call");
   assert.ok(
     at("l32r").references.some(
       (reference) =>
@@ -416,27 +420,19 @@ const returned = (statements, code, name) => {
 };
 
 /**
- * How decompiled code carries the value the call0 caller keeps in
- * callee-saved a12 across call0, its parameter plus `values.kept`:
- * "folded" when the return adds the callee's result, the parameter and the
- * constant, which needs a12 to survive the call; "before-call" when a
- * statement first computes the sum into a variable, as Ghidra's windowed
- * default prototype, which does not preserve a12, leaves it.
+ * How decompiled code carries a value that `caller` keeps in callee-saved
+ * a12 across its call, its parameter plus `kept`: "folded" when the return
+ * adds the call's result, the parameter and the constant, which needs a12 to
+ * survive the call; "before-call" when a statement first computes the sum
+ * into a variable, as Ghidra does when the call's prototype does not
+ * preserve a12.
  */
-export function xtensaCall0KeptValue(entry, values) {
-  const name = "rea_xtensa_call0_entry";
-  const call = singleCall(entry, name, "rea_xtensa_call0_leaf");
-  assert.deepEqual(
-    call.args,
-    [BigInt(values.literal)],
-    `${name} must pass ${display(BigInt(values.literal))} to rea_xtensa_call0_leaf: ${entry}`,
-  );
+const keptValue = (code, caller, call, kept) => {
   const [parameter] = call.parameters;
   const before = call.statements
     .slice(0, call.index)
     .filter((statement) => !isDeclaration(statement));
-  const sum = chain(returned(call.statements, entry, name), "+");
-  const kept = BigInt(values.kept);
+  const sum = chain(returned(call.statements, code, caller), "+");
   if (before.length === 0 && sameOperands(sum, [call.result, parameter, kept]))
     return "folded";
   const assignment = before.length === 1 ? ASSIGNMENT.exec(before[0]) : null;
@@ -447,8 +443,52 @@ export function xtensaCall0KeptValue(entry, values) {
   )
     return "before-call";
   throw new assert.AssertionError({
-    message: `${name} must return the rea_xtensa_call0_leaf result plus its argument plus ${values.kept}: ${entry}`,
+    message: `${caller} must return its call's result plus its argument plus ${String(kept)}: ${code}`,
   });
+};
+
+/** How the call0 caller carries its a12 value across call0 to the leaf. */
+export function xtensaCall0KeptValue(entry, values) {
+  const name = "rea_xtensa_call0_entry";
+  const call = singleCall(entry, name, "rea_xtensa_call0_leaf");
+  assert.deepEqual(
+    call.args,
+    [BigInt(values.literal)],
+    `${name} must pass ${display(BigInt(values.literal))} to rea_xtensa_call0_leaf: ${entry}`,
+  );
+  return keptValue(entry, name, call, BigInt(values.kept));
+}
+
+/**
+ * How the second caller carries its a12 value across callx0 to the mask-ROM
+ * address, where the program has no function. Ghidra prints the call through
+ * the address, a label at it such as `SUB_40002000`, or the literal, and
+ * assigns the result.
+ */
+export function xtensaCall0RomKeptValue(code, values) {
+  const name = "rea_xtensa_call0_rom_caller";
+  const { parameters, statements } = decompiledFunction(code, name);
+  const target = new RegExp(
+    `(?:(?<![\\da-f])${values.rom.toString(16)}(?![\\da-f])|\\brea_xtensa_call0_rom_address\\b)[^;]*\\)\\s*\\(`,
+    "iu",
+  );
+  const indices = statements.flatMap((statement, index) =>
+    target.test(statement) ? [index] : [],
+  );
+  assert.equal(
+    indices.length,
+    1,
+    `${name} must call ${display(BigInt(values.rom))} once: ${code}`,
+  );
+  const [index] = indices;
+  const assignment = ASSIGNMENT.exec(statements[index]);
+  assert.ok(assignment, `${name} must assign the call's result: ${code}`);
+  return keptValue(
+    code,
+    name,
+    { parameters, statements, index, result: assignment[1] },
+    BigInt(values.kept),
+  );
 }
 
 /**

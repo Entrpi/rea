@@ -13,6 +13,7 @@ import {
   assertXtensaFixturePseudocode,
   parseXtensaReadelf,
   xtensaCall0KeptValue,
+  xtensaCall0RomKeptValue,
 } from "./xtensa-checks.mjs";
 import {
   mutateXtensaFixture,
@@ -330,7 +331,13 @@ const call0Decoded = {
     kind: "return",
     direct_destinations: [],
   }),
+  callx0: instruction("callx0", "c00300", {
+    kind: "call",
+    direct_destinations: [],
+  }),
 };
+const ROM_CALLER = (body: string) =>
+  `int __call0 rea_xtensa_call0_rom_caller(int param_1)\n\n{\n  int iVar1;\n  \n  ${body}\n}\n`;
 
 describe("Xtensa call0 lane fixture and dataflow", () => {
   it("writes a call0 fixture REA admits, which the lane can declare windowed", async () => {
@@ -398,7 +405,7 @@ describe("Xtensa call0 lane fixture and dataflow", () => {
     {
       name: "a lost a12 value",
       entry: CALL0_ENTRY.replace("+ param_1 + 5", "+ unaff_a12"),
-      error: /plus its argument plus 5/u,
+      error: /plus its argument plus 5:/u,
     },
     {
       name: "the literal not passed",
@@ -409,6 +416,54 @@ describe("Xtensa call0 lane fixture and dataflow", () => {
     expect(() =>
       xtensaCall0KeptValue(entry, XTENSA_CALL0_FIXTURE_VALUES),
     ).toThrow(error);
+  });
+
+  it("classifies the mask-ROM call, which has no function and keeps the default", () => {
+    // Ghidra 12.1.4 decompiled the fixture's ROM caller this way with `__call0`.
+    expect(
+      xtensaCall0RomKeptValue(
+        ROM_CALLER(
+          "param_1 = param_1 + 5;\n  iVar1 = (*(code *)&SUB_40002000)();\n  return iVar1 + param_1;",
+        ),
+        XTENSA_CALL0_FIXTURE_VALUES,
+      ),
+    ).toBe("before-call");
+    expect(
+      xtensaCall0RomKeptValue(
+        ROM_CALLER(
+          "param_1 = param_1 + 5;\n  iVar1 = (*(code *)0x40002000)();\n  return iVar1 + param_1;",
+        ),
+        XTENSA_CALL0_FIXTURE_VALUES,
+      ),
+    ).toBe("before-call");
+    expect(() =>
+      xtensaCall0RomKeptValue(
+        ROM_CALLER(
+          "param_1 = param_1 + 5;\n  iVar1 = (*(code *)0x140002000)();\n  return iVar1 + param_1;",
+        ),
+        XTENSA_CALL0_FIXTURE_VALUES,
+      ),
+    ).toThrow(/must call 0x40002000 once/u);
+    expect(
+      xtensaCall0RomKeptValue(
+        ROM_CALLER(
+          "iVar1 = (*(code *)rea_xtensa_call0_rom_address)();\n  return iVar1 + param_1 + 5;",
+        ),
+        XTENSA_CALL0_FIXTURE_VALUES,
+      ),
+    ).toBe("folded");
+    expect(() =>
+      xtensaCall0RomKeptValue(
+        ROM_CALLER("iVar1 = (*(code *)0x40002000)();\n  return iVar1;"),
+        XTENSA_CALL0_FIXTURE_VALUES,
+      ),
+    ).toThrow(/plus its argument plus 5:/u);
+    expect(() =>
+      xtensaCall0RomKeptValue(
+        ROM_CALLER("return param_1 + 5;"),
+        XTENSA_CALL0_FIXTURE_VALUES,
+      ),
+    ).toThrow(/must call 0x40002000 once/u);
   });
 
   it("accepts the compiled call0 fixture and refuses its windowed-default spill", () => {

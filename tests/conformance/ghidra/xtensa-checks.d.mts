@@ -30,9 +30,13 @@ export function assertXtensaCFixturePseudocode(
   values: { global: string; factor: number; constant: number },
 ): void;
 export function assertXtensaCall0FixtureInstructions(
-  instructions: Record<"l32r" | "call0" | "ret", unknown>,
+  instructions: Record<"l32r" | "call0" | "ret" | "callx0", unknown>,
   addresses: { leaf: string; literal: string },
 ): void;
+export function xtensaCall0RomKeptValue(
+  code: string,
+  values: { rom: number; kept: number },
+): "folded" | "before-call";
 export function xtensaCall0KeptValue(
   entry: string,
   values: { literal: number; kept: number },

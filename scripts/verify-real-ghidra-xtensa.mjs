@@ -32,6 +32,7 @@ import {
   assertXtensaFixturePseudocode,
   inspectXtensaReadelf,
   xtensaCall0KeptValue,
+  xtensaCall0RomKeptValue,
   XTENSA_COMPILER_SPEC,
   XTENSA_LANGUAGE,
 } from "../tests/conformance/ghidra/xtensa-checks.mjs";
@@ -421,7 +422,11 @@ try {
   const call0Symbol = (name) => hex(XTENSA_CALL0_FIXTURE_SYMBOLS[name].address);
   await open(call0Fixture.path, call0Fixture.sha256, "call0");
   const call0Inventory = await evidenceOf("list_procedures");
-  for (const name of ["rea_xtensa_call0_entry", "rea_xtensa_call0_leaf"])
+  for (const name of [
+    "rea_xtensa_call0_entry",
+    "rea_xtensa_call0_leaf",
+    "rea_xtensa_call0_rom_caller",
+  ])
     assert.ok(
       call0Inventory.normalized_result.some(
         (procedure) =>
@@ -430,6 +435,14 @@ try {
       ),
       `${name} missing from Ghidra inventory`,
     );
+  // The mask-ROM address lies outside the image, so no function is there.
+  assert.ok(
+    call0Inventory.normalized_result.every(
+      (procedure) =>
+        BigInt(procedure.address) !== BigInt(XTENSA_CALL0_FIXTURE_VALUES.rom),
+    ),
+    "Ghidra reported a function at the mask-ROM address",
+  );
   // The bridge reports the prototype outcome; the session delivers it.
   const outcome =
     /^Call0 prototype outcome: (\d+) functions and (\d+) function definitions use __call0\.$/u;
@@ -478,6 +491,34 @@ try {
   );
   assert.equal(call0Dossier.pseudocode, call0Code.rea_xtensa_call0_entry);
   assert.equal(call0Dossier.native_api?.calling_convention, "__call0");
+  // A call to an address with no function keeps Ghidra's default prototype.
+  const romCode = await call("procedure_pseudo_code", {
+    procedure: call0Symbol("rea_xtensa_call0_rom_caller"),
+  });
+  assert.equal(
+    xtensaCall0RomKeptValue(romCode, XTENSA_CALL0_FIXTURE_VALUES),
+    "before-call",
+    `the call with no function now keeps a12 under __call0: ${romCode}`,
+  );
+  const call0SnapshotPath = join(workspace, "xtensa-call0.snapshot.json");
+  const call0Saved = await call("close_binary", {
+    snapshot_path: call0SnapshotPath,
+  });
+  assert.ok(call0Saved.evidence_records > 0);
+  const call0Snapshot = parseAnalysisSnapshot(
+    JSON.parse(await readFile(call0SnapshotPath, "utf8")),
+  );
+  assert.equal(call0Snapshot.target.sha256, call0Fixture.sha256);
+  assertProfile(call0Snapshot.binding.analysis_profile, "call0");
+  for (const record of call0Snapshot.evidence_bundle.records)
+    assertEvidence(parseEvidence(record), call0Fixture.sha256, "call0");
+  await open(call0Fixture.path, call0Fixture.sha256, "call0", {
+    snapshot_path: call0SnapshotPath,
+  });
+  assert.deepEqual(
+    await call("list_procedures"),
+    call0Inventory.normalized_result,
+  );
   await call("close_binary");
   const call0Cli = parseEvidence(
     JSON.parse(
@@ -518,6 +559,13 @@ try {
     "before-call",
     `the windowed default prototype no longer differs: ${controlCode}`,
   );
+  const controlRomCode = await call("procedure_pseudo_code", {
+    procedure: call0Symbol("rea_xtensa_call0_rom_caller"),
+  });
+  assert.equal(
+    xtensaCall0RomKeptValue(controlRomCode, XTENSA_CALL0_FIXTURE_VALUES),
+    "before-call",
+  );
   await call("close_binary");
   assert.equal(
     createHash("sha256")
@@ -533,13 +581,16 @@ try {
     checks: [
       "readelf header, symbols and Xtensa_Info ABI=1",
       "call0 lane and committed call0 prototype in every result",
-      "l32r, call0 and ret.n decoding and the call0 target",
+      "l32r, call0, callx0 and ret.n decoding and the call0 target",
       "decompiled caller keeps its a12 value across call0 and adds it to the callee result",
       "analyze_function reports the __call0 calling convention",
+      "a callx0 to the mask-ROM address, where no function exists, still computes the a12 value before the call",
+      "snapshot save and reopen with the call0 profile",
       "CLI/MCP parity",
       "the same bytes declared windowed compute the a12 value before the call",
     ],
     entry_pseudocode: call0Code.rea_xtensa_call0_entry,
+    rom_caller_pseudocode: romCode,
     declared_windowed_pseudocode: controlCode,
     original_unchanged: true,
   });

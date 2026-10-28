@@ -18,17 +18,20 @@ export const XTENSA_CALL0_FIXTURE_TEXT: Buffer;
 export const XTENSA_CALL0_FIXTURE_SYMBOLS: Record<
   | "rea_xtensa_call0_literal"
   | "rea_xtensa_call0_entry"
-  | "rea_xtensa_call0_leaf",
+  | "rea_xtensa_call0_leaf"
+  | "rea_xtensa_call0_rom_address"
+  | "rea_xtensa_call0_rom_caller",
   { address: number; size: number; type: "OBJECT" | "FUNC" }
 >;
 export const XTENSA_CALL0_FIXTURE_INSTRUCTIONS: Record<
-  "l32r" | "call0" | "ret",
+  "l32r" | "call0" | "ret" | "callx0",
   number
 >;
 export const XTENSA_CALL0_FIXTURE_VALUES: {
   literal: number;
   addend: number;
   kept: number;
+  rom: number;
 };
 export const XTENSA_CALL0_C_FIXTURE_VALUES: {
   mask: number;

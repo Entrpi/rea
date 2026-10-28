@@ -301,8 +301,10 @@ unknown rather than false.
 ESP32, ESP32-S2 and ESP32-S3 ELF builds (`EM_XTENSA`) open only with Ghidra:
 little-endian ELF32 `ET_EXEC` whose `.xtensa.info` declares the windowed or call0
 ABI. For call0 builds such as ESP8266, REA assigns Ghidra's `__call0` prototype
-to every function after analysis; calls to addresses outside the image, such as
-mask ROM, keep Ghidra's windowed default. On ESP32-S3, Ghidra does not decode
+to every function, external function and function definition after analysis. A
+call to an address where Ghidra has no function, such as mask ROM outside the
+image, or through an untyped function pointer, keeps Ghidra's default prototype,
+so check values kept across such calls against the assembly. On ESP32-S3, Ghidra does not decode
 SALT/SALTU, so calls after them in a function are missing; check the assembly
 when a function looks truncated. See the [Xtensa guide](https://github.com/morluto/rea/blob/main/docs/ghidra-xtensa.md).
 

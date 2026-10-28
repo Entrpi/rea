@@ -106,7 +106,7 @@ export const ghidraXtensaCall0Limitations = (
 ): readonly string[] =>
   expected
     ? [
-        "Call0 ABI: Ghidra 12.1.4's default Xtensa prototype models windowed calls, which preserve a8-a11 across a call. After analysis REA assigns Ghidra's `__call0` prototype, which preserves a12-a15, to every function, external function and function definition, so calls to them have call0 register effects.",
+        "Call0 ABI: Ghidra 12.1.4's default Xtensa prototype lists a8-a11, not a12-a15, as preserved across a call. After analysis REA assigns Ghidra's `__call0` prototype, which preserves a12-a15, to every function, external function and function definition, so calls to them have call0 register effects.",
         ...(report === undefined
           ? []
           : [
@@ -161,9 +161,9 @@ export const ghidraXtensaLimitations = (
       "Measured by REA: Ghidra 12.1.4 does not decode SALT/SALTU, which ESP32-S3 builds use, so disassembly, calls and parameters after them are missing in that function. Reported upstream or derived from Ghidra 12.1.4 sources, not reproduced by REA: decompiled output approximates register-window rotation; FLIX bundles and ESP32-S3 `ee.*` vector instructions are not decoded; zero-overhead loops are mis-modeled.",
     ];
   return [
-    "REA verifies this lane against Ghidra 12.1.4 with source-owned call0 fixtures (call0, ret.n, l32r, a value kept in a12 across a call). Decompiled code for other images is not verified function by function; check call targets and arguments against the assembly when they matter.",
+    "REA verifies this lane against Ghidra 12.1.4 with source-owned call0 fixtures (call0, callx0, ret.n, l32r, a value kept in a12 across a call) and call0 builds from xtensa-lx106-elf-gcc 13.3.0 and xtensa-esp32-elf-gcc -mabi=call0. Decompiled code for other images is not verified function by function; check call targets and arguments against the assembly when they matter.",
     "REA pins Ghidra's generic `Xtensa:LE:32:default` language with the `default` compiler specification. The language does not identify the ESP8266 or another core configuration, or the producing compiler.",
-    "Derived from Ghidra 12.1.4 sources, not reproduced by REA: a call to an address with no function in the program, such as a mask-ROM routine outside the image, keeps the windowed default prototype, because Ghidra has no program option for the model of a called function it cannot resolve.",
-    "Measured by REA: Ghidra 12.1.4 does not decode SALT/SALTU, so disassembly, calls and parameters after them are missing in that function. Reported upstream or derived from Ghidra 12.1.4 sources, not reproduced by REA: FLIX bundles are not decoded; zero-overhead loops are mis-modeled.",
+    "Measured by REA: a call to an address with no function in the program, such as an ESP8266 mask-ROM routine outside the image, keeps Ghidra's default prototype: a value kept in a12 across it is computed before the call. Derived from Ghidra 12.1.4 sources, not reproduced by REA: the default prototype does not preserve a12-a15 at such a call, the same applies to a call through an untyped function pointer, and auto-analysis ran with the default prototype before REA assigned `__call0`.",
+    "Measured by REA: Ghidra 12.1.4 does not decode SALT/SALTU, so disassembly, calls and parameters after them are missing in that function. Reported upstream or derived from Ghidra 12.1.4 sources, not reproduced by REA: FLIX bundles and ESP32-S3 `ee.*` vector instructions are not decoded; zero-overhead loops are mis-modeled.",
   ];
 };
