@@ -323,7 +323,7 @@ it("keeps the segments identity facts in a summary and pages its checks", async 
   const observations = nativeLoadImageObservationFixture();
   const report: NativeLoadImage = {
     status: "verified",
-    variant: "segments",
+    layout: "segments",
     version: 1,
     format: "raw-binary",
     target_sha256: "a".repeat(64),
@@ -371,7 +371,7 @@ it("keeps the segments identity facts in a summary and pages its checks", async 
     summary: {
       verification: {
         status: "verified",
-        variant: "segments",
+        layout: "segments",
         version: 1,
         segments: report.segments,
         entries: report.entries,

@@ -133,12 +133,13 @@ export const nativeRawLoadImageSchema = z.strictObject({
 });
 /**
  * Version 1 of a raw load that names a separate base, an architecture variant
- * or a Reset-derived entry. A load with its base at a caller-selected entry and
- * no variant keeps the raw-binary shape above, so its saved Evidence is unchanged.
+ * or a Reset-derived entry, told apart by `layout`. A load with its base at a
+ * caller-selected entry and no variant keeps the raw-binary shape above, so its
+ * saved Evidence is unchanged.
  */
 export const nativeSegmentsLoadImageSchema = z.strictObject({
   status: z.enum(["verified", "mismatch"]),
-  variant: z.literal("segments"),
+  layout: z.literal("segments"),
   version: z.literal(1),
   format: z.literal("raw-binary"),
   target_sha256: digest,

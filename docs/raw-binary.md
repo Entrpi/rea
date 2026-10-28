@@ -181,10 +181,10 @@ unchanged. Any other raw load:
 - commits `raw_load` (`version: 1`) to its analysis profile and snapshot target:
   the base, the variant, the vector table that Reset was read from, and the
   entry's address, instruction set, `role` and `basis`;
-- returns the `segments` load image (`version: 1`): one segment backed by the
-  whole file at the base, one entry with its `isa_mode`, `role` and `basis`,
-  and, when the basis is the vector table, `vector_table` with the table
-  address and the two words read from it.
+- returns the `segments` load image (`layout: "segments"`, `version: 1`): one
+  segment backed by the whole file at the base, one entry with its `isa_mode`,
+  `role` and `basis`, and, when the basis is the vector table, `vector_table`
+  with the table address and the two words read from it.
 
 An entry's `role` names its function: `entry` for an entry the caller named,
 `reset` for the Reset handler. Its `basis` records how REA chose it: `caller`

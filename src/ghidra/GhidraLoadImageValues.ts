@@ -491,7 +491,7 @@ export const attestGhidraRawBinaryLoadImage = (
     return ok(
       nativeLoadImageSchema.parse({
         status,
-        variant: "segments",
+        layout: "segments",
         version: 1,
         format: "raw-binary",
         target_sha256: target.sha256,

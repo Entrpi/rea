@@ -413,7 +413,7 @@ describe("raw-binary segments load image", () => {
       ok: true,
       value: {
         status: "verified",
-        variant: "segments",
+        layout: "segments",
         version: 1,
         format: "raw-binary",
         architecture: "arm",
@@ -515,7 +515,7 @@ describe("raw-binary segments load image", () => {
       ok: true,
       value: {
         status: "verified",
-        variant: "segments",
+        layout: "segments",
         architecture_variant: "armv7-m",
         language_id: "ARM:LE:32:Cortex",
         entries: [
