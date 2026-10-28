@@ -679,9 +679,10 @@ cannot be opened as raw-binary. See
 A whole-flash dump opens as `esp-flash-image`. `root_format_metadata` holds
 `partition_table` (its `method`: `default`, `caller` or a derived
 `scan`), `bootloader` and `apps` ESP image facts, the `otadata` records,
-`partitions_outside_dump`, and a `boot_selection` for every table whose
-`basis` names the bootloader's branch (`no-otadata` without otadata,
-`unknown` when a record is missing) with its `assumptions`;
+`partitions_outside_dump` and `boot_selection`. Every table has a
+`boot_selection`: its `basis` names the bootloader's branch (`no-otadata`
+without otadata, `none` when the bootloader rejects the table, `unknown`
+when a record is missing), and it lists its `assumptions`;
 `running_partition` is always `unknown`. Each image names its entry
 `path`. With `detail: "summary"` the root kind is `esp-flash-image-summary`
 and each image is a compact `summary` (chip, entry point, segment count,

@@ -171,10 +171,9 @@ name the Evidence that holds them.
 
 `erased` is the bootloader's view: with no image header at the start of the
 slot, it finds no app there. An erased slot can still hold data further in,
-such as a complete older app image that a previous partition layout placed
-there. When it does, its entry's `written_offset` and `written_end` say
-where, and a limitation says that the slot holds bytes the bootloader does
-not read; REA does not look for images in them.
+even a complete app image. When it does, its entry's `written_offset` and
+`written_end` say where, and a limitation says that the slot holds bytes the
+bootloader does not read; REA does not look for images in them.
 
 ### OTA data
 
@@ -328,9 +327,9 @@ and ESP-IDF v5.5.2's `gen_esp32part.py`, `otatool.py` and `parttool.py`,
 once with esptool v5.6.0 and once with 4.12.0. Its `gen_esp32part.py` is
 identical to v6.1's, and its otatool and parttool differ only in import style
 and esptool command spelling. All checks passed in both runs. With v5.6.0 and
-the build already cached, the run took 19.6 s elapsed, 14.7 s user CPU and
-5.1 s system CPU under `/usr/bin/time -l`; the largest single process peaked
-at a 256 MiB resident set, and the combined peak of all processes was not
+the build already cached, the run took 21.8 s elapsed, 15.9 s user CPU and
+5.7 s system CPU under `/usr/bin/time -l`; the largest single process peaked
+at a 258 MiB resident set, and the combined peak of all processes was not
 measured.
 
 The lane does not establish:
