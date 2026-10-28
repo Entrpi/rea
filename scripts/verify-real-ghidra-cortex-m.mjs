@@ -370,7 +370,8 @@ function sameMnemonic(ghidra, llvm) {
 async function verifyDecoding(fixture, address, digest) {
   const prefix = fixture.prefix ?? 0;
   const entry = address(0x40);
-  // Offsets the case expects Ghidra's analysis not to reach.
+  // Offsets the case expects Ghidra's analysis not to reach: in memory, with
+  // no listed instruction or data, which Ghidra reports as not-in-listing.
   const unreached = new Set(fixture.notDisassembled ?? []);
   // Collect every disagreement so one run reports them all.
   const disagreements = [];
@@ -383,7 +384,7 @@ async function verifyDecoding(fixture, address, digest) {
       )
     ).normalized_result;
     if (unreached.has(offset)) {
-      if (decoded.status !== "undecodable")
+      if (decoded.status !== "not-in-listing")
         disagreements.push({
           address: address(offset),
           llvm: mnemonic,
