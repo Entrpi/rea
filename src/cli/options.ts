@@ -13,9 +13,9 @@ import {
   type NativeLoadSelection,
 } from "../domain/rawBinary.js";
 import {
-  rawArchitectureVariantSchema,
-  type RawArchitectureVariant,
-} from "../domain/rawArchitectureVariant.js";
+  architectureVariantSchema,
+  type ArchitectureVariant,
+} from "../domain/architectureVariant.js";
 import { analysisProviderSelectorSchema } from "../domain/providerSelection.js";
 import type { AnalysisProviderSelector } from "../domain/providerSelection.js";
 import type { Logger } from "pino";
@@ -65,7 +65,7 @@ export const baseAddressSelectionOption = rawBinaryBaseAddressSchema
     "Address of raw file offset 0 (0xhex) for an --architecture-variant image, separate from --entry-point; defaults to it",
   );
 
-export const architectureVariantSelectionOption = rawArchitectureVariantSchema
+export const architectureVariantSelectionOption = architectureVariantSchema
   .optional()
   .describe(
     "ARM M-profile variant of a raw image, decoded in Thumb state; requires --architecture arm",
@@ -97,7 +97,7 @@ export interface NativeOpenCliFlags {
   readonly architecture?: BinaryArchitecture | undefined;
   readonly "entry-point"?: string | undefined;
   readonly "base-address"?: string | undefined;
-  readonly "architecture-variant"?: RawArchitectureVariant | undefined;
+  readonly "architecture-variant"?: ArchitectureVariant | undefined;
   readonly "vector-table-address"?: string | undefined;
 }
 

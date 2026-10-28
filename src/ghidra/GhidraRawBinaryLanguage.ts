@@ -1,7 +1,7 @@
 import type {
-  RawArchitectureVariant,
+  ArchitectureVariant,
   RawEntryIsaMode,
-} from "../domain/rawArchitectureVariant.js";
+} from "../domain/architectureVariant.js";
 import type { RawBinaryLoad } from "../domain/binaryTargetTypes.js";
 import {
   isLegacyRawLoad,
@@ -22,14 +22,14 @@ export interface GhidraRawBinaryLanguage {
  * `ARM:LE:32:v8-m`, which Ghidra 12.1.4's `ARM.ldefs` also lists for
  * `armv8.1-m.main`. Both languages share `ARMCortex.pspec`.
  */
-export const GHIDRA_RAW_VARIANT_LANGUAGES = {
+export const GHIDRA_VARIANT_LANGUAGES = {
   "armv6-m": "ARM:LE:32:Cortex",
   "armv7-m": "ARM:LE:32:Cortex",
   "armv7e-m": "ARM:LE:32:Cortex",
   "armv8-m.base": "ARM:LE:32:v8-m",
   "armv8-m.main": "ARM:LE:32:v8-m",
   "armv8.1-m.main": "ARM:LE:32:v8-m",
-} as const satisfies Record<RawArchitectureVariant, string>;
+} as const satisfies Record<ArchitectureVariant, string>;
 
 /**
  * Ghidra context register and value that select each entry instruction set,
@@ -57,8 +57,8 @@ export const GHIDRA_RAW_ENTRY_CONTEXT = {
  * 0 those labels would fall inside the image and over the code after the table.
  * Admission reads the vector table itself. Undefined keeps the language default.
  */
-export const ghidraRawProcessorLabels = (
-  variant: RawArchitectureVariant | undefined,
+export const ghidraVariantProcessorLabels = (
+  variant: ArchitectureVariant | undefined,
 ): "not-applied-v1" | undefined =>
   variant === undefined ? undefined : "not-applied-v1";
 
@@ -72,11 +72,11 @@ export const ghidraRawProcessorLabels = (
  */
 export const ghidraRawBinaryLanguage = (
   architecture: RawBinaryAdmission["architecture"],
-  variant?: RawArchitectureVariant,
+  variant?: ArchitectureVariant,
 ): GhidraRawBinaryLanguage => {
   if (variant !== undefined)
     return {
-      languageId: GHIDRA_RAW_VARIANT_LANGUAGES[variant],
+      languageId: GHIDRA_VARIANT_LANGUAGES[variant],
       compilerSpecId: "default",
       defaultAddressSpace: "ram",
     };

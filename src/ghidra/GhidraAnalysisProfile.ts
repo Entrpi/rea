@@ -34,7 +34,7 @@ import {
 import {
   GHIDRA_RAW_ENTRY_CONTEXT,
   ghidraRawBinaryLanguage,
-  ghidraRawProcessorLabels,
+  ghidraVariantProcessorLabels,
 } from "./GhidraRawBinaryLanguage.js";
 import { rawLoadIdentity } from "../domain/rawBinary.js";
 import {
@@ -236,7 +236,7 @@ export const resolveGhidraAnalysisProfile = async (
     );
     // A legacy-equivalent load commits exactly the parameters it always did.
     const identity = rawLoadIdentity(rawLoad);
-    const processorLabels = ghidraRawProcessorLabels(
+    const processorLabels = ghidraVariantProcessorLabels(
       rawLoad.architectureVariant,
     );
     return Promise.resolve(

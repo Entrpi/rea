@@ -6,14 +6,14 @@ import { attestGhidraRawBinaryLoadImage } from "./GhidraLoadImageValues.js";
 import { fixtureRawBinaryLoadImage } from "./GhidraRawBinaryLoadImage.fixture.js";
 import {
   GHIDRA_RAW_ENTRY_CONTEXT,
-  GHIDRA_RAW_VARIANT_LANGUAGES,
+  GHIDRA_VARIANT_LANGUAGES,
   ghidraRawBinaryLanguage,
   ghidraRawBinaryLimitations,
 } from "./GhidraRawBinaryLanguage.js";
 import {
-  RAW_ARCHITECTURE_VARIANT_NAMES,
-  RAW_ARCHITECTURE_VARIANTS,
-} from "../domain/rawArchitectureVariant.js";
+  ARCHITECTURE_VARIANT_NAMES,
+  ARCHITECTURE_VARIANTS,
+} from "../domain/architectureVariant.js";
 import type { RawBinaryLoad } from "../domain/binaryTargetTypes.js";
 import {
   admittedRawLoad,
@@ -54,16 +54,16 @@ describe("raw-binary Ghidra language binding", () => {
 });
 
 describe("raw-binary variant Ghidra binding", () => {
-  it.each(RAW_ARCHITECTURE_VARIANT_NAMES)(
+  it.each(ARCHITECTURE_VARIANT_NAMES)(
     "binds %s to its little-endian ARM decoder and Thumb entry context",
     (variant) => {
-      const row = RAW_ARCHITECTURE_VARIANTS[variant];
+      const row = ARCHITECTURE_VARIANTS[variant];
       expect(ghidraRawBinaryLanguage(row.architecture, variant)).toEqual({
-        languageId: GHIDRA_RAW_VARIANT_LANGUAGES[variant],
+        languageId: GHIDRA_VARIANT_LANGUAGES[variant],
         compilerSpecId: "default",
         defaultAddressSpace: "ram",
       });
-      expect(GHIDRA_RAW_VARIANT_LANGUAGES[variant]).toMatch(/^ARM:LE:32:/u);
+      expect(GHIDRA_VARIANT_LANGUAGES[variant]).toMatch(/^ARM:LE:32:/u);
       expect(GHIDRA_RAW_ENTRY_CONTEXT[row.isaMode]).toMatchObject({
         register: "TMode",
         value: "0x1",
@@ -74,7 +74,7 @@ describe("raw-binary variant Ghidra binding", () => {
     expect(ghidraRawBinaryLanguage("arm").languageId).toBe("ARM:LE:32:v7");
   });
   // Observed on real Ghidra 12.1.4; verify:ghidra:cortex-m checks it.
-  it.each(RAW_ARCHITECTURE_VARIANT_NAMES)(
+  it.each(ARCHITECTURE_VARIANT_NAMES)(
     "reports Ghidra's low-overhead-loop flow only for armv8.1-m.main: %s",
     (variant) => {
       const limitations = ghidraRawBinaryLimitations(

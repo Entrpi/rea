@@ -9,14 +9,14 @@ import type {
 import type { ExecutableFormatHint } from "./dosCom.js";
 import type { JsonValue } from "./jsonValue.js";
 import {
-  RAW_ARCHITECTURE_VARIANT_NAMES,
+  ARCHITECTURE_VARIANT_NAMES,
   RAW_ENTRY_BASES,
   RAW_ENTRY_ISA_MODES,
   RAW_ENTRY_ROLES,
-  rawArchitectureVariantRow,
-  rawArchitectureVariantSchema,
-  type RawArchitectureVariant,
-} from "./rawArchitectureVariant.js";
+  architectureVariantRow,
+  architectureVariantSchema,
+  type ArchitectureVariant,
+} from "./architectureVariant.js";
 import { err, ok, type Result } from "./result.js";
 
 /** Caller-visible CPU families admitted for headerless raw binaries. */
@@ -94,7 +94,7 @@ export interface NativeLoadSelection {
   readonly architecture?: BinaryArchitecture;
   readonly entryPoint?: string;
   readonly baseAddress?: string;
-  readonly architectureVariant?: RawArchitectureVariant;
+  readonly architectureVariant?: ArchitectureVariant;
   readonly vectorTableAddress?: string;
 }
 
@@ -160,7 +160,7 @@ export const rawEntryRoleAndBasis = (
 export const rawLoadIdentitySchema = z.strictObject({
   version: z.literal(1),
   base_address: rawBinaryBaseAddressSchema,
-  architecture_variant: rawArchitectureVariantSchema.exactOptional(),
+  architecture_variant: architectureVariantSchema.exactOptional(),
   vector_table_address: rawBinaryVectorTableAddressSchema.exactOptional(),
   entries: z
     .array(
@@ -260,10 +260,10 @@ export const admitRawBinary = (input: {
     return selectionRejected(
       "raw-binary format requires architecture (x86, x86_64, arm, arm64, 6502, or m68k)",
     );
-  const variant = rawArchitectureVariantRow(input.architectureVariant);
+  const variant = architectureVariantRow(input.architectureVariant);
   if (input.architectureVariant !== undefined && variant === undefined)
     return selectionRejected(
-      `architecture_variant must be one of ${RAW_ARCHITECTURE_VARIANT_NAMES.join(", ")}`,
+      `architecture_variant must be one of ${ARCHITECTURE_VARIANT_NAMES.join(", ")}`,
     );
   const issue = rawBinaryVariantSelectionIssue({
     ...input,
@@ -462,7 +462,7 @@ export const rawBinaryVariantSelectionIssue = (input: {
   readonly architectureVariant?: unknown;
   readonly vectorTableAddress?: unknown;
 }): LoadSelectionIssue | undefined => {
-  const variant = rawArchitectureVariantRow(input.architectureVariant);
+  const variant = architectureVariantRow(input.architectureVariant);
   if (variant !== undefined && variant.architecture !== input.architecture)
     return {
       field: "architecture_variant",

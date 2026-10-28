@@ -12,7 +12,7 @@ import {
   rawBinaryEntryPointSchema,
   rawBinaryVectorTableAddressSchema,
 } from "./rawBinary.js";
-import { rawArchitectureVariantSchema } from "./rawArchitectureVariant.js";
+import { architectureVariantSchema } from "./architectureVariant.js";
 import { ZIP_PACKAGE_FORMATS } from "./zipPackageFormat.js";
 
 const architectureSchema = z.enum(BINARY_ARCHITECTURES);
@@ -57,7 +57,7 @@ export const liveBinaryTargetSummaryVariants = [
       .describe(
         "Canonical address of raw file offset 0. Present when the load names a separate base or an architecture_variant.",
       ),
-    architecture_variant: rawArchitectureVariantSchema.exactOptional(),
+    architecture_variant: architectureVariantSchema.exactOptional(),
     vector_table_address: rawBinaryVectorTableAddressSchema
       .exactOptional()
       .describe(

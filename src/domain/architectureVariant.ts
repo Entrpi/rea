@@ -9,7 +9,7 @@ import { z } from "zod";
  * with bit 0 set, in word 1. Provider lanes map each row to a decoder; provider
  * language ids never enter this table. Tests, schemas and docs derive from it.
  */
-export const RAW_ARCHITECTURE_VARIANTS = {
+export const ARCHITECTURE_VARIANTS = {
   "armv6-m": {
     architecture: "arm",
     label: "ARMv6-M",
@@ -49,27 +49,25 @@ export const RAW_ARCHITECTURE_VARIANTS = {
   }
 >;
 
-export type RawArchitectureVariant = keyof typeof RAW_ARCHITECTURE_VARIANTS;
+export type ArchitectureVariant = keyof typeof ARCHITECTURE_VARIANTS;
 
 /** Variant names in table order. */
-export const RAW_ARCHITECTURE_VARIANT_NAMES = Object.keys(
-  RAW_ARCHITECTURE_VARIANTS,
-) as [RawArchitectureVariant, ...RawArchitectureVariant[]];
+export const ARCHITECTURE_VARIANT_NAMES = Object.keys(
+  ARCHITECTURE_VARIANTS,
+) as [ArchitectureVariant, ...ArchitectureVariant[]];
 
 /** Caller-named profile variant of a headerless image. */
-export const rawArchitectureVariantSchema = z.enum(
-  RAW_ARCHITECTURE_VARIANT_NAMES,
-);
+export const architectureVariantSchema = z.enum(ARCHITECTURE_VARIANT_NAMES);
 
 /** Instruction set selected for a variant's code. */
 export type RawEntryIsaMode =
-  (typeof RAW_ARCHITECTURE_VARIANTS)[RawArchitectureVariant]["isaMode"];
+  (typeof ARCHITECTURE_VARIANTS)[ArchitectureVariant]["isaMode"];
 
 /** The table row for a caller-named variant, or undefined for any other value. */
-export const rawArchitectureVariantRow = (name: unknown) => {
-  const parsed = rawArchitectureVariantSchema.safeParse(name);
+export const architectureVariantRow = (name: unknown) => {
+  const parsed = architectureVariantSchema.safeParse(name);
   return parsed.success
-    ? { name: parsed.data, ...RAW_ARCHITECTURE_VARIANTS[parsed.data] }
+    ? { name: parsed.data, ...ARCHITECTURE_VARIANTS[parsed.data] }
     : undefined;
 };
 

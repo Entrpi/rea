@@ -21,7 +21,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 import { parseAnalysisSnapshot } from "../dist/domain/analysisSnapshot.js";
 import { parseEvidence } from "../dist/domain/evidence.js";
-import { GHIDRA_RAW_VARIANT_LANGUAGES } from "../dist/ghidra/GhidraRawBinaryLanguage.js";
+import { GHIDRA_VARIANT_LANGUAGES } from "../dist/ghidra/GhidraRawBinaryLanguage.js";
 import {
   CORTEX_M0_SOURCE,
   CORTEX_M55_SOURCE,
@@ -262,10 +262,7 @@ async function verifyCase(fixture) {
   assert.equal(loaded.status, "verified", JSON.stringify(image));
   assert.equal(loaded.variant, "segments");
   assert.equal(loaded.version, 1);
-  assert.equal(
-    loaded.language_id,
-    GHIDRA_RAW_VARIANT_LANGUAGES[fixture.variant],
-  );
+  assert.equal(loaded.language_id, GHIDRA_VARIANT_LANGUAGES[fixture.variant]);
   assert.deepEqual(loaded.segments, [
     {
       name: "image",

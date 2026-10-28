@@ -233,8 +233,8 @@ This is decision D1 of the embedded-target work, raised in
   separate base for every raw family is a later, additive widening; it needs
   base-separated cases in the 6502 and m68k lanes and on Windows Ghidra P0,
   which admits raw 6502.
-- **Owner and consumers.** `src/domain/rawArchitectureVariant.ts` owns the
-  vocabulary; `GHIDRA_RAW_VARIANT_LANGUAGES` owns the Ghidra mapping, which
+- **Owner and consumers.** `src/domain/architectureVariant.ts` owns the
+  vocabulary; `GHIDRA_VARIANT_LANGUAGES` owns the Ghidra mapping, which
   follows the GNU architecture names in Ghidra 12.1.4's `ARM.ldefs`; raw
   admission owns the load, its legacy equivalence, the entry's role and basis,
   and its `raw_load` identity; the Ghidra profile owns the coordinate context

@@ -13,10 +13,10 @@ import {
   validateRawBinaryLength,
 } from "./rawBinary.js";
 import {
-  RAW_ARCHITECTURE_VARIANT_NAMES,
-  RAW_ARCHITECTURE_VARIANTS,
-  type RawArchitectureVariant,
-} from "./rawArchitectureVariant.js";
+  ARCHITECTURE_VARIANT_NAMES,
+  ARCHITECTURE_VARIANTS,
+  type ArchitectureVariant,
+} from "./architectureVariant.js";
 import { admittedRawLoad, vectorTableWords } from "./rawBinary.fixture.js";
 
 describe("headerless format hints", () => {
@@ -517,7 +517,7 @@ describe("raw-binary base address admission", () => {
 const vectorWords = vectorTableWords;
 
 const vectorTableRead = (
-  variant: RawArchitectureVariant,
+  variant: ArchitectureVariant,
   selection: {
     readonly baseAddress: string;
     readonly vectorTableAddress?: string;
@@ -525,7 +525,7 @@ const vectorTableRead = (
   },
 ) => {
   const result = admitRawBinary({
-    architecture: RAW_ARCHITECTURE_VARIANTS[variant].architecture,
+    architecture: ARCHITECTURE_VARIANTS[variant].architecture,
     architectureVariant: variant,
     entryPoint: undefined,
     ...selection,
@@ -536,10 +536,10 @@ const vectorTableRead = (
   return result.value;
 };
 
-describe.each(RAW_ARCHITECTURE_VARIANT_NAMES)(
+describe.each(ARCHITECTURE_VARIANT_NAMES)(
   "raw-binary %s explicit entry admission",
   (variant) => {
-    const { architecture, isaMode } = RAW_ARCHITECTURE_VARIANTS[variant];
+    const { architecture, isaMode } = ARCHITECTURE_VARIANTS[variant];
 
     it("admits an even Thumb entry that generic ARM would refuse", () => {
       expect(
@@ -614,10 +614,10 @@ describe.each(RAW_ARCHITECTURE_VARIANT_NAMES)(
   },
 );
 
-describe.each(RAW_ARCHITECTURE_VARIANT_NAMES)(
+describe.each(ARCHITECTURE_VARIANT_NAMES)(
   "raw-binary %s vector-table admission",
   (variant) => {
-    const { architecture, isaMode } = RAW_ARCHITECTURE_VARIANTS[variant];
+    const { architecture, isaMode } = ARCHITECTURE_VARIANTS[variant];
     const derived = (selection: Parameters<typeof vectorTableRead>[1]) =>
       vectorTableRead(variant, selection);
 
@@ -743,7 +743,7 @@ describe("raw-binary variant pairing at admission", () => {
     ).toMatchObject({
       ok: false,
       error: {
-        reason: `architecture_variant must be one of ${RAW_ARCHITECTURE_VARIANT_NAMES.join(", ")}`,
+        reason: `architecture_variant must be one of ${ARCHITECTURE_VARIANT_NAMES.join(", ")}`,
       },
     });
   });

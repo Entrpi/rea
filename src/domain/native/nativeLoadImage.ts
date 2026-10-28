@@ -6,8 +6,8 @@ import {
   RAW_ENTRY_BASES,
   RAW_ENTRY_ISA_MODES,
   RAW_ENTRY_ROLES,
-  rawArchitectureVariantSchema,
-} from "../rawArchitectureVariant.js";
+  architectureVariantSchema,
+} from "../architectureVariant.js";
 import { nativeAddressObservationSchema } from "./nativeAddress.js";
 
 const integer = z.int().min(0).max(Number.MAX_SAFE_INTEGER);
@@ -143,7 +143,7 @@ export const nativeSegmentsLoadImageSchema = z.strictObject({
   format: z.literal("raw-binary"),
   target_sha256: digest,
   architecture: binaryArchitectureSchema,
-  architecture_variant: rawArchitectureVariantSchema.exactOptional(),
+  architecture_variant: architectureVariantSchema.exactOptional(),
   language_id: z.string().min(1),
   compiler_spec_id: z.string().min(1),
   file_bytes: integer.min(1),
