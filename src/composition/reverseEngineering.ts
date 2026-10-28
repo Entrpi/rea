@@ -7,6 +7,7 @@ import {
 } from "../objdump/ObjdumpCommand.js";
 import {
   rizinCommand,
+  rizinCommandLimitations,
   RIZIN_PROVIDER_IDENTITY,
   RIZIN_VERSION_PROBE,
 } from "../rizin/RizinCommand.js";
@@ -33,6 +34,7 @@ export const createReverseEngineeringCommandPort = (
       platform,
     ),
     arguments: rizinCommand(input),
+    limitations: rizinCommandLimitations(input),
     identity: RIZIN_PROVIDER_IDENTITY,
     versionProbe: RIZIN_VERSION_PROBE,
   }),
