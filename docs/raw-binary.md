@@ -124,7 +124,8 @@ rea inspect /absolute/path/to/dump.bin --target-format raw-binary --architecture
 has no ARMv8-M encodings, such as the `MSPLIM` and `PSPLIM` system registers that
 v8-M startup code sets, so the v8-M and v8.1-M variants use `ARM:LE:32:v8-m`.
 Ghidra 12.1.4's `ARM.ldefs` lists `armv8.1-m.main` for that language, which also
-decodes ARMv8.1-M encodings such as the low-overhead loops (`wls`, `le`) and MVE.
+decodes ARMv8.1-M encodings such as MVE and the low-overhead loops (`wls`, `le`);
+the loop branches' flow is wrong, as Limitations describes.
 Neither decoder refuses instructions that a smaller profile lacks: `armv6-m`
 code is decoded with the ARMv7-M instruction set, and `armv8-m.main` code with
 the ARMv8.1-M one.
@@ -323,6 +324,11 @@ exercised.
   processor-defined vector labels are not applied, so other vectors are neither
   entries nor labels. Floating-point state, TrustZone and device memory maps are
   not modelled.
+- Ghidra 12.1.4 decodes the ARMv8.1-M low-overhead-loop branches `wls` and `le`
+  with the right mnemonics, but not their flow. In the verifier's Cortex-M55
+  image, `wls` branched 2 bytes short of its target, `le` branched 4 bytes past
+  the loop start, and `le` had no fall-through. Code after such a loop may be
+  left undisassembled; `armv8.1-m.main` results say so.
 - Reset vectors, memory-mapped I/O, and firmware boot sequences are not
   emulated.
 - Independent load-image verification covers source identity, mapped file

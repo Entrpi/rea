@@ -8,6 +8,7 @@ import {
   GHIDRA_RAW_ENTRY_CONTEXT,
   GHIDRA_RAW_VARIANT_LANGUAGES,
   ghidraRawBinaryLanguage,
+  ghidraRawBinaryLimitations,
 } from "./GhidraRawBinaryLanguage.js";
 import {
   RAW_ARCHITECTURE_VARIANT_NAMES,
@@ -72,6 +73,25 @@ describe("raw-binary variant Ghidra binding", () => {
   it("keeps the generic ARM decoder when no variant is named", () => {
     expect(ghidraRawBinaryLanguage("arm").languageId).toBe("ARM:LE:32:v7");
   });
+  // Observed on real Ghidra 12.1.4; verify:ghidra:cortex-m checks it.
+  it.each(RAW_ARCHITECTURE_VARIANT_NAMES)(
+    "reports Ghidra's low-overhead-loop flow only for armv8.1-m.main: %s",
+    (variant) => {
+      const limitations = ghidraRawBinaryLimitations(
+        admittedRawLoad({
+          architecture: "arm",
+          architectureVariant: variant,
+          baseAddress: "0x8000000",
+          entryPoint: "0x8000000",
+          fileBytes: 4,
+        }),
+        ghidraRawBinaryLanguage("arm", variant),
+      );
+      expect(
+        limitations.some((text) => text.includes("low-overhead-loop")),
+      ).toBe(variant === "armv8.1-m.main");
+    },
+  );
 });
 
 describe("raw-binary mapped-block state", () => {
