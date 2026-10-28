@@ -149,6 +149,14 @@ image they hold the [ESP image](esp-image.md) root facts, `segments`,
 the region. Extract a partition and inspect it as an ESP image for its
 segments as entries.
 
+The summary view (`inspect_artifact` with `detail: "summary"`, or the
+inventory summary of `inspect_analysis_view`) gives each of these images a
+`summary` instead of its `facts`: `status`, `chip`, `entry_addr`,
+`segment_count`, `load_ranges` (the load address and declared length of each
+segment that is mapped, loaded or unclassified), the `checksum` and
+`appended_sha256` statuses, `coverage` and `limitations`. The default
+complete detail keeps the full facts, every segment included.
+
 `erased` is the bootloader's view: with no image header at the start of the
 slot, it finds no app there. An erased slot can still hold data further in,
 such as a complete older app image that a previous partition layout placed

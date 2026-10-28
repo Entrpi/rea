@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-const offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
-const uint32 = z.number().int().min(0).max(0xffff_ffff);
+export const offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+export const uint32 = z.number().int().min(0).max(0xffff_ffff);
 
 /** Parsed source fields owned by the PCK adapter, independent of content hashes. */
 export const godotPckMetadataSchema = z.strictObject({
@@ -127,7 +127,7 @@ export const nodeSeaEntryDeclaration = (
   metadata: z.infer<typeof nodeSeaEntryMetadataSchema>,
 ) => ({ role: metadata.role, source_path: metadata.source_path });
 
-const uint8 = z.number().int().min(0).max(0xff);
+export const uint8 = z.number().int().min(0).max(0xff);
 const uint16 = z.number().int().min(0).max(0xffff);
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/u);
 const byteRange = z.strictObject({ offset, length: offset });

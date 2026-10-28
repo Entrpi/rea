@@ -10,10 +10,28 @@ import {
 } from "../../../src/domain/firmware/espImage.fixture.js";
 import { espFlashDump } from "../../../src/domain/firmware/espFlash.fixture.js";
 import { parseEvidence } from "../../../src/domain/evidence.js";
-import { artifactExtractionResultSchema } from "../../../src/domain/artifactGraph.js";
+import {
+  artifactExtractionResultSchema,
+  artifactInventoryResultSchema,
+} from "../../../src/domain/artifactGraph.js";
+import { artifactInspectionResultSchema } from "../../../src/domain/artifactInspection.js";
 
 const summarySchema = z.object({
   summary: z.object({ root_format_metadata: z.unknown() }),
+});
+
+const completeBootloaderSchema = z.object({
+  bootloader: z.object({
+    facts: z.object({
+      segments: z.array(
+        z.object({
+          load_addr: z.number(),
+          data_len: z.number(),
+          classification: z.string(),
+        }),
+      ),
+    }),
+  }),
 });
 
 // The compiled stdio fixture checks advertised schemas against their dialect
@@ -53,16 +71,47 @@ it.each(["full", "compact"] as const)(
       );
       const reply = await call("inspect_artifact", { detail: "summary" });
       expect(reply.isError, JSON.stringify(reply)).not.toBe(true);
-      expect(
-        summarySchema.parse(
-          parseEvidence(reply.structuredContent).normalized_result,
-        ).summary.root_format_metadata,
-      ).toMatchObject({
+      const summaryRoot = summarySchema.parse(
+        parseEvidence(reply.structuredContent).normalized_result,
+      ).summary.root_format_metadata;
+      expect(summaryRoot).toMatchObject({
         kind: "esp-flash-image",
         flash_offset: { value: 0x1000, source: "caller" },
         chip: { target: "esp32" },
         partition_table: { flash_address: 0x8000, method: "default" },
       });
+      // The summary view gives each image's summary; complete keeps segments.
+      const complete = await call("inspect_artifact", {});
+      expect(complete.isError, JSON.stringify(complete)).not.toBe(true);
+      const { facts } = completeBootloaderSchema.parse(
+        artifactInventoryResultSchema
+          .parse(
+            artifactInspectionResultSchema.parse(
+              parseEvidence(complete.structuredContent).normalized_result,
+            ).substeps[0]?.evidence.normalized_result,
+          )
+          .occurrences.find(({ logical_path }) => logical_path === ".")
+          ?.format_metadata,
+      ).bootloader;
+      expect(facts.segments).toHaveLength(ESP32C3_BOOTLOADER_SEGMENTS.length);
+      expect(summaryRoot).toMatchObject({
+        bootloader: {
+          flash_address: 0x1000,
+          summary: {
+            status: "esp-image",
+            chip: "esp32",
+            segment_count: ESP32C3_BOOTLOADER_SEGMENTS.length,
+            load_ranges: facts.segments
+              .filter(({ classification }) => classification !== "not-loaded")
+              .map(({ load_addr, data_len }) => ({
+                address: load_addr,
+                length: data_len,
+              })),
+            checksum: "valid",
+          },
+        },
+      });
+      expect(JSON.stringify(summaryRoot)).not.toContain('"segments"');
       const extracted = await call("extract_artifact", {});
       expect(extracted.isError, JSON.stringify(extracted)).not.toBe(true);
       const result = artifactExtractionResultSchema.parse(
