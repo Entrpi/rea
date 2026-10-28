@@ -118,7 +118,7 @@ import {
   GHIDRA_RAW_ENTRY_CONTEXT,
   ghidraRawBinaryLanguage,
   ghidraRawBinaryLimitations,
-  ghidraRawProcessorLabels,
+  GHIDRA_PROCESSOR_LABELS_NOT_APPLIED,
 } from "./GhidraRawBinaryLanguage.js";
 import { ghidraDolLanguage, ghidraDolSectionFile } from "./GhidraDolProfile.js";
 
@@ -474,10 +474,12 @@ export const createGhidraProviderClient = (input: {
                     entryContext:
                       GHIDRA_RAW_ENTRY_CONTEXT[target.rawLoad.entryIsaMode],
                   }),
-              // The profile commits the same label policy.
-              ...(ghidraRawProcessorLabels(target.rawLoad) === undefined
-                ? {}
-                : { applyProcessorLabels: false as const }),
+              // The committed profile owns the label policy and the language
+              // definition that the import must load.
+              ...(committedProfile.parameters.processor_labels ===
+              GHIDRA_PROCESSOR_LABELS_NOT_APPLIED
+                ? { applyProcessorLabels: false as const }
+                : {}),
               ...(languageDefinition === undefined
                 ? {}
                 : { languageDefinition }),

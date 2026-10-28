@@ -94,6 +94,7 @@ describe("open_binary load input pairing", () => {
         format: "raw-binary",
         architecture: "arm",
         architecture_variant: "armv7-m",
+        base_address: "0x8000000",
         entry_point: "0x8000000",
         vector_table_address: "0x8000000",
       },
@@ -105,7 +106,16 @@ describe("open_binary load input pairing", () => {
         architecture: "arm",
         architecture_variant: "armv7-m",
       },
-      "entry_point",
+      "base_address",
+    ],
+    [
+      {
+        format: "raw-binary",
+        architecture: "arm",
+        architecture_variant: "armv7-m",
+        entry_point: "0x8000000",
+      },
+      "base_address",
     ],
     [
       { format: "raw-binary", architecture: "arm", base_address: "0x8000000" },

@@ -37,6 +37,29 @@ export const GHIDRA_VARIANT_LANGUAGES = {
 } as const satisfies Record<ArchitectureVariant, string>;
 
 /**
+ * Observed with Ghidra 12.1.4 on the verifier's Cortex-M55 image: WLS and LE
+ * decode with LLVM's mnemonics, but WLS branched 2 bytes short, LE branched 4
+ * bytes past the loop start, and LE had no fall-through, so the code after the
+ * loop was not disassembled.
+ */
+const GHIDRA_LOW_OVERHEAD_LOOPS =
+  "Ghidra 12.1.4 decodes the ARMv8.1-M low-overhead-loop branches WLS and LE, but their targets can be wrong and LE has no fall-through, so code after such a loop may be left undisassembled.";
+
+/**
+ * Limitations of each variant's Ghidra decoder, whatever container holds the
+ * code; every lane that loads a variant reports them. A new variant states
+ * its own, even when there are none.
+ */
+export const GHIDRA_VARIANT_LIMITATIONS = {
+  "armv6-m": [],
+  "armv7-m": [],
+  "armv7e-m": [],
+  "armv8-m.base": [],
+  "armv8-m.main": [],
+  "armv8.1-m.main": [GHIDRA_LOW_OVERHEAD_LOOPS],
+} as const satisfies Record<ArchitectureVariant, readonly string[]>;
+
+/**
  * Ghidra context register and value that select each entry instruction set,
  * and the versioned profile commitment that the entry is seeded with them.
  */
@@ -55,6 +78,9 @@ export const GHIDRA_RAW_ENTRY_CONTEXT = {
   }
 >;
 
+/** Profile `processor_labels` value: the import does not apply the language's labels. */
+export const GHIDRA_PROCESSOR_LABELS_NOT_APPLIED = "not-applied-v1";
+
 /**
  * Profile commitment that a variant load is imported without the language's
  * default labels. `ARMCortex.pspec` names the vector table at `ram:0x0`-`0x40`
@@ -64,8 +90,8 @@ export const GHIDRA_RAW_ENTRY_CONTEXT = {
  */
 export const ghidraVariantProcessorLabels = (
   variant: ArchitectureVariant | undefined,
-): "not-applied-v1" | undefined =>
-  variant === undefined ? undefined : "not-applied-v1";
+): typeof GHIDRA_PROCESSOR_LABELS_NOT_APPLIED | undefined =>
+  variant === undefined ? undefined : GHIDRA_PROCESSOR_LABELS_NOT_APPLIED;
 
 /**
  * The label policy of a raw load: a variant's, and also not applied for a
@@ -73,10 +99,10 @@ export const ghidraVariantProcessorLabels = (
  */
 export const ghidraRawProcessorLabels = (
   load: RawBinaryLoad,
-): "not-applied-v1" | undefined =>
+): typeof GHIDRA_PROCESSOR_LABELS_NOT_APPLIED | undefined =>
   load.providerLanguage === undefined
     ? ghidraVariantProcessorLabels(load.architectureVariant)
-    : "not-applied-v1";
+    : GHIDRA_PROCESSOR_LABELS_NOT_APPLIED;
 
 /**
  * Map caller-visible CPU families to generic Ghidra languages with a
@@ -144,22 +170,13 @@ export const ghidraRawBinaryLanguage = (
 };
 
 const GENERIC_RAW_LANGUAGES =
-  "Little-endian generic Ghidra languages are used for x86, x86_64, arm, arm64, and NMOS 6502; m68k uses the big-endian 68000 default language, which decodes the 68040 superset. Big-endian ARM, 65C02, 65816, separate 68020/68030/CPU32/ColdFire variants, and other processor variants are not families; ARM M-profile code needs architecture_variant, and provider_language can select another Ghidra language, unverified.";
+  "Little-endian generic Ghidra languages are used for x86, x86_64, arm, arm64, and NMOS 6502; m68k uses the big-endian 68000 default language, which decodes the 68040 superset. Big-endian ARM, the 65C02 and 65816, and separate 68020, 68030, CPU32 or ColdFire languages are not families. ARM M-profile code needs architecture_variant, which names only ARM M profiles; provider_language can select another Ghidra language, unverified.";
 
 /** What REA checked about a caller-selected language, and what it did not. */
 const callerLanguageLimitation = (
   selection: ProviderLanguageSelection,
 ): string =>
   `The caller selected the Ghidra language ${selection.languageId} with compiler spec ${selection.compilerSpecId} (verification: unverified). REA checked that the installation defines it, that the image fits its declared address size, and that its default address space is byte-addressed and its only loaded space, but not that it decodes this image. Entry alignment is left to the language's decoder.`;
-
-/**
- * Observed with Ghidra 12.1.4 on the verifier's Cortex-M55 image: WLS and LE
- * decode with LLVM's mnemonics, but WLS branched 2 bytes short, LE branched 4
- * bytes past the loop start, and LE had no fall-through, so the code after the
- * loop was not disassembled.
- */
-const GHIDRA_LOW_OVERHEAD_LOOPS =
-  "Ghidra 12.1.4 decodes the ARMv8.1-M low-overhead-loop branches WLS and LE, but their targets can be wrong and LE has no fall-through, so code after such a loop may be left undisassembled.";
 
 /** Limitations that every result from a raw-binary session carries. */
 export const ghidraRawBinaryLimitations = (
@@ -179,9 +196,9 @@ export const ghidraRawBinaryLimitations = (
           : load.architectureVariant === undefined
             ? GENERIC_RAW_LANGUAGES
             : `The caller-named ${load.architectureVariant} variant is decoded with ${language.languageId} in Thumb state. The decoder does not refuse instructions that this profile lacks, and floating-point and TrustZone state are not modeled.`,
-        ...(load.architectureVariant === "armv8.1-m.main"
-          ? [GHIDRA_LOW_OVERHEAD_LOOPS]
-          : []),
+        ...(load.architectureVariant === undefined
+          ? []
+          : GHIDRA_VARIANT_LIMITATIONS[load.architectureVariant]),
         ...(load.entrySource.kind === "vector-table"
           ? [
               `The entry is the Reset vector ${load.entrySource.resetVector} read from the vector table at ${load.entrySource.address}, with bit 0 cleared. The initial stack pointer ${load.entrySource.initialStackPointer} is recorded and not validated.`,

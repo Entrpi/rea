@@ -283,13 +283,21 @@ const readOpenedBinaryTarget = async (
     // An omitted M-profile entry is the Reset word of the selected vector table.
     else if ("admit" in selected.value)
       admitted = selected.value.admit(
-        await readHandleRange(handle, selected.value.fileOffset, 8, signal),
+        await readHandleRange(
+          handle,
+          selected.value.fileOffset,
+          selected.value.byteLength,
+          signal,
+        ),
       );
     else admitted = ok(selected.value);
     if (!admitted.ok)
       return err(
         new BinaryTargetError(path, admitted.error.reason, {
           constraint: admitted.error.constraint,
+          ...(admitted.error.field === undefined
+            ? {}
+            : { field: admitted.error.field }),
           ...(admitted.error.diagnostics === undefined
             ? {}
             : { diagnostics: admitted.error.diagnostics }),
@@ -317,6 +325,7 @@ const readOpenedBinaryTarget = async (
     return err(
       new BinaryTargetError(path, pairing.message, {
         constraint: "load_selection_rejected",
+        field: pairing.field,
       }),
     );
   if (formatHint === "gamecube-dol") {

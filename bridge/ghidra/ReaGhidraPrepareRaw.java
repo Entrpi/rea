@@ -80,6 +80,9 @@ public final class ReaGhidraPrepareRaw extends GhidraScript {
             }
         }
         addEntryPoint(entry);
+        // Named as Ghidra's loaders name a program entry, whatever its role. The
+        // load image reports the role; a handler name such as Reset_Handler
+        // would claim a symbol the image does not carry.
         if (!disassemble(entry) || createFunction(entry, "entry") == null) {
             throw new IllegalStateException("Raw binary entry cannot be decoded as a function");
         }

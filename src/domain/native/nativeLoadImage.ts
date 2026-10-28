@@ -133,13 +133,13 @@ export const nativeRawLoadImageSchema = z.strictObject({
 });
 /**
  * Version 1 of a raw load that names a separate base, an architecture variant,
- * a provider language or a Reset-derived entry. A load with its base at a
- * caller-selected entry, a family decoder and no variant keeps the raw-binary
- * shape above, so its saved Evidence is unchanged.
+ * a provider language or a Reset-derived entry, told apart by `layout`. A load
+ * with its base at a caller-selected entry, a family decoder and no variant
+ * keeps the raw-binary shape above, so its saved Evidence is unchanged.
  */
 export const nativeSegmentsLoadImageSchema = z.strictObject({
   status: z.enum(["verified", "mismatch"]),
-  variant: z.literal("segments"),
+  layout: z.literal("segments"),
   version: z.literal(1),
   format: z.literal("raw-binary"),
   target_sha256: digest,
@@ -176,8 +176,10 @@ export const nativeSegmentsLoadImageSchema = z.strictObject({
     )
     .min(1),
   // Present only for an entry whose basis is the vector table: the table address
-  // and the two words read from it. The initial stack pointer is observed and
-  // not validated.
+  // and the two words read from it. Like other format words REA reports (GPU
+  // code-object flags, metadata tokens), the words keep their full 32-bit width;
+  // they are not addresses, and the entry holds Reset's canonical code address.
+  // The initial stack pointer is observed and not validated.
   vector_table: z
     .strictObject({
       address: nativeAddressObservationSchema,

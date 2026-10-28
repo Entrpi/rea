@@ -30,6 +30,7 @@ describe.each(ARCHITECTURE_VARIANT_NAMES)("architecture variant %s", (name) => {
           format: "raw-binary",
           architecture,
           entryPoint: "0x8000000",
+          baseAddress: "0x8000000",
           architectureVariant: name,
         }),
       ).toEqual(
@@ -43,7 +44,7 @@ describe.each(ARCHITECTURE_VARIANT_NAMES)("architecture variant %s", (name) => {
     },
   );
 
-  it("lets the entry be omitted only together with a base", () => {
+  it("requires a base, which lets the entry be omitted", () => {
     const selection = {
       format: "raw-binary",
       architecture: row.architecture,
@@ -52,9 +53,16 @@ describe.each(ARCHITECTURE_VARIANT_NAMES)("architecture variant %s", (name) => {
     expect(
       rawBinarySelectionError({ ...selection, baseAddress: "0x8000000" }),
     ).toBeUndefined();
-    expect(rawBinarySelectionError(selection)).toMatchObject({
-      field: "entry_point",
-    });
+    // A variant never maps the image at its entry.
+    for (const unbased of [
+      selection,
+      { ...selection, entryPoint: "0x8000000" },
+    ])
+      expect(rawBinarySelectionError(unbased)).toEqual({
+        field: "base_address",
+        message:
+          "architecture_variant requires base_address, the address of file offset 0",
+      });
   });
 });
 

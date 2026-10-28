@@ -596,9 +596,8 @@ that address. Hopper and IDA refuse this interpretation; Ghidra uses
 `BinaryLoader` with a generic language: big-endian for `m68k`, little-endian
 otherwise. For a Cortex-M dump, add `architecture_variant` (`armv6-m`,
 `armv7-m`, `armv7e-m`, `armv8-m.base`, `armv8-m.main` or `armv8.1-m.main`)
-and `base_address`,
-which maps file offset 0 separately and is accepted only with a variant;
-omit `entry_point` to take Reset from the vector table, adding
+and `base_address`, which maps file offset 0 separately and which a variant
+requires. Omit `entry_point` to take Reset from the vector table, adding
 `vector_table_address` when a header precedes it. An odd entry is refused. Big-endian ARM is unsupported.
 `6502` selects NMOS 6502; the entry and complete file mapping must fit within
 `0x0000..0xffff`. 65C02, 65816, cartridge containers, bank switching, and mapper

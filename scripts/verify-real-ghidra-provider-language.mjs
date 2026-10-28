@@ -123,7 +123,7 @@ await withServer(ghidra, async ({ call, refuse, fail }) => {
   const image = evidence(await call("inspect_native_load_image"), sh4);
   const loaded = image.normalized_result;
   assert.equal(loaded.status, "verified", JSON.stringify(loaded));
-  assert.equal(loaded.variant, "segments");
+  assert.equal(loaded.layout, "segments");
   assert.equal(loaded.architecture, null);
   assert.equal(loaded.language_id, SH4.language_id);
   assert.equal(loaded.compiler_spec_id, "default");
