@@ -5,10 +5,7 @@ import { bundleComparisonInputSchema } from "../domain/bundleComparison.js";
 
 import { processTraceSpecificationSchema } from "../domain/process/processTraceSpecification.js";
 import { evidenceSchema } from "../domain/evidence.js";
-import {
-  evidenceFileReferenceSchema,
-  retainedEvidenceReferenceSchema,
-} from "../domain/evidenceReference.js";
+import { evidenceSourceInputSchema } from "../domain/evidenceReference.js";
 import { prefixedDigestSchema } from "./../domain/digests.js";
 import { evidenceRecordFiltersSchema } from "../domain/evidenceRecordSummary.js";
 import { residualUnknownSchema } from "../domain/residualUnknown.js";
@@ -56,18 +53,10 @@ export const processComparisonInputSchema = z.strictObject({
   max_capture_age_ms: z.int().nonnegative().optional(),
 });
 
-// Complete Evidence remains the inline spelling of a side; the references are
-// inspect_analysis_view's retained and file sources, resolved by their owners.
-const artifactComparisonSideSchema = z.union([
-  evidenceSchema,
-  retainedEvidenceReferenceSchema,
-  evidenceFileReferenceSchema,
-]);
-
 /** Name each compared artifact inventory once: inline, retained, or in a local Evidence file. */
 export const artifactComparisonInputSchema = z.strictObject({
-  left: artifactComparisonSideSchema,
-  right: artifactComparisonSideSchema,
+  left: evidenceSourceInputSchema,
+  right: evidenceSourceInputSchema,
 });
 export type ArtifactComparisonInput = z.output<
   typeof artifactComparisonInputSchema

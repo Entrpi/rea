@@ -29,3 +29,10 @@ export const evidenceInputSchema = z.union([
   retainedEvidenceReferenceSchema,
 ]);
 export type EvidenceInput = z.output<typeof evidenceInputSchema>;
+
+/** Evidence input, or one record read from a local Evidence file or bundle. */
+export const evidenceSourceInputSchema = z.union([
+  ...evidenceInputSchema.options,
+  evidenceFileReferenceSchema,
+]);
+export type EvidenceSourceInput = z.output<typeof evidenceSourceInputSchema>;

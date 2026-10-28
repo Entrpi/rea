@@ -1,14 +1,12 @@
 import {
   resolveEvidenceInput,
+  resolvePairedEvidenceSources,
   type EvidenceLookup,
 } from "../EvidenceInputResolver.js";
 import { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { AnalysisInputError } from "../../domain/analysisErrorCore.js";
 import { inspectAnalysisViewValidated } from "../analysisView/AnalysisViewService.js";
-import {
-  readEvidenceFileSource,
-  type EvidenceFileReadOptions,
-} from "../analysisView/evidenceFileSource.js";
+import type { EvidenceFileReadOptions } from "../analysisView/evidenceFileSource.js";
 import type { ArtifactComparisonInput } from "../../contracts/sessionToolSchemas.js";
 import { artifactInventorySummaryViewResultSchema } from "../../domain/analysisView/analysisView.js";
 import {
@@ -44,42 +42,36 @@ export interface ArtifactComparisonOutcome {
 }
 
 /**
- * Resolve each named side through the owner of its source: inline Evidence is
- * authenticated here, a retained reference is read from the caller's Evidence
- * lookup, and an Evidence file is read and authenticated by the shared file
- * source. A summary then resolves to its exact retained parent.
+ * Select both sides through the shared paired-source owner, authenticate them,
+ * then resolve a summary to its exact retained parent inventory.
  */
 export const resolveArtifactComparisonSources = async (
   input: ArtifactComparisonInput,
   evidenceById: EvidenceLookup | undefined,
   options: EvidenceFileReadOptions = {},
 ): Promise<Result<ArtifactComparisonSources, AnalysisError>> => {
-  const left = await resolveSide(input, "left", evidenceById, options);
+  const selected = await resolvePairedEvidenceSources(input, evidenceById, {
+    ...options,
+    operation: OPERATION,
+  });
+  if (!selected.ok) return selected;
+  const suppliedLeft = readEvidence(selected.value.left);
+  if (!suppliedLeft.ok) return suppliedLeft;
+  const suppliedRight = readEvidence(selected.value.right);
+  if (!suppliedRight.ok) return suppliedRight;
+  const left = resolveArtifactComparisonEvidence(
+    suppliedLeft.value,
+    evidenceById,
+    ["left"],
+  );
   if (!left.ok) return left;
-  const right = await resolveSide(input, "right", evidenceById, options);
+  const right = resolveArtifactComparisonEvidence(
+    suppliedRight.value,
+    evidenceById,
+    ["right"],
+  );
   if (!right.ok) return right;
   return ok({ left: left.value, right: right.value });
-};
-
-const resolveSide = async (
-  input: ArtifactComparisonInput,
-  side: "left" | "right",
-  evidenceById: EvidenceLookup | undefined,
-  options: EvidenceFileReadOptions,
-): Promise<Result<Evidence, AnalysisError>> => {
-  const source = input[side];
-  const selected = !("kind" in source)
-    ? readEvidence(source)
-    : source.kind === "retained-evidence"
-      ? resolveEvidenceInput(source, evidenceById)
-      : await readEvidenceFileSource(source.path, options, source.evidence_id, {
-          operation: OPERATION,
-          path: [side],
-        });
-  if (!selected.ok) return selected;
-  return resolveArtifactComparisonEvidence(selected.value, evidenceById, [
-    side,
-  ]);
 };
 
 /** Compare resolved inventories and derive Evidence citing both complete owners. */

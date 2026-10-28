@@ -89,6 +89,25 @@ it("advertises one spelling per compare_artifacts source and rejects the same si
       false,
     );
     expect(validate({ left: retained })).toBe(false);
+    // compare_functions is the precedent for the inline and retained forms;
+    // only the Evidence-file reference extends it.
+    const functions = toolContract("compare_functions");
+    const shared = sides.filter(
+      ([, side]) =>
+        typeof side !== "object" ||
+        side === null ||
+        !("kind" in side) ||
+        side.kind !== "evidence-file",
+    );
+    expect(shared).toHaveLength(sides.length - 3);
+    for (const [label, side] of shared)
+      expect(
+        functions.inputSchema.safeParse({ left: side, right: retained })
+          .success,
+        label,
+      ).toBe(
+        contract.inputSchema.safeParse({ left: side, right: retained }).success,
+      );
   } finally {
     await Promise.allSettled([client.close(), server.close()]);
   }
