@@ -956,7 +956,7 @@ export class ReverseEngineeringService {
     );
     if (!outcome.ok) return outcome;
     const completed = outcome.value;
-    if (completed.status !== "read")
+    if (completed.status !== "read" && completed.status !== "unrecognized")
       return ok(
         unidentified(
           `its version probe (${probe.arguments.join(" ")}) ${VERSION_PROBE_FAILURE_REASONS[completed.status]}`,
@@ -964,21 +964,20 @@ export class ReverseEngineeringService {
           { ...parameters, provider_version_probe: completed.diagnostics },
         ),
       );
-    const { identification } = completed;
     const banner = `its ${probe.arguments.join(" ")} banner`;
     const bannerParameters = {
       ...parameters,
       provider_version_banner: completed.banner,
       provider_version_banner_truncated: completed.bannerTruncated,
     };
-    if (identification === undefined)
+    if (completed.status === "unrecognized")
       return ok(
-        unidentified(
-          `${banner} did not identify the tool`,
-          lookup.path,
-          bannerParameters,
-        ),
+        unidentified(`${banner} did not identify the tool`, lookup.path, {
+          ...bannerParameters,
+          provider_version_probe: completed.diagnostics,
+        }),
       );
+    const { identification } = completed;
     return ok({
       executable: lookup.path,
       identity: identification.identity,
@@ -1020,12 +1019,22 @@ export class ReverseEngineeringService {
         });
       const line = output.stdout.split(/\r?\n/u, 1)[0]?.trim() ?? "";
       const banner = boundedUtf8Text(line, VERSION_PROBE_TEXT_BYTES);
-      return ok({
-        status: "read",
-        identification: probe.identify(banner.text),
-        banner: banner.text,
-        bannerTruncated: banner.truncated,
-      });
+      const identification = probe.identify(banner.text);
+      return ok(
+        identification === undefined
+          ? {
+              status: "unrecognized",
+              banner: banner.text,
+              bannerTruncated: banner.truncated,
+              diagnostics: versionProbeDiagnostics(0, output),
+            }
+          : {
+              status: "read",
+              identification,
+              banner: banner.text,
+              bannerTruncated: banner.truncated,
+            },
+      );
     } catch (cause) {
       const capture = execFileOutputFailure(cause);
       const code = capture?.code ?? commandFailureCode(cause);
@@ -1093,11 +1102,17 @@ interface ProviderIdentification {
 type VersionProbeOutcome =
   | {
       readonly status: "read";
-      /** Undefined when the banner identified no tool. */
-      readonly identification: ProviderToolIdentification | undefined;
+      readonly identification: ProviderToolIdentification;
       /** The first stdout line, trimmed and bounded. */
       readonly banner: string;
       readonly bannerTruncated: boolean;
+    }
+  | {
+      /** A banner that identified no tool, kept with the probe's diagnostics. */
+      readonly status: "unrecognized";
+      readonly banner: string;
+      readonly bannerTruncated: boolean;
+      readonly diagnostics: Readonly<Record<string, JsonValue>>;
     }
   | {
       readonly status: "failed" | "timed-out" | "undecodable";
@@ -1110,7 +1125,7 @@ export const VERSION_PROBE_FAILURE_REASONS = {
   "timed-out": "reached the command deadline",
   undecodable: "printed output that is not valid UTF-8",
 } as const satisfies Record<
-  Exclude<VersionProbeOutcome["status"], "read">,
+  Exclude<VersionProbeOutcome["status"], "read" | "unrecognized">,
   string
 >;
 

@@ -917,3 +917,51 @@ posix.each([
     }
   },
 );
+
+posix.each([
+  [
+    "an empty first line",
+    "\nrizin 0.9.1 @ linux-x86-64\n",
+    "warning: the banner moved to the second line\n",
+    "",
+  ],
+  [
+    "a Usage: banner",
+    "Usage: rizin [-ACdfLMnNqStuvwzX]\n -v  show version information\n",
+    "",
+    "Usage: rizin [-ACdfLMnNqStuvwzX]",
+  ],
+] as const)(
+  "keeps the probe's diagnostics beside %s that identifies no tool",
+  async (_case, stdout, stderr, banner) => {
+    const { executable, path } = await fixture();
+    const run = vi.fn(
+      async (
+        _command: string,
+        args: readonly string[],
+        _options?: ExecFileOutputOptions,
+      ) =>
+        args[0] === "-v"
+          ? { stdout, stderr }
+          : { stdout: "command output", stderr: "" },
+    );
+    const service = new TestReverseEngineeringService({
+      run,
+      lookup: lookupExecutable,
+      environment: { REA_RIZIN_COMMAND: executable },
+    });
+    const result = await service.executeRizinCommand({ path, command: "iI" });
+    if (!result.ok) throw result.error;
+    expect(result.value.provider.version).toBeNull();
+    expect(result.value.parameters).toMatchObject({
+      provider_identity: "assumed",
+      provider_version_banner: banner,
+      provider_version_probe: {
+        exit_code: 0,
+        stdout,
+        stderr,
+        output_truncated: false,
+      },
+    });
+  },
+);
