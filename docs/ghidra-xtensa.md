@@ -93,6 +93,35 @@ Ghidra issue or derived from the 12.1.4 Xtensa language sources:
   as `R_XTENSA_SLOT0_OP` and `R_XTENSA_ASM_EXPAND`, which ESP32 Wi-Fi and PHY
   libraries use ([#7341](https://github.com/NationalSecurityAgency/ghidra/issues/7341)).
 
+## What to expect with ESP-IDF apps
+
+REA measured these costs with Ghidra 12.1.4 on Linux x64, using ESP-IDF 5.5
+application ELFs with DWARF: a 16 MB ESP32 build and a 48 MB ESP32-S3 build.
+Times depend on the host.
+
+- **Ask for summaries first.** With the default `complete` detail,
+  `inspect_native_load_image` returned 0.66–1.5 MB, and its `raw_result`
+  duplicated `normalized_result.observations`. `list_procedures` returned
+  1.5–2.9 MB. With `detail: "summary"`, each returned 5.7–6.8 KB and retained
+  the complete Evidence. Page that Evidence with `inspect_analysis_view`: kind
+  `native-load-image` for mappings, entry points and the other load-image
+  collections, and kind `native-inventory` for procedure, name and string lists.
+  See [load-image summaries](ghidra-provider.md#loaded-addresses-and-file-offsets)
+  and [inventory pages](mcp-contracts.md#tool-results).
+- **Allow for a slow first query.** `open_binary` returned in about 5 s. The
+  first query then ran Ghidra's import and analysis: 53–56 s for the ESP32 app
+  and 112 s for the ESP32-S3 app. A client on the MCP SDK's default 60-second
+  request timeout failed on the ESP32-S3 app, and its cancellation discarded the
+  analysis. Send a progress token and reset the timeout on progress
+  (`resetTimeoutOnProgress: true`), or set a longer timeout; see
+  [Ghidra first-query deadlines](mcp-contracts.md#ghidra-first-query-deadlines-and-recovery).
+- **Keep one MCP session.** Later queries in the same session took 16–527 ms.
+  Each CLI command imports and analyzes the ELF again: `rea decompile` took
+  about 54 s per call on the ESP32 app. `--snapshot` replays an exact repeat of
+  [`rea analyze`](cli.md#save-and-reuse-analysis-snapshots), but a repeated
+  `rea decompile --procedure app_main` with the same `--snapshot` ran the whole
+  analysis again.
+
 ## Verification and limits
 
 Run `npm run verify:ghidra:xtensa` with Ghidra 12.1.4, JDK 21+ and GNU or LLVM
