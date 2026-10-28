@@ -40,7 +40,7 @@ import { err, ok, type Result } from "../../domain/result.js";
 import {
   readEvidenceFileSource,
   type EvidenceFileReadOptions,
-} from "../EvidenceFileSource.js";
+} from "./evidenceFileSource.js";
 
 /** A parsed request whose source can be projected without filesystem access. */
 export interface ReadyAnalysisViewInput {
@@ -93,9 +93,9 @@ const inspectFileView = async (
   options: EvidenceFileReadOptions = {},
 ): Promise<Result<Evidence, AnalysisError>> => {
   const loaded = await readEvidenceFileSource(
-    input.source,
-    { operation: INSPECT_ANALYSIS_VIEW_OPERATION, path: ["source"] },
+    input.source.path,
     options,
+    input.source.evidence_id,
   );
   // Authentication and projection are synchronous; dispatch queued callbacks and
   // the signal notifications they enqueue before accepting either result.

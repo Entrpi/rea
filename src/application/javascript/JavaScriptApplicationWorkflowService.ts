@@ -2,7 +2,7 @@ import {
   resolveEvidenceSources,
   type EvidenceLookup,
 } from "../EvidenceInputResolver.js";
-import type { EvidenceFileReadOptions } from "../EvidenceFileSource.js";
+import type { EvidenceFileReadOptions } from "../analysisView/evidenceFileSource.js";
 import {
   APPLICATION_EVIDENCE_SOURCE,
   PAIRED_EVIDENCE_SOURCES,
@@ -167,6 +167,10 @@ export const traceApplicationFeatureEvidence = async (
   const result = traceApplicationFeature({
     sourceEvidenceId: source.evidence.evidence_id,
     graph: source.graph,
+    semanticGraph: source.semanticGraph,
+    ...(input.semantic_page === undefined
+      ? {}
+      : { semanticPage: input.semantic_page }),
     nativeEvidence,
     seed: input.seed,
     direction: input.direction,
@@ -177,6 +181,9 @@ export const traceApplicationFeatureEvidence = async (
       native_evidence_ids: nativeEvidence.map(({ evidence_id: id }) => id),
       seed: input.seed,
       direction: input.direction,
+      ...(input.semantic_page === undefined
+        ? {}
+        : { semantic_page: input.semantic_page }),
     },
     result,
   );

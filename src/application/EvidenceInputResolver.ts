@@ -12,10 +12,27 @@ import { err, ok, type Result } from "../domain/result.js";
 import {
   readEvidenceFileSource,
   type EvidenceFileReadOptions,
-} from "./EvidenceFileSource.js";
+} from "./analysisView/evidenceFileSource.js";
 
 /** Read-only lookup supplied by the current investigation's Evidence ledger. */
 export type EvidenceLookup = (evidenceId: string) => Evidence | undefined;
+
+/** Normalize each selected record using its file context and the current ledger. */
+export interface EvidenceSourceResolutionOptions<
+  Field extends string = string,
+> extends EvidenceFileReadOptions {
+  readonly operation: string;
+  /**
+   * Receives each source once its reference resolves. Inline Evidence arrives
+   * as supplied, before any authentication. A record selected from an
+   * Evidence file looks up related records in that file before the ledger.
+   */
+  readonly resolveEvidence?: (
+    source: unknown,
+    lookup: EvidenceLookup | undefined,
+    field: Field,
+  ) => Result<Evidence, AnalysisError>;
+}
 
 /** Resolve an exact reference without selecting a target or running analysis. */
 export const resolveEvidenceInput = (
@@ -45,11 +62,6 @@ export const resolveEvidenceInput = (
   return ok(record);
 };
 
-/** The operation resolving the sources, its cancellation, and the scope for Evidence-file reads. */
-export interface EvidenceSourceOptions extends EvidenceFileReadOptions {
-  readonly operation: string;
-}
-
 /** A reference resolves to Evidence; inline Evidence is unchanged until its consumer authenticates it. */
 type ResolvedEvidenceSource<Source> = Source extends EvidenceReference
   ? Evidence
@@ -69,7 +81,7 @@ export const resolveEvidenceSources = async <
   request: Request,
   fields: readonly Field[],
   lookup: EvidenceLookup | undefined,
-  options: EvidenceSourceOptions,
+  options: EvidenceSourceResolutionOptions<Field>,
 ): Promise<
   Result<
     Omit<Request, Field> & {
@@ -94,15 +106,17 @@ const resolveEvidenceSource = async <Field extends string>(
   request: { readonly [Name in Field]: unknown },
   field: Field,
   lookup: EvidenceLookup | undefined,
-  options: EvidenceSourceOptions,
+  options: EvidenceSourceResolutionOptions<Field>,
 ): Promise<Result<unknown, AnalysisError>> => {
+  const { operation, resolveEvidence } = options;
   const source = request[field];
-  if (!namesEvidenceReference(source)) return ok(source);
+  if (!namesEvidenceReference(source))
+    return resolveEvidence?.(source, lookup, field) ?? ok(source);
   const reference = evidenceReferenceSchema.safeParse(source);
   if (!reference.success)
     return err(
       analysisInputErrorFromIssues(
-        options.operation,
+        operation,
         reference.error.issues.map((issue) => ({
           ...issue,
           path: [field, ...issue.path],
@@ -111,11 +125,24 @@ const resolveEvidenceSource = async <Field extends string>(
         { cause: reference.error },
       ),
     );
-  if (reference.data.kind === "retained-evidence")
-    return resolveEvidenceInput(reference.data, lookup);
-  return readEvidenceFileSource(
-    reference.data,
-    { operation: options.operation, path: [field] },
-    options,
-  );
+  if (reference.data.kind === "evidence-file")
+    return readEvidenceFileSource(
+      reference.data.path,
+      options,
+      reference.data.evidence_id,
+      {
+        operation,
+        path: [field],
+        resolveSelected: (selected, fileLookup) =>
+          resolveEvidence?.(
+            selected,
+            (id) => fileLookup(id) ?? lookup?.(id),
+            field,
+          ) ?? ok(selected),
+      },
+    );
+  const selected = resolveEvidenceInput(reference.data, lookup);
+  return selected.ok
+    ? (resolveEvidence?.(selected.value, lookup, field) ?? selected)
+    : selected;
 };

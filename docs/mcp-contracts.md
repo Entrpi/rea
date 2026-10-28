@@ -58,7 +58,9 @@ holds no valid Evidence, is refused with its file path rather than the field.
 references.
 
 `compare_artifacts` can also resolve an artifact summary to its exact retained
-parent in the session. Supported historical summaries keep their original
+parent in the session, or from the authenticated bundle containing a file-selected
+summary. File-local records take precedence over the session lookup. Unrelated
+records are not retained by the file resolver. Supported historical summaries keep their original
 Evidence identity and omissions; a missing or mismatched parent is rejected.
 
 `analyze_function` does not deliver its complete record by default. Without
@@ -332,6 +334,15 @@ unknown metadata. Missing omission counts remain null. Summary output carries
 every matching record; actual transport admission still applies. Omitted
 `detail` preserves complete canonical bundle delivery; filters require summary.
 
+Residual-unknown mutations reject missing Evidence or unknown references and
+unproven verified resolutions with nonretryable `invalid_request` diagnostics.
+`details.constraint` carries the validator's `kind`, owning `unknown_id`, and
+missing `evidence_id` or `related_unknown_id` where applicable. Correct the
+reported input or supply the required retained Evidence; unchanged retries do
+not repair these constraints. Rejected mutations leave retained state unchanged.
+Revision conflicts remain retryable `revision_conflict`; broken revision histories
+remain `evidence_integrity_mismatch`.
+
 `list_unknowns` returns every matching current head by default. For a smaller
 inline response, supply `offset` and `limit`, then follow `next_offset` until it
 is null. `total` counts all matching heads; each page preserves complete records
@@ -351,8 +362,11 @@ When `record_unknown` or `update_unknown` commits but its complete reply exceeds
 the response budget, `details.reported_limits.committed_unknown` identifies the
 exact unknown ID, committed revision and mutation Evidence IDs. Its retained
 Evidence reference remains available on the same connection. Export the bundle
-or page `list_unknowns` to recover the result; do not repeat the committed
-mutation. A delivery failure does not undo that revision.
+to recover the result; do not repeat the committed mutation. A single unknown
+may be too large for a `list_unknowns` page. A delivery failure does not undo
+that revision. If a list response overflows, retry on the same connection with
+the same filters and offset and a smaller limit; export if one head still cannot
+fit.
 
 For a portable exported bundle, the CLI shares this projection:
 `rea inspect-evidence-bundle '{"path":"/tmp/evidence.json","detail":"summary","filters":{"operation":"analyze_function"}}' --format json`.
