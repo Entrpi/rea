@@ -37,7 +37,10 @@ import {
 import type { ArtifactInventoryOptions } from "./types.js";
 import { readMachoHeaderPrefixFacts } from "../../domain/apple/machoContainer.js";
 import { hasDiskImageSignature } from "../../domain/apple/diskImageFormat.js";
-import { DFUSE_SUFFIX_BYTES } from "../../domain/firmware/dfuse.js";
+import {
+  DFUSE_SUFFIX_BYTES,
+  hasDfuSePrefix,
+} from "../../domain/firmware/dfuse.js";
 import {
   observeMzWindowsHeader,
   type MzWindowsHeaderSignatureEvidence,
@@ -279,12 +282,14 @@ const classifyRootFormat = async (
     archiveBytes,
     signal,
   );
-  // The probe stops reading at its bounded prefix, so the trailer comes from
+  // The probe stops at its bounded prefix, so a DfuSe trailer is read from
   // the file's own end unless the probe already observed every byte.
   const suffix =
-    probe.length >= archiveBytes
-      ? fatEvidence.suffix
-      : await read(archiveBytes - DFUSE_SUFFIX_BYTES, DFUSE_SUFFIX_BYTES);
+    fatEvidence.suffix === undefined &&
+    archiveBytes >= DFUSE_SUFFIX_BYTES &&
+    hasDfuSePrefix(evidence.prefix)
+      ? await read(archiveBytes - DFUSE_SUFFIX_BYTES, DFUSE_SUFFIX_BYTES)
+      : fatEvidence.suffix;
   const classificationEvidence = {
     ...fatEvidence,
     ...(suffix === undefined ? {} : { suffix }),

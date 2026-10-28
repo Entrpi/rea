@@ -507,6 +507,12 @@ it("classifies nested UF2 by block magics and DfuSe by prefix and suffix", () =>
       dfu.length,
     ),
   ).toMatchObject({ kind: "container", format: "dfuse" });
+  // Bytes the probe never saw may follow, so it reports no suffix at all.
+  const partial = probe.finish(dfu.length + 1);
+  expect(partial.suffix).toBeUndefined();
+  expect(
+    classifyArtifactContent("firmware/update.bin", partial, dfu.length + 1),
+  ).toMatchObject({ format: "file" });
 });
 
 describe("FAT prefix observation coverage", () => {

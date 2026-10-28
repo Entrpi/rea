@@ -157,7 +157,7 @@ export const nodeSeaEntryMetadataSchema = z.strictObject({
 
 /**
  * UF2 facts derived from every 512-byte block. Regions hold only valid
- * main-flash payloads; block numbering is counted per familyID and block count.
+ * main-flash payloads; block numbering is grouped by familyID and block count.
  */
 export const uf2MetadataSchema = z.strictObject({
   kind: z.literal("uf2"),
@@ -170,8 +170,11 @@ export const uf2MetadataSchema = z.strictObject({
   md5_block_count: offset,
   extension_tag_block_count: offset,
   family_count: offset,
-  sequence_count: offset,
+  /** The registry revision REA's region `family_name` values come from. */
+  family_name_registry: z.string(),
+  numbering_group_count: offset,
   missing_block_count: offset,
+  ambiguous_numbering_group_count: offset,
   repeated_block_count: offset,
   out_of_order_block_count: offset,
   block_number_out_of_range_count: offset,
@@ -181,23 +184,23 @@ export const uf2MetadataSchema = z.strictObject({
 });
 export type Uf2Metadata = z.infer<typeof uf2MetadataSchema>;
 
-/** One family's address-contiguous region; blocks are zero-based file positions. */
+/** One family's address-contiguous region; file blocks are zero-based positions. */
 export const uf2RegionMetadataSchema = z.strictObject({
   kind: z.literal("uf2-region"),
   family_id: uint32.nullable(),
+  /** REA's label for `family_id`, from `family_name_registry`; not file content. */
   family_name: z.string().nullable(),
   start_address: uint32,
   end_address: uint32,
   length: offset,
   block_count: offset,
-  first_block: offset,
-  last_block: offset,
+  first_file_block: offset,
+  last_file_block: offset,
 });
 
 /** DfuSe prefix and DFU suffix facts; both CRCs use the suffix's stored form. */
 export const dfuSeMetadataSchema = z.strictObject({
   kind: z.literal("dfuse"),
-  format_version: uint32,
   image_size: uint32,
   target_count: uint32,
   element_count: offset,
@@ -207,7 +210,6 @@ export const dfuSeMetadataSchema = z.strictObject({
   device_version: uint32,
   product_id: uint32,
   vendor_id: uint32,
-  dfu_version: uint32,
   suffix_crc: uint32,
   computed_crc: uint32,
 });
@@ -223,6 +225,14 @@ export const dfuSeElementMetadataSchema = z.strictObject({
   start_address: uint32,
   end_address: uint32,
   length: offset,
+});
+
+/** The device memory an element targets, which its path and bytes do not show. */
+export const dfuSeElementDeclaration = (
+  metadata: z.infer<typeof dfuSeElementMetadataSchema>,
+) => ({
+  alternate_setting: metadata.alternate_setting,
+  target_name: metadata.target_name,
 });
 
 /**

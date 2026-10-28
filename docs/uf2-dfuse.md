@@ -40,55 +40,72 @@ never filled.
 
 Region `format_metadata` (`uf2-region`) records `family_id` (or `null`),
 `family_name`, `start_address`, `end_address`, `length`, `block_count`, and
-`first_block`/`last_block`: the zero-based file positions of the contributing
-blocks. `family_name` is the short name from a small table copied from
-Microsoft's `uf2families.json` at commit
-[`cf3bd7f9`](https://github.com/microsoft/uf2/blob/cf3bd7f9c274b949528f8cd6a19eef2502a687d2/utils/uf2families.json).
-It covers the ESP32 family, ESP8266, RP2040, the RP2350 and RP2XXX download
-families, STM32F4, nRF52840, SAMD21 and SAMD51. Other IDs keep their value with
-`family_name: null`. A familyID names a target family; it does not establish
-the CPU state, memory map or entry point.
+`first_file_block`/`last_file_block`: the zero-based positions in the file of
+the contributing blocks, not their UF2 block numbers. `family_name` is REA's
+label, not file content. It comes from a small table copied from Microsoft's
+`uf2families.json` at commit
+[`cf3bd7f9`](https://github.com/microsoft/uf2/blob/cf3bd7f9c274b949528f8cd6a19eef2502a687d2/utils/uf2families.json),
+which the root's `family_name_registry` names. The table covers the ESP32
+family, ESP8266, RP2040, the RP2350 and RP2XXX download families, STM32F4,
+nRF52840, SAMD21 and SAMD51; other IDs keep their value with `family_name:
+null`. A familyID names a target family; it does not establish the CPU state,
+memory map or entry point.
 
 Root `format_metadata` (`uf2`) records:
 
-| Field                                                      | Meaning                                                                                        |
-| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `block_count`, `trailing_bytes`                            | Complete 512-byte blocks, and bytes after the last complete block                              |
-| `invalid_block_count`                                      | Blocks with a wrong magic number, a payload over 476 bytes, or a payload that wraps past 4 GiB |
-| `flash_block_count`                                        | Valid main-flash blocks, the only source of region bytes                                       |
-| `not_main_flash_block_count`, `file_container_block_count` | Blocks with flag `0x1`, and blocks with flag `0x1000`                                          |
-| `md5_block_count`, `extension_tag_block_count`             | Blocks that declare an MD5 region (`0x4000`) or extension tags (`0x8000`)                      |
-| `family_count`                                             | Distinct familyIDs among main-flash blocks                                                     |
-| `sequence_count`                                           | Numbering sequences: valid blocks grouped by familyID and declared block count                 |
-| `missing_block_count`                                      | Block numbers below a sequence's block count that no valid block carries                       |
-| `repeated_block_count`, `out_of_order_block_count`         | Blocks whose number already appeared, and blocks numbered at or below their predecessor        |
-| `block_number_out_of_range_count`                          | Blocks numbered at or above their block count, or with a block count of 0                      |
-| `region_count`, `data_bytes`, `duplicate_bytes`            | Regions, unique decoded bytes, and bytes rewritten with identical values                       |
+| Field                                                      | Meaning                                                                                                                |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `block_count`, `trailing_bytes`                            | Complete 512-byte blocks, and bytes after the last complete block                                                      |
+| `invalid_block_count`                                      | Blocks with a wrong magic number, a payload over 476 bytes, or a payload that wraps past 4 GiB                         |
+| `flash_block_count`                                        | Valid main-flash blocks, the only source of region bytes                                                               |
+| `not_main_flash_block_count`, `file_container_block_count` | Blocks with flag `0x1`, and blocks with flag `0x1000`                                                                  |
+| `md5_block_count`, `extension_tag_block_count`             | Blocks that declare an MD5 flash region (`0x4000`) or extension tags (`0x8000`)                                        |
+| `family_count`, `family_name_registry`                     | Distinct familyIDs among main-flash blocks, and the registry revision of `family_name`                                 |
+| `numbering_group_count`                                    | Groups of valid blocks that share a familyID (or none) and a declared block count                                      |
+| `missing_block_count`                                      | Block numbers below a group's block count that no valid block carries                                                  |
+| `ambiguous_numbering_group_count`                          | Groups whose numbers appear at unequal counts of target addresses                                                      |
+| `repeated_block_count`, `out_of_order_block_count`         | Blocks whose number already appeared in their group, and blocks numbered at or below the previous block of their group |
+| `block_number_out_of_range_count`                          | Blocks numbered at or above their block count, or with a block count of 0                                              |
+| `region_count`, `data_bytes`, `duplicate_bytes`            | Regions, unique decoded bytes, and bytes rewritten with identical values                                               |
 
-Numbering is counted per familyID because a bootloader ignores every field of
-another family's block, including its numbering. esptool numbers each merged
-input file from 0, so its files are separate sequences of one family.
+Numbering is grouped by familyID because a bootloader ignores every field of
+another family's block, including its numbering. Within a group, a block number
+seen at several target addresses belongs to several copies of a sequence:
+esptool numbers each merged input file from 0, so inputs with equal block
+counts share a group, and each number then appears once per input. A block sent
+twice to the same address is one block. A group is complete when every number
+below its block count is present at the same count of addresses. If some numbers
+appear at more addresses than others, a copy may have lost a block, so coverage
+is unknown and a limitation names the group.
 
 ## UF2 facts, limitations and failures
 
-| Situation                                                    | Outcome                                                                             |
-| ------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| Blocks out of address or number order                        | Sorted into regions; counted in `out_of_order_block_count`                          |
-| An address written twice with the same value in one family   | Accepted and counted in `duplicate_bytes`                                           |
-| An address written twice with different values in one family | Fails, naming the family, the address and the block spans of both writes            |
-| The same addresses in different families                     | Separate regions; never a conflict                                                  |
-| Numbered blocks absent from a sequence                       | Regions are returned; coverage is unknown and a limitation names the sequences      |
-| An invalid block                                             | Excluded; coverage is unknown and a limitation names the first one and its offset   |
-| A partial final block                                        | Excluded; coverage is unknown and the file may be truncated                         |
-| Block numbers at or above the block count                    | Payloads are kept; coverage is unknown                                              |
-| Not-main-flash blocks (`0x1`)                                | Excluded from regions and reported with their payload bytes; coverage is unaffected |
-| File-container blocks (`0x1000`)                             | Excluded from regions; their files are not reconstructed, so coverage is unknown    |
-| MD5 (`0x4000`) and extension-tag (`0x8000`) blocks           | Counted; the MD5 regions and tags are not decoded or verified                       |
+| Situation                                                     | Outcome                                                                                        |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Blocks out of address order                                   | Sorted into regions                                                                            |
+| Blocks numbered at or below the previous block of their group | Counted in `out_of_order_block_count`; the spec lets blocks arrive in any order                |
+| An address written twice with the same value in one family    | Accepted and counted in `duplicate_bytes`                                                      |
+| An address written twice with different values in one family  | Fails, naming the family, the address and the block spans of both writes                       |
+| The same addresses in different families                      | Separate regions; never a conflict                                                             |
+| Numbered blocks absent from a group                           | Regions are returned; coverage is unknown and a limitation names the groups                    |
+| Reused numbers at unequal address counts                      | Regions are returned; coverage is unknown and a limitation names the groups                    |
+| An invalid block                                              | Excluded; coverage is unknown and a limitation names the first one and its offset              |
+| A partial final block                                         | Excluded; coverage is unknown and the file may be truncated                                    |
+| Block numbers at or above the block count                     | Payloads are kept; coverage is unknown                                                         |
+| Not-main-flash blocks (`0x1`)                                 | Excluded from regions; their count and payload byte count are reported; coverage is unaffected |
+| File-container blocks (`0x1000`)                              | Excluded from regions; their files are not reconstructed, so coverage is unknown               |
+| MD5 (`0x4000`) and extension-tag (`0x8000`) blocks            | Counted and reported as a limitation; neither is decoded or verified                           |
 
-The MD5 structure is not verified because producers disagree on its place:
-the specification puts it in the last 24 bytes of the data area, while
-esptool v4.12.0 and v5.6.0 write it right after a shorter final payload and
-leave those 24 bytes zero.
+Unlike a malformed Intel HEX record, which fails the whole file, an invalid UF2
+block is excluded and reported: each block carries its own framing and address,
+so its neighbours stay readable.
+
+The MD5 structure is not checked because it is not a checksum of the block's
+bytes in the file. It names a region of device flash, usually aligned to erase
+pages, whose MD5 a flashing tool compares to skip writing. Producers also
+disagree on its place: the specification puts it in the last 24 bytes of the
+data area, while esptool v4.12.0 and v5.6.0 write it right after a shorter final
+payload, so those 24 bytes hold zeros or part of that structure.
 
 ## DfuSe regions and metadata
 
@@ -102,35 +119,44 @@ Element `format_metadata` (`dfuse-element`) records `target_index`,
 `alternate_setting`, `target_name`, `element_index`, `start_address`,
 `end_address` and `length`. `target_name` is `null` when `bTargetNamed` is 0;
 otherwise it is `szTargetName` up to its first NUL, one character per byte.
+`compare_artifacts` treats an element's alternate setting and target name as
+its declaration, so the same bytes moved to another device memory are
+`changed` in `metadata`.
 
 Root `format_metadata` (`dfuse`) records:
 
-| Field                                                      | Meaning                                                                         |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `format_version`, `image_size`, `target_count`             | `bVersion`, `DFUImageSize` and `bTargets` from the prefix                       |
-| `element_count`, `empty_element_count`, `data_bytes`       | All elements, elements of 0 bytes (which have no entry), and element data bytes |
-| `overlapping_element_count`                                | Elements that overlap an earlier element of the same alternate setting          |
-| `device_version`, `product_id`, `vendor_id`, `dfu_version` | `bcdDevice`, `idProduct`, `idVendor` and `bcdDFU` from the suffix               |
-| `suffix_crc`, `computed_crc`                               | The stored `dwCRC`, and the same CRC computed over every byte before it         |
+| Field                                                | Meaning                                                                         |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `image_size`, `target_count`                         | `DFUImageSize` and `bTargets` from the prefix                                   |
+| `element_count`, `empty_element_count`, `data_bytes` | All elements, elements of 0 bytes (which have no entry), and element data bytes |
+| `overlapping_element_count`                          | Elements that overlap an earlier element of the same alternate setting          |
+| `device_version`, `product_id`, `vendor_id`          | `bcdDevice`, `idProduct` and `idVendor` from the suffix                         |
+| `suffix_crc`, `computed_crc`                         | The stored `dwCRC`, and the same CRC computed over every byte before it         |
 
-The DFU suffix CRC is CRC-32 without the final inversion, as dfu-util stores
-and checks it. Producers disagree on `DFUImageSize`: UM0391 calls it the file
-length, which dfu-util's `dfuse-pack.py` writes, while ST's DfuFileMgr,
-MicroPython's `dfu.py` and pydfu leave the 16-byte suffix out. REA accepts
-either value and keeps the declared one in `image_size`.
+Recognition already requires `bVersion` 1 and `bcdDFU` `0x011A`, so they are
+not repeated. The DFU suffix CRC is CRC-32 without the final inversion, as
+dfu-util stores and checks it.
+
+Producers disagree on `DFUImageSize`. UM0391 calls it the file length, and
+dfu-util's `dfuse-pack.py` writes that value since commit `ee6b393d`
+(2020-10-08). Earlier `dfuse-pack.py` and MicroPython's `tools/dfu.py`
+(checked at `cb99ca98`) write the length before the suffix, and an ST community
+report describes ST's DfuFileMgr the same way; REA has not run DfuFileMgr.
+dfu-util's own parser ignores the field. REA accepts either value and keeps the
+declared one in `image_size`.
 
 ## DfuSe facts, limitations and failures
 
-| Situation                                                                          | Outcome                                                                   |
-| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `dwCRC` differs from the computed CRC                                              | Follows `integrity_policy`, below                                         |
-| A target without the `Target` signature                                            | Fails with its byte offset                                                |
-| `DFUImageSize` that equals neither the file length nor the bytes before the suffix | Fails with the declared size, the suffix offset and the file length       |
-| A target size or an element size that disagrees with the bytes that hold it        | Fails with the byte offset and the declared and available sizes           |
-| An element whose address range wraps past `0xFFFFFFFF`                             | Fails with its byte offset                                                |
-| Overlapping elements of one alternate setting                                      | Kept as separate entries; a limitation names them; coverage is unaffected |
-| The same addresses in different alternate settings                                 | Separate entries; an alternate setting selects a device memory            |
-| Elements of 0 bytes                                                                | Counted in `empty_element_count`; no entry                                |
+| Situation                                                                          | Outcome                                                                                             |
+| ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `dwCRC` differs from the computed CRC                                              | Follows `integrity_policy`, below                                                                   |
+| A target without the `Target` signature                                            | Fails with its byte offset                                                                          |
+| `DFUImageSize` that equals neither the file length nor the bytes before the suffix | Fails with the declared size, the suffix offset, the file length and whether the suffix CRC matches |
+| A target size or an element size that disagrees with the bytes that hold it        | Fails with the byte offset and the declared and available sizes                                     |
+| An element whose address range wraps past `0xFFFFFFFF`                             | Fails with its byte offset                                                                          |
+| Overlapping elements of one alternate setting                                      | Kept as separate entries; a limitation names them; coverage is unaffected                           |
+| The same addresses in different alternate settings                                 | Separate entries; an alternate setting selects a device memory                                      |
+| Elements of 0 bytes, and targets with no elements                                  | No entry; counted, and a limitation names their addresses and alternate settings                    |
 
 A CRC mismatch is an integrity contradiction, never proof of a cause. With the
 default `integrity_policy` `fail`, inspection and extraction fail with
@@ -139,16 +165,22 @@ default `integrity_policy` `fail`, inspection and extraction fail with
 (CLI `--integrity-policy record-and-continue`), the root occurrence becomes
 `mismatched`, `integrity_contradictions` records the pair for logical path `.`,
 and extraction carries that contradiction, because every element came from the
-contradicted container.
+contradicted container. The root occurrence has no `declared_integrity`: that
+field holds entry digests, so the declared CRC appears in the contradiction and,
+as a number, in `suffix_crc`. Under `fail`, the elements are hashed before the
+mismatch is raised.
 
 ## Limits
 
 Each file must be at most 128 MiB. The UF2 decoder reserves at most 476 bytes
-per complete block before reading and retains at most 65,536
-address-discontiguous block runs. The DfuSe decoder holds the file once and
-parses at most 65,536 elements, empty ones included. These are fixed resource
-bounds, not format limits, and fail as limits (`file-size` and `capacity`) with
-no runtime override. Configurable ceilings are tracked in
+per complete block before reading, merges payloads into regions of at most the
+same total size, and keeps one numbering entry per valid block, so its peak is
+about twice the decoded bytes. It retains at most 65,536 regions as entries; the
+order of blocks does not count against that bound. The DfuSe decoder holds the
+file once, serves elements as views of it, and retains at most 65,536 elements
+with bytes as entries; empty elements are only counted. These are fixed
+resource bounds, not format limits, and fail as limits (`file-size` and
+`capacity`) with no runtime override. Configurable ceilings are tracked in
 [#6176](https://github.com/morluto/rea/issues/6176).
 
 Decoded regions are cached only for the reader's lifetime, and each open checks
@@ -167,20 +199,24 @@ are not resolved.
 ## Verification
 
 Fixtures written from the UF2 specification and from ST UM0391 cover block and
-element layouts, numbering, families, rewrites and conflicts, invalid and
-partial blocks, not-main-flash and file-container blocks, structural faults,
-overlaps, both integrity policies, resource refusals, inventory, extraction and
-reader identity checks. Two DfuSe fixtures are byte-identical, CRC included,
-to what the `build()` functions of dfu-util's `dfuse-pack.py` and MicroPython's
-`tools/dfu.py` produce for the same image, one for each `DFUImageSize`
-convention. Those functions were transcribed and run under Python 3; the
-scripts themselves were not run. CLI and stdio MCP tests exercise the same
-artifact provider and advertised schemas.
+element layouts, numbering groups and reused numbers, families, rewrites and
+conflicts, invalid and partial blocks, not-main-flash and file-container blocks,
+structural faults, overlaps, both integrity policies, accepted boundaries beside
+each refusal, resource refusals, inventory, extraction, comparison and reader
+identity checks. The reader lifecycle (cancellation, close and stream
+ownership) is covered by the Intel HEX reader tests, which exercise the shared
+reader. Two DfuSe fixtures are byte-identical, CRC included, to what the
+`build()` functions of dfu-util's `dfuse-pack.py` (at `f9a537c9`) and
+MicroPython's `tools/dfu.py` (at `cb99ca98`) produce for the same image, one for
+each `DFUImageSize` convention. Those functions were transcribed and run under
+Python 3; the scripts themselves were not run. CLI and stdio MCP tests exercise
+the same artifact provider and advertised schemas.
 
 `npm run verify:uf2` runs esptool's `merge-bin --format uf2` on generated
-inputs at known addresses, with and without MD5 and with 256-byte payloads, and
-on a concatenation of two chips' outputs. Inspection and extraction must return
-every input at its address under esptool's own familyID. It passed with esptool
-v4.12.0 and v5.6.0 on macOS. Set `REA_ESPTOOL_PYTHON` to a Python that runs
-`-m esptool`. Pico SDK, picotool, `uf2conv.py`, TinyUF2 and real DfuSe producers
-remain unverified, and no device accepted these files in REA's tests.
+inputs at known addresses, with and without MD5, with 256-byte payloads, with
+two inputs of equal block count, and on a concatenation of two chips' outputs.
+Inspection and extraction must return every input at its address under
+esptool's own familyID. It passed with esptool v4.12.0 and v5.6.0 on macOS. Set
+`REA_ESPTOOL_PYTHON` to a Python that runs `-m esptool`. Pico SDK, picotool,
+`uf2conv.py`, TinyUF2 and real DfuSe producers remain unverified, and no device
+accepted these files in REA's tests.

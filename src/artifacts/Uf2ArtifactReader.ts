@@ -1,5 +1,4 @@
 import { createUf2Decoder, type Uf2Image } from "../domain/firmware/uf2.js";
-import { uf2FamilyName } from "../domain/firmware/uf2Families.js";
 import {
   DecodedRegionArtifactReader,
   regionFileName,
@@ -25,14 +24,13 @@ const uf2Regions: RegionDecoding<Uf2Image> = {
       formatMetadata: {
         kind: "uf2-region",
         family_id: region.familyId,
-        family_name:
-          region.familyId === null ? null : uf2FamilyName(region.familyId),
+        family_name: region.familyName,
         start_address: region.start,
         end_address: region.end,
         length: region.bytes.length,
         block_count: region.blockCount,
-        first_block: region.firstBlock,
-        last_block: region.lastBlock,
+        first_file_block: region.firstFileBlock,
+        last_file_block: region.lastFileBlock,
       },
       bytes: region.bytes,
     })),

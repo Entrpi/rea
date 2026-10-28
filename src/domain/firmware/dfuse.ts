@@ -2,6 +2,7 @@ import { crc32 } from "node:zlib";
 
 import type { DfuSeMetadata } from "../artifactFormatMetadata.js";
 import { err, ok, type Result } from "../result.js";
+import type { RegionDecodeFailure, RegionDecoder } from "./regionDecoder.js";
 
 /** "DfuSe", bVersion, DFUImageSize and bTargets (ST UM0391). */
 const PREFIX_BYTES = 11;
@@ -16,8 +17,8 @@ export const DFUSE_SUFFIX_BYTES = 16;
 const DFUSE_VERSION = 1;
 const DFU_SUFFIX_VERSION = 0x011a;
 const ADDRESS_SPACE = 0x1_0000_0000;
-/** Overlaps named in one limitation before the rest are counted. */
-const NAMED_OVERLAPS = 4;
+/** Elements named in one limitation before the rest are counted. */
+const NAMED_ELEMENTS = 4;
 const SIGNATURE = [0x44, 0x66, 0x75, 0x53, 0x65];
 const TARGET_SIGNATURE = [0x54, 0x61, 0x72, 0x67, 0x65, 0x74];
 const SUFFIX_SIGNATURE = [0x55, 0x46, 0x44];
@@ -27,15 +28,8 @@ const SUFFIX_SIGNATURE = [0x55, 0x46, 0x44];
  * tracked in #6176. The decoder holds the file once and slices elements from it.
  */
 export const DFUSE_MAX_FILE_BYTES = 128 * 1024 * 1024;
-/** Elements parsed from one file, empty ones included. */
+/** Non-empty elements retained as inventory entries, as for UF2 regions. */
 export const DFUSE_MAX_ELEMENTS = 65_536;
-
-/** A whole-file refusal; no partial elements accompany it. */
-export interface DfuSeFailure {
-  readonly kind: "format" | "limit";
-  readonly message: string;
-  readonly boundary?: "file-size" | "capacity";
-}
 
 /** One element: bytes the file declares for an address in one alternate setting. */
 export interface DfuSeElement {
@@ -55,13 +49,6 @@ export interface DfuSeImage {
   /** In file order; empty elements are counted in metadata but not listed. */
   readonly elements: readonly DfuSeElement[];
   readonly limitations: readonly string[];
-}
-
-export interface DfuSeDecoder {
-  /** Retain the next file bytes. */
-  write(chunk: Uint8Array): Result<void, DfuSeFailure>;
-  /** Parse the retained file and compute its suffix CRC. */
-  finish(): Result<DfuSeImage, DfuSeFailure>;
 }
 
 const readUint16 = (bytes: Uint8Array, offset: number): number =>
@@ -106,7 +93,7 @@ export const isDfuSeFile = (
 /** Start a decoder that holds at most the admitted file size. */
 export const createDfuSeDecoder = (
   fileBytes: number,
-): Result<DfuSeDecoder, DfuSeFailure> =>
+): Result<RegionDecoder<DfuSeImage>, RegionDecodeFailure> =>
   Number.isSafeInteger(fileBytes) &&
   fileBytes >= 0 &&
   fileBytes <= DFUSE_MAX_FILE_BYTES
@@ -120,12 +107,19 @@ export const createDfuSeDecoder = (
 /** The DFU suffix CRC: CRC-32 without the final inversion, over every byte before dwCRC. */
 const dfuCrc = (bytes: Uint8Array): number => ~crc32(bytes) >>> 0;
 
-const formatFailure = (offset: number, detail: string): DfuSeFailure => ({
+const formatFailure = (
+  offset: number,
+  detail: string,
+): RegionDecodeFailure => ({
   kind: "format",
   message: `byte offset ${String(offset)}: ${detail}`,
 });
 
-class RetainingDfuSeDecoder implements DfuSeDecoder {
+/** At most NAMED_ELEMENTS descriptions, then a count of the rest. */
+const named = (items: readonly string[]): string =>
+  `${items.slice(0, NAMED_ELEMENTS).join("; ")}${items.length > NAMED_ELEMENTS ? `; and ${String(items.length - NAMED_ELEMENTS)} more` : ""}`;
+
+class RetainingDfuSeDecoder implements RegionDecoder<DfuSeImage> {
   readonly #bytes: Uint8Array;
   #length = 0;
 
@@ -133,7 +127,7 @@ class RetainingDfuSeDecoder implements DfuSeDecoder {
     this.#bytes = new Uint8Array(fileBytes);
   }
 
-  write(chunk: Uint8Array): Result<void, DfuSeFailure> {
+  write(chunk: Uint8Array): Result<void, RegionDecodeFailure> {
     if (this.#length + chunk.length > this.#bytes.length)
       return err({
         kind: "limit",
@@ -145,12 +139,14 @@ class RetainingDfuSeDecoder implements DfuSeDecoder {
     return ok(undefined);
   }
 
-  finish(): Result<DfuSeImage, DfuSeFailure> {
+  finish(): Result<DfuSeImage, RegionDecodeFailure> {
     return parseDfuSe(this.#bytes.subarray(0, this.#length));
   }
 }
 
-const parseDfuSe = (bytes: Uint8Array): Result<DfuSeImage, DfuSeFailure> => {
+const parseDfuSe = (
+  bytes: Uint8Array,
+): Result<DfuSeImage, RegionDecodeFailure> => {
   const suffixStart = bytes.length - DFUSE_SUFFIX_BYTES;
   if (
     bytes.length < PREFIX_BYTES + DFUSE_SUFFIX_BYTES ||
@@ -164,13 +160,16 @@ const parseDfuSe = (bytes: Uint8Array): Result<DfuSeImage, DfuSeFailure> => {
       ),
     );
   // UM0391 calls DFUImageSize the file length, which dfu-util's dfuse-pack.py
-  // writes; ST's DfuFileMgr, MicroPython's dfu.py and pydfu exclude the suffix.
+  // writes since ee6b393d (2020-10-08). Earlier dfuse-pack.py and MicroPython's
+  // tools/dfu.py write the length before the suffix.
   const imageSize = readUint32(bytes, 6);
+  const suffixCrc = readUint32(bytes, suffixStart + 12);
+  const computedCrc = dfuCrc(bytes.subarray(0, bytes.length - 4));
   if (imageSize !== suffixStart && imageSize !== bytes.length)
     return err(
       formatFailure(
         6,
-        `DFUImageSize declares ${String(imageSize)} bytes, but the DFU suffix begins at byte ${String(suffixStart)} and the file holds ${String(bytes.length)} bytes`,
+        `DFUImageSize declares ${String(imageSize)} bytes, but the DFU suffix begins at byte ${String(suffixStart)} and the file holds ${String(bytes.length)} bytes; the suffix CRC ${suffixCrc === computedCrc ? "matches" : "does not match"} the file`,
       ),
     );
   const targetCount = bytes[10] ?? 0;
@@ -193,7 +192,6 @@ const parseDfuSe = (bytes: Uint8Array): Result<DfuSeImage, DfuSeFailure> => {
   return ok({
     metadata: {
       kind: "dfuse",
-      format_version: DFUSE_VERSION,
       image_size: imageSize,
       target_count: targetCount,
       element_count: walk.elementCount,
@@ -206,23 +204,30 @@ const parseDfuSe = (bytes: Uint8Array): Result<DfuSeImage, DfuSeFailure> => {
       device_version: readUint16(bytes, suffixStart),
       product_id: readUint16(bytes, suffixStart + 2),
       vendor_id: readUint16(bytes, suffixStart + 4),
-      dfu_version: readUint16(bytes, suffixStart + 6),
-      suffix_crc: readUint32(bytes, suffixStart + 12),
-      computed_crc: dfuCrc(bytes.subarray(0, bytes.length - 4)),
+      suffix_crc: suffixCrc,
+      computed_crc: computedCrc,
     },
     elements,
-    limitations:
-      overlaps.length === 0
+    limitations: [
+      ...(overlaps.length === 0
         ? []
         : [
-            `${String(overlaps.length)} DfuSe element(s) overlap an earlier element of the same alternate setting; each stays a separate entry and no bytes were merged: ${overlaps.slice(0, NAMED_OVERLAPS).join("; ")}${overlaps.length > NAMED_OVERLAPS ? `; and ${String(overlaps.length - NAMED_OVERLAPS)} more` : ""}.`,
-          ],
+            `${String(overlaps.length)} DfuSe element(s) overlap an earlier element of the same alternate setting; each stays a separate entry and no bytes were merged: ${named(overlaps)}.`,
+          ]),
+      ...(walk.unlisted.length === 0
+        ? []
+        : [
+            `DfuSe declarations without bytes have no entry: ${named(walk.unlisted)}.`,
+          ]),
+    ],
   });
 };
 
 /** Targets and elements in file order; every size is checked against its container. */
 class TargetWalk {
   readonly elements: DfuSeElement[] = [];
+  /** Empty elements and element-less targets, which no entry can show. */
+  readonly unlisted: string[] = [];
   elementCount = 0;
   emptyElements = 0;
 
@@ -232,7 +237,10 @@ class TargetWalk {
   ) {}
 
   /** Parse one target at `offset`; the result is the offset after its elements. */
-  target(targetIndex: number, offset: number): Result<number, DfuSeFailure> {
+  target(
+    targetIndex: number,
+    offset: number,
+  ): Result<number, RegionDecodeFailure> {
     const { bytes } = this;
     if (offset + TARGET_PREFIX_BYTES > this.suffixStart)
       return err(
@@ -272,6 +280,10 @@ class TargetWalk {
               ),
             ),
     };
+    if (declaredElements === 0)
+      this.unlisted.push(
+        `target ${String(targetIndex)} (alternate setting ${String(target.alternateSetting)}) declares no elements`,
+      );
     let position = bodyStart;
     for (let index = 0; index < declaredElements; index += 1) {
       const next = this.#element(target, index, position, bodyEnd);
@@ -296,7 +308,7 @@ class TargetWalk {
     elementIndex: number,
     position: number,
     bodyEnd: number,
-  ): Result<number, DfuSeFailure> {
+  ): Result<number, RegionDecodeFailure> {
     const name = `target ${String(target.targetIndex)} element ${String(elementIndex)}`;
     if (position + ELEMENT_HEADER_BYTES > bodyEnd)
       return err(
@@ -305,12 +317,6 @@ class TargetWalk {
           `${name} header lies beyond the target's end at byte ${String(bodyEnd)}`,
         ),
       );
-    if (this.elementCount >= DFUSE_MAX_ELEMENTS)
-      return err({
-        kind: "limit",
-        boundary: "capacity",
-        message: `byte offset ${String(position)}: the file declares more than ${String(DFUSE_MAX_ELEMENTS)} elements`,
-      });
     const address = readUint32(this.bytes, position);
     const size = readUint32(this.bytes, position + 4);
     const dataOffset = position + ELEMENT_HEADER_BYTES;
@@ -328,9 +334,19 @@ class TargetWalk {
           `${name} at ${hex32(address)} with ${String(size)} bytes wraps past 0xffffffff`,
         ),
       );
+    if (size > 0 && this.elements.length >= DFUSE_MAX_ELEMENTS)
+      return err({
+        kind: "limit",
+        boundary: "capacity",
+        message: `byte offset ${String(position)}: the file holds more than ${String(DFUSE_MAX_ELEMENTS)} elements with bytes, the most retained as entries`,
+      });
     this.elementCount += 1;
-    if (size === 0) this.emptyElements += 1;
-    else
+    if (size === 0) {
+      this.emptyElements += 1;
+      this.unlisted.push(
+        `${name} at ${hex32(address)} (alternate setting ${String(target.alternateSetting)}) holds no bytes`,
+      );
+    } else
       this.elements.push({
         ...target,
         elementIndex,

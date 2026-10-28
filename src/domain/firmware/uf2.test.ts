@@ -75,12 +75,13 @@ it("joins one family's numbered blocks into a region across chunk boundaries", (
     expect(regionFacts(decoded)).toEqual([
       {
         familyId: RP2040_FAMILY,
+        familyName: "RP2040",
         start: 0x1000_0000,
         end: 0x1000_03e7,
         length: 1000,
         blockCount: 4,
-        firstBlock: 0,
-        lastBlock: 3,
+        firstFileBlock: 0,
+        lastFileBlock: 3,
       },
     ]);
     expect(Buffer.compare(decoded.regions[0]!.bytes, bytes)).toBe(0);
@@ -96,8 +97,10 @@ it("joins one family's numbered blocks into a region across chunk boundaries", (
     md5_block_count: 0,
     extension_tag_block_count: 0,
     family_count: 1,
-    sequence_count: 1,
+    family_name_registry: "microsoft/uf2 cf3bd7f9 utils/uf2families.json",
+    numbering_group_count: 1,
     missing_block_count: 0,
+    ambiguous_numbering_group_count: 0,
     repeated_block_count: 0,
     out_of_order_block_count: 0,
     block_number_out_of_range_count: 0,
@@ -128,15 +131,15 @@ it("keeps gaps between regions and sorts blocks that arrive out of order", () =>
       start: 0x1000_0000,
       end: 0x1000_02ff,
       blockCount: 3,
-      firstBlock: 1,
-      lastBlock: 3,
+      firstFileBlock: 1,
+      lastFileBlock: 3,
     }),
     expect.objectContaining({
       start: 0x1000_1000,
       end: 0x1000_1001,
       blockCount: 1,
-      firstBlock: 0,
-      lastBlock: 0,
+      firstFileBlock: 0,
+      lastFileBlock: 0,
     }),
   ]);
   expect(decoded.metadata).toMatchObject({
@@ -213,13 +216,13 @@ it("keeps families apart even when they target the same addresses", () => {
   ]);
   expect(decoded.metadata).toMatchObject({
     family_count: 3,
-    sequence_count: 3,
+    numbering_group_count: 3,
     missing_block_count: 1,
     duplicate_bytes: 0,
   });
   expect(decoded.complete).toBe(false);
   expect(decoded.limitations).toEqual([
-    "UF2 numbering declares 1 block(s) that are absent: family 0xe48bff57 (RP2XXX_ABSOLUTE) has 1 of 2 numbered blocks.",
+    "UF2 numbering declares 1 block(s) that are absent: family 0xe48bff57 (RP2XXX_ABSOLUTE) with 2 numbered blocks has 1 of them.",
   ]);
 });
 
@@ -232,12 +235,12 @@ it("reports numbered blocks that are absent and leaves coverage unknown", () => 
     region_count: 2,
   });
   expect(decoded.limitations).toEqual([
-    "UF2 numbering declares 1 block(s) that are absent: family 0xe48bff56 (RP2040) has 3 of 4 numbered blocks.",
+    "UF2 numbering declares 1 block(s) that are absent: family 0xe48bff56 (RP2040) with 4 numbered blocks has 3 of them.",
   ]);
 });
 
-it("counts repeated numbering sequences without reporting absent blocks", () => {
-  // esptool numbers each merged file from 0, so equal-sized files repeat numbers.
+it("keeps equal-sized esptool copies complete and an identical resend complete", () => {
+  // esptool numbers each merged file from 0, so equal-sized files reuse numbers.
   const decoded = image(
     uf2File([
       ...uf2Image(0xc47e_5767, 0x0, patternBytes(512, 3)),
@@ -245,15 +248,43 @@ it("counts repeated numbering sequences without reporting absent blocks", () => 
     ]),
   );
   expect(decoded.metadata).toMatchObject({
-    sequence_count: 1,
+    numbering_group_count: 1,
     repeated_block_count: 2,
     out_of_order_block_count: 1,
     missing_block_count: 0,
+    ambiguous_numbering_group_count: 0,
     family_count: 1,
     region_count: 2,
   });
   expect(decoded.complete).toBe(true);
-  expect(decoded.regions[1]?.familyId).toBe(0xc47e_5767);
+  expect(decoded.regions[1]?.familyName).toBe("ESP32S3");
+  // A block sent twice to its own address is one block, not a second copy.
+  const blocks = uf2Image(RP2040_FAMILY, 0x1000_0000, patternBytes(512));
+  const resent = image(uf2File([blocks[0]!, blocks[1]!, blocks[1]!]));
+  expect(resent.complete).toBe(true);
+  expect(resent.metadata).toMatchObject({
+    repeated_block_count: 1,
+    duplicate_bytes: 256,
+    ambiguous_numbering_group_count: 0,
+  });
+});
+
+it("leaves coverage unknown when one copy of reused numbering lost a block", () => {
+  const first = uf2Image(0xc47e_5767, 0x0, patternBytes(768, 5));
+  const second = uf2Image(0xc47e_5767, 0x8000, patternBytes(768, 6));
+  for (const lost of [first[1]!, second[2]!]) {
+    const decoded = image(
+      uf2File([...first, ...second].filter((block) => block !== lost)),
+    );
+    expect(decoded.complete).toBe(false);
+    expect(decoded.metadata).toMatchObject({
+      missing_block_count: 0,
+      ambiguous_numbering_group_count: 1,
+    });
+    expect(decoded.limitations).toEqual([
+      "UF2 numbering cannot show that every copy of a block sequence is complete: family 0xc47e5767 (ESP32S3) with 3 numbered blocks has some numbers at 1 address(es) and others at 2.",
+    ]);
+  }
 });
 
 it("excludes not-main-flash and file-container blocks from regions", () => {
@@ -274,12 +305,13 @@ it("excludes not-main-flash and file-container blocks from regions", () => {
   expect(regionFacts(decoded)).toEqual([
     {
       familyId: null,
+      familyName: null,
       start: 0,
       end: 1,
       length: 2,
       blockCount: 1,
-      firstBlock: 0,
-      lastBlock: 0,
+      firstFileBlock: 0,
+      lastFileBlock: 0,
     },
   ]);
   expect(decoded.metadata).toMatchObject({
@@ -358,7 +390,7 @@ it("excludes invalid blocks and a truncated final block, leaving coverage unknow
   expect(decoded.limitations).toEqual([
     "UF2 file ends with 100 bytes after its last complete 512-byte block; the file may be truncated.",
     "3 UF2 block(s) are invalid and were excluded; the first is block 1 at byte offset 512: end magic number does not match.",
-    "UF2 numbering declares 1 block(s) that are absent: family 0xe48bff56 (RP2040) has 2 of 3 numbered blocks.",
+    "UF2 numbering declares 1 block(s) that are absent: family 0xe48bff56 (RP2040) with 3 numbered blocks has 2 of them.",
   ]);
 });
 
@@ -371,14 +403,14 @@ it("reports block numbers outside their declared count", () => {
   );
   expect(decoded.metadata).toMatchObject({
     block_number_out_of_range_count: 2,
-    sequence_count: 0,
+    numbering_group_count: 0,
     region_count: 1,
     data_bytes: 2,
   });
   expect(decoded.complete).toBe(false);
 });
 
-it("counts MD5 and extension-tag flags as declared facts", () => {
+it("counts MD5 and extension-tag flags as declared, unverified facts", () => {
   const decoded = image(
     uf2File([
       uf2Block({
@@ -402,18 +434,107 @@ it("counts MD5 and extension-tag flags as declared facts", () => {
     extension_tag_block_count: 1,
     region_count: 1,
   });
+  expect(decoded.complete).toBe(true);
+  expect(decoded.limitations).toEqual([
+    "1 UF2 block(s) declare an MD5 flash region (flag 0x4000) and 1 declare extension tags (flag 0x8000); both are counted, not decoded or verified.",
+  ]);
 });
 
-it("refuses files above the fixed ceiling and too many discontiguous runs", () => {
+it("accepts boundary blocks beside the invalid ones", () => {
+  const decoded = image(
+    uf2File([
+      // A full 476-byte payload ends exactly at the top of the address space.
+      uf2Block({
+        address: 0xffff_ffff - 475,
+        payload: patternBytes(476),
+        blockNo: 0,
+        numBlocks: 3,
+        familyId: RP2040_FAMILY,
+      }),
+      // A main-flash block may carry no payload.
+      uf2Block({
+        address: 0x1000_0000,
+        payload: [],
+        blockNo: 1,
+        numBlocks: 3,
+        familyId: RP2040_FAMILY,
+      }),
+      // Blocks without a familyID form their own address space.
+      uf2Block({
+        address: 0xffff_ffff - 475,
+        payload: patternBytes(476, 1),
+        blockNo: 0,
+        numBlocks: 1,
+      }),
+      uf2Block({
+        address: 0x1000_0000,
+        payload: [7],
+        blockNo: 2,
+        numBlocks: 3,
+        familyId: RP2040_FAMILY,
+      }),
+    ]),
+  );
+  expect(decoded.complete).toBe(true);
+  expect(
+    decoded.regions.map(({ familyId, start, end }) => [familyId, start, end]),
+  ).toEqual([
+    [null, 0xffff_fe24, 0xffff_ffff],
+    [RP2040_FAMILY, 0x1000_0000, 0x1000_0000],
+    [RP2040_FAMILY, 0xffff_fe24, 0xffff_ffff],
+  ]);
+  expect(decoded.metadata).toMatchObject({
+    invalid_block_count: 0,
+    flash_block_count: 4,
+    family_count: 1,
+    numbering_group_count: 2,
+  });
+});
+
+it("refuses a larger file than its decoder admitted with a typed limit", () => {
+  const block = uf2Block({
+    address: 0,
+    payload: [1],
+    blockNo: 0,
+    numBlocks: 1,
+  });
+  const decoder = createUf2Decoder(511);
+  if (!decoder.ok) throw new Error(decoder.error.message);
+  expect(decoder.value.write(block)).toMatchObject({
+    ok: false,
+    error: { kind: "limit", boundary: "file-size" },
+  });
+});
+
+it("refuses files above the fixed ceiling and more regions than retained", () => {
   expect(createUf2Decoder(UF2_MAX_FILE_BYTES + 1)).toMatchObject({
     ok: false,
     error: { kind: "limit", boundary: "file-size" },
   });
-  const blocks = Array.from({ length: 65_537 }, (_, index) =>
-    uf2Block({ address: index * 2, payload: [1], blockNo: 0, numBlocks: 1 }),
-  );
-  expect(decode(uf2File(blocks), 512 * 1024)).toMatchObject({
+  const blocks = (count: number) =>
+    Array.from({ length: count }, (_, index) =>
+      uf2Block({ address: index * 2, payload: [1], blockNo: 0, numBlocks: 1 }),
+    );
+  const accepted = decode(uf2File(blocks(65_536)), 512 * 1024);
+  if (!accepted.ok) throw new Error(accepted.error.message);
+  expect(accepted.value.metadata.region_count).toBe(65_536);
+  expect(decode(uf2File(blocks(65_537)), 512 * 1024)).toMatchObject({
     ok: false,
     error: { kind: "limit", boundary: "capacity" },
+  });
+  // Runs are not capped: blocks in reverse order still merge into one region.
+  const reversed = Array.from({ length: 70_000 }, (_, index) =>
+    uf2Block({
+      address: (69_999 - index) * 4,
+      payload: [1, 2, 3, 4],
+      blockNo: 0,
+      numBlocks: 1,
+    }),
+  );
+  const merged = decode(uf2File(reversed), 512 * 1024);
+  if (!merged.ok) throw new Error(merged.error.message);
+  expect(merged.value.metadata).toMatchObject({
+    region_count: 1,
+    data_bytes: 280_000,
   });
 });

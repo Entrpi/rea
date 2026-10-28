@@ -286,7 +286,10 @@ const contradictions = (
 ): ArtifactInspectionResult["contradictions"] =>
   inventory.integrity_contradictions.map((value) => {
     const semantic = {
-      statement: `Declared integrity for ${value.logical_path} contradicts observed bytes.`,
+      statement:
+        value.logical_path === "."
+          ? "The container's declared integrity contradicts its observed bytes."
+          : `Declared integrity for ${value.logical_path} contradicts observed bytes.`,
       occurrence_id: value.occurrence_id,
       ...artifactIntegrityPairOf(value),
       evidence_id: evidenceId,

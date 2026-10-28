@@ -47,8 +47,9 @@ const DFUSE_PACK_EQUIVALENT: DfuSeFixture = {
 };
 
 it("decodes files packed with and without the suffix in DFUImageSize", () => {
-  // Oracle: dfu-util's dfuse-pack.py build() and compute_crc(), transcribed
-  // and run under Python 3. It counts the suffix in DFUImageSize.
+  // Oracle: build() and compute_crc() of dfu-util's dfuse-pack.py at f9a537c9,
+  // transcribed and run under Python 3. Since ee6b393d it writes DFUImageSize
+  // as PREFIX_SIZE + len(data) + SUFFIX_SIZE, the whole file.
   const packed = dfuseFile({
     ...DFUSE_PACK_EQUIVALENT,
     imageSizeIncludesSuffix: true,
@@ -62,8 +63,9 @@ it("decodes files packed with and without the suffix in DFUImageSize", () => {
     computed_crc: 0x2c4c_4f44,
   });
   const bytes = dfuseFile(DFUSE_PACK_EQUIVALENT);
-  // Oracle: MicroPython's tools/dfu.py build() and compute_crc(), transcribed
-  // and run under Python 3. Like ST's DfuFileMgr, it leaves the suffix out.
+  // Oracle: build() and compute_crc() of MicroPython's tools/dfu.py at
+  // cb99ca98, transcribed and run under Python 3. It writes len(data) + 11,
+  // leaving the suffix out, as dfuse-pack.py did before ee6b393d.
   expect(bytes.length).toBe(325);
   expect(createHash("sha256").update(bytes).digest("hex")).toBe(
     "65ad96452f1f82cc8b44d30dfe94f268f4fd230a32b30a8826a639b269f7034d",
@@ -71,7 +73,6 @@ it("decodes files packed with and without the suffix in DFUImageSize", () => {
   const decoded = image(bytes);
   expect(decoded.metadata).toEqual({
     kind: "dfuse",
-    format_version: 1,
     image_size: 309,
     target_count: 1,
     element_count: 1,
@@ -81,7 +82,6 @@ it("decodes files packed with and without the suffix in DFUImageSize", () => {
     device_version: 0,
     product_id: 0xdf11,
     vendor_id: 0x0483,
-    dfu_version: 0x011a,
     suffix_crc: 0x7a37_11da,
     computed_crc: 0x7a37_11da,
   });
@@ -182,12 +182,54 @@ it("names overlapping elements within one alternate setting only", () => {
           alternateSetting: 1,
           elements: [{ address: 0x0800_0000, data: [9] }],
         },
+        {
+          alternateSetting: 0,
+          elements: [{ address: 0x0800_0003, data: [4, 5] }],
+        },
       ],
     }),
   );
-  expect(decoded.metadata.overlapping_element_count).toBe(1);
+  expect(decoded.metadata.overlapping_element_count).toBe(2);
   expect(decoded.limitations).toEqual([
-    "1 DfuSe element(s) overlap an earlier element of the same alternate setting; each stays a separate entry and no bytes were merged: target 0 element 1 (0x08000002-0x08000003) overlaps target 0 element 0 (0x08000000-0x08000003) in alternate setting 0.",
+    "2 DfuSe element(s) overlap an earlier element of the same alternate setting; each stays a separate entry and no bytes were merged: target 0 element 1 (0x08000002-0x08000003) overlaps target 0 element 0 (0x08000000-0x08000003) in alternate setting 0; target 2 element 0 (0x08000003-0x08000004) overlaps target 0 element 0 (0x08000000-0x08000003) in alternate setting 0.",
+  ]);
+});
+
+it("accepts boundary declarations beside the malformed ones", () => {
+  // A valid file may hold no targets at all.
+  expect(image(dfuseFile({ targets: [] })).metadata).toMatchObject({
+    image_size: 11,
+    target_count: 0,
+    element_count: 0,
+  });
+  const name = Uint8Array.from({ length: 255 }, () => 0x41);
+  const decoded = image(
+    dfuseFile({
+      targets: [
+        {
+          alternateSetting: 4,
+          // A name filling all 255 bytes has no NUL.
+          name,
+          elements: [
+            // An element may end exactly at the top of the address space.
+            { address: 0xffff_fffe, data: [1, 2] },
+            { address: 0x2000_0000, data: [] },
+          ],
+        },
+        { alternateSetting: 5, elements: [] },
+      ],
+    }),
+  );
+  expect(decoded.elements.map((element) => element.targetName)).toEqual([
+    "A".repeat(255),
+  ]);
+  expect(decoded.metadata).toMatchObject({
+    target_count: 2,
+    element_count: 2,
+    empty_element_count: 1,
+  });
+  expect(decoded.limitations).toEqual([
+    "DfuSe declarations without bytes have no entry: target 0 element 1 at 0x20000000 (alternate setting 4) holds no bytes; target 1 (alternate setting 5) declares no elements.",
   ]);
 });
 
@@ -260,7 +302,7 @@ it.each([
   [
     "an image size that matches neither packer convention",
     { targets: [], imageSize: 12 },
-    "byte offset 6: DFUImageSize declares 12 bytes, but the DFU suffix begins at byte 11 and the file holds 27 bytes",
+    "byte offset 6: DFUImageSize declares 12 bytes, but the DFU suffix begins at byte 11 and the file holds 27 bytes; the suffix CRC matches the file",
   ],
   [
     "bytes between the last target and the suffix",
@@ -309,17 +351,37 @@ it("refuses files above the fixed ceiling and more elements than retained", () =
     ok: false,
     error: { kind: "limit", boundary: "file-size" },
   });
-  const elements = Array.from({ length: 65_537 }, (_, address) => ({
-    address,
-    data: [],
-  }));
+  const elements = (count: number, data: readonly number[]) =>
+    Array.from({ length: count }, (_, index) => ({
+      address: index * 2,
+      data,
+    }));
+  const accepted = decode(
+    dfuseFile({
+      targets: [{ alternateSetting: 0, elements: elements(65_536, [1]) }],
+    }),
+    1 << 20,
+  );
+  if (!accepted.ok) throw new Error(accepted.error.message);
+  expect(accepted.value.elements).toHaveLength(65_536);
   expect(
     decode(
-      dfuseFile({ targets: [{ alternateSetting: 0, elements }] }),
+      dfuseFile({
+        targets: [{ alternateSetting: 0, elements: elements(65_537, [1]) }],
+      }),
       1 << 20,
     ),
   ).toMatchObject({
     ok: false,
     error: { kind: "limit", boundary: "capacity" },
   });
+  // Empty elements are counted but retained as no entry, so they are not capped.
+  const empty = decode(
+    dfuseFile({
+      targets: [{ alternateSetting: 0, elements: elements(65_537, []) }],
+    }),
+    1 << 20,
+  );
+  if (!empty.ok) throw new Error(empty.error.message);
+  expect(empty.value.metadata.empty_element_count).toBe(65_537);
 });

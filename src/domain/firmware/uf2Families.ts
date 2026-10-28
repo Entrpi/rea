@@ -9,6 +9,10 @@
  * reported by value only; a missing name never means an unknown family is
  * invalid.
  */
+/** The registry revision the names below come from, recorded with each inventory. */
+export const UF2_FAMILY_REGISTRY =
+  "microsoft/uf2 cf3bd7f9 utils/uf2families.json";
+
 const UF2_FAMILY_NAMES: ReadonlyMap<number, string> = new Map([
   [0x1c5f_21b0, "ESP32"],
   [0xbfdd_4eee, "ESP32S2"],

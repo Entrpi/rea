@@ -1,7 +1,8 @@
 import type { Uf2Metadata } from "../artifactFormatMetadata.js";
 import { err, ok, type Result } from "../result.js";
 import { mergeArenaRuns, type RunConflict } from "./addressRuns.js";
-import { uf2FamilyName } from "./uf2Families.js";
+import type { RegionDecodeFailure, RegionDecoder } from "./regionDecoder.js";
+import { UF2_FAMILY_REGISTRY, uf2FamilyName } from "./uf2Families.js";
 
 /** Every UF2 block is 512 bytes: a 32-byte header, 476 data bytes, an end magic. */
 export const UF2_BLOCK_BYTES = 512;
@@ -16,35 +17,30 @@ const UF2_FLAG_FAMILY_ID = 0x0000_2000;
 const UF2_FLAG_MD5 = 0x0000_4000;
 const UF2_FLAG_EXTENSION_TAGS = 0x0000_8000;
 const ADDRESS_SPACE = 0x1_0000_0000;
-/** Sequences named in one numbering limitation before the rest are counted. */
-const NAMED_SEQUENCES = 4;
+/** Numbering groups named in one limitation before the rest are counted. */
+const NAMED_GROUPS = 4;
 
 /**
  * Fixed whole-file ceiling, as for Intel HEX; configurable ceilings are
  * tracked in #6176. Decoded bytes stay below 476/512 of it.
  */
 export const UF2_MAX_FILE_BYTES = 128 * 1024 * 1024;
-/** Address-adjacent block runs retained before regions are merged. */
-export const UF2_MAX_RUNS = 65_536;
-
-/** A whole-file refusal; no partial regions accompany it. */
-export interface Uf2Failure {
-  readonly kind: "format" | "limit";
-  readonly message: string;
-  readonly boundary?: "file-size" | "capacity";
-}
+/** Regions retained as inventory entries, as for Intel HEX record runs. */
+export const UF2_MAX_REGIONS = 65_536;
 
 /** Decoded bytes for one family's address-contiguous range; `end` is inclusive. */
 export interface Uf2Region {
   /** The declared familyID, or null when the block did not set flag 0x2000. */
   readonly familyId: number | null;
+  /** The registry short name REA knows for `familyId`, or null. */
+  readonly familyName: string | null;
   readonly start: number;
   readonly end: number;
   readonly bytes: Uint8Array;
   readonly blockCount: number;
   /** Zero-based positions of the contributing blocks in the file. */
-  readonly firstBlock: number;
-  readonly lastBlock: number;
+  readonly firstFileBlock: number;
+  readonly lastFileBlock: number;
 }
 
 export interface Uf2Image {
@@ -55,13 +51,6 @@ export interface Uf2Image {
   readonly limitations: readonly string[];
 }
 
-export interface Uf2Decoder {
-  /** Decode the next file bytes; a block may span chunks. */
-  write(chunk: Uint8Array): Result<void, Uf2Failure>;
-  /** Account for a partial final block, then merge runs into regions. */
-  finish(): Result<Uf2Image, Uf2Failure>;
-}
-
 /** Consecutive main-flash blocks of one family whose addresses continue each other. */
 interface BlockRun {
   readonly familyId: number | null;
@@ -69,16 +58,30 @@ interface BlockRun {
   readonly offset: number;
   length: number;
   blockCount: number;
-  readonly firstBlock: number;
-  lastBlock: number;
+  readonly firstFileBlock: number;
+  lastFileBlock: number;
 }
 
-/** Blocks sharing a familyID (or none) and a declared block count. */
-interface NumberingSequence {
+/**
+ * Valid blocks sharing a familyID (or none) and a declared block count. A
+ * number seen at several addresses belongs to several copies, as when esptool
+ * numbers each merged file from 0; a repeat at one address is the same block.
+ */
+interface NumberingGroup {
   readonly familyId: number | null;
   readonly declared: number;
-  readonly seen: Set<number>;
+  /** The first target address seen for each block number. */
+  readonly first: Map<number, number>;
+  /** Further distinct target addresses, only for numbers that have them. */
+  readonly further: Map<number, Set<number>>;
   previous: number;
+}
+
+/** What block numbering establishes about completeness. */
+interface NumberingFacts {
+  readonly missing: number;
+  readonly absent: readonly string[];
+  readonly ambiguous: readonly string[];
 }
 
 const readUint32 = (bytes: Uint8Array, offset: number): number =>
@@ -99,6 +102,10 @@ const familyText = (familyId: number | null): string => {
     : `family ${hex32(familyId)} (${name})`;
 };
 
+/** At most NAMED_GROUPS descriptions, then a count of the rest. */
+const named = (items: readonly string[]): string =>
+  `${items.slice(0, NAMED_GROUPS).join("; ")}${items.length > NAMED_GROUPS ? `; and ${String(items.length - NAMED_GROUPS)} more` : ""}`;
+
 /** Recognize a file only by a complete first block with all three magic numbers. */
 export const hasUf2Block = (prefix: Uint8Array): boolean =>
   prefix.length >= UF2_BLOCK_BYTES &&
@@ -109,7 +116,7 @@ export const hasUf2Block = (prefix: Uint8Array): boolean =>
 /** Start a block decoder whose arena is bounded by the admitted file size. */
 export const createUf2Decoder = (
   fileBytes: number,
-): Result<Uf2Decoder, Uf2Failure> =>
+): Result<RegionDecoder<Uf2Image>, RegionDecodeFailure> =>
   Number.isSafeInteger(fileBytes) &&
   fileBytes >= 0 &&
   fileBytes <= UF2_MAX_FILE_BYTES
@@ -120,10 +127,37 @@ export const createUf2Decoder = (
         message: `file is ${String(fileBytes)} bytes, exceeding the fixed ${String(UF2_MAX_FILE_BYTES)}-byte (128 MiB) ceiling`,
       });
 
-class StreamingUf2Decoder implements Uf2Decoder {
+/** Absent numbers, and groups whose numbers appear at unequal address counts. */
+const numberingFacts = (groups: Iterable<NumberingGroup>): NumberingFacts => {
+  let missing = 0;
+  const absent: string[] = [];
+  const ambiguous: string[] = [];
+  for (const group of groups) {
+    const seen = group.first.size;
+    const name = `${familyText(group.familyId)} with ${String(group.declared)} numbered blocks`;
+    if (seen < group.declared) {
+      missing += group.declared - seen;
+      absent.push(`${name} has ${String(seen)} of them`);
+    }
+    // Every seen number holds one address unless another copy was seen.
+    let most = 1;
+    let fewest = group.further.size < seen ? 1 : Number.MAX_SAFE_INTEGER;
+    for (const further of group.further.values()) {
+      most = Math.max(most, further.size + 1);
+      fewest = Math.min(fewest, further.size + 1);
+    }
+    if (most !== fewest)
+      ambiguous.push(
+        `${name} has some numbers at ${String(fewest)} address(es) and others at ${String(most)}`,
+      );
+  }
+  return { missing, absent, ambiguous };
+};
+
+class StreamingUf2Decoder implements RegionDecoder<Uf2Image> {
   readonly #block = new Uint8Array(UF2_BLOCK_BYTES);
   readonly #runs: BlockRun[] = [];
-  readonly #sequences = new Map<string, NumberingSequence>();
+  readonly #groups = new Map<string, NumberingGroup>();
   readonly #families = new Set<number>();
   #arena: Uint8Array;
   #arenaUsed = 0;
@@ -149,7 +183,7 @@ class StreamingUf2Decoder implements Uf2Decoder {
     );
   }
 
-  write(chunk: Uint8Array): Result<void, Uf2Failure> {
+  write(chunk: Uint8Array): Result<void, RegionDecodeFailure> {
     let from = 0;
     while (from < chunk.length) {
       const count = Math.min(
@@ -167,21 +201,28 @@ class StreamingUf2Decoder implements Uf2Decoder {
     return ok(undefined);
   }
 
-  finish(): Result<Uf2Image, Uf2Failure> {
+  finish(): Result<Uf2Image, RegionDecodeFailure> {
     const merged = mergeRuns(this.#runs, this.#arena);
     this.#arena = new Uint8Array(0);
     if (!merged.ok) return merged;
     const { regions, duplicateBytes } = merged.value;
-    const limitations = this.#limitations();
+    if (regions.length > UF2_MAX_REGIONS)
+      return err({
+        kind: "limit",
+        boundary: "capacity",
+        message: `payloads form ${String(regions.length)} address-discontiguous regions, more than the ${String(UF2_MAX_REGIONS)} retained as entries`,
+      });
+    const numbering = numberingFacts(this.#groups.values());
+    const limitations = this.#limitations(numbering);
     return ok({
-      metadata: this.#metadata(regions, duplicateBytes),
+      metadata: this.#metadata(regions, duplicateBytes, numbering),
       regions,
       complete: limitations.unknown.length === 0,
       limitations: [...limitations.unknown, ...limitations.known],
     });
   }
 
-  #decodeBlock(block: Uint8Array): Result<void, Uf2Failure> {
+  #decodeBlock(block: Uint8Array): Result<void, RegionDecodeFailure> {
     const index = this.#blockCount;
     this.#blockCount += 1;
     const flags = readUint32(block, 8);
@@ -207,7 +248,12 @@ class StreamingUf2Decoder implements Uf2Decoder {
       (flags & UF2_FLAG_FAMILY_ID) !== 0 ? readUint32(block, 28) : null;
     if ((flags & UF2_FLAG_MD5) !== 0) this.#md5 += 1;
     if ((flags & UF2_FLAG_EXTENSION_TAGS) !== 0) this.#extensionTags += 1;
-    this.#number(familyId, readUint32(block, 24), readUint32(block, 20));
+    this.#number(
+      familyId,
+      readUint32(block, 24),
+      readUint32(block, 20),
+      address,
+    );
     // The file-container flag overrides not-main-flash: such blocks hold files.
     if ((flags & UF2_FLAG_FILE_CONTAINER) !== 0) {
       this.#fileContainer += 1;
@@ -229,21 +275,43 @@ class StreamingUf2Decoder implements Uf2Decoder {
   }
 
   /** Numbering is per familyID and block count, as bootloaders ignore other families. */
-  #number(familyId: number | null, declared: number, blockNo: number): void {
+  #number(
+    familyId: number | null,
+    declared: number,
+    blockNo: number,
+    address: number,
+  ): void {
     if (declared === 0 || blockNo >= declared) {
       this.#outOfRange += 1;
       return;
     }
     const key = `${familyId === null ? "none" : String(familyId)}:${String(declared)}`;
-    let sequence = this.#sequences.get(key);
-    if (sequence === undefined) {
-      sequence = { familyId, declared, seen: new Set(), previous: -1 };
-      this.#sequences.set(key, sequence);
+    let group = this.#groups.get(key);
+    if (group === undefined) {
+      group = {
+        familyId,
+        declared,
+        first: new Map(),
+        further: new Map(),
+        previous: -1,
+      };
+      this.#groups.set(key, group);
     }
-    if (sequence.seen.has(blockNo)) this.#repeated += 1;
-    else sequence.seen.add(blockNo);
-    if (blockNo <= sequence.previous) this.#outOfOrder += 1;
-    sequence.previous = blockNo;
+    const first = group.first.get(blockNo);
+    if (first === undefined) group.first.set(blockNo, address);
+    else {
+      this.#repeated += 1;
+      if (first !== address) {
+        let further = group.further.get(blockNo);
+        if (further === undefined) {
+          further = new Set();
+          group.further.set(blockNo, further);
+        }
+        further.add(address);
+      }
+    }
+    if (blockNo <= group.previous) this.#outOfOrder += 1;
+    group.previous = blockNo;
   }
 
   #addData(
@@ -251,8 +319,14 @@ class StreamingUf2Decoder implements Uf2Decoder {
     familyId: number | null,
     address: number,
     data: Uint8Array,
-  ): Result<void, Uf2Failure> {
+  ): Result<void, RegionDecodeFailure> {
     if (data.length === 0) return ok(undefined);
+    if (this.#arenaUsed + data.length > this.#arena.length)
+      return err({
+        kind: "limit",
+        boundary: "file-size",
+        message: `block ${String(block)}: payload bytes exceed ${String(UF2_DATA_BYTES)} per complete block of the admitted file size`,
+      });
     const run = this.#runs.at(-1);
     if (
       run !== undefined &&
@@ -261,45 +335,27 @@ class StreamingUf2Decoder implements Uf2Decoder {
     ) {
       run.length += data.length;
       run.blockCount += 1;
-      run.lastBlock = block;
-    } else {
-      if (this.#runs.length >= UF2_MAX_RUNS)
-        return err({
-          kind: "limit",
-          boundary: "capacity",
-          message: `block ${String(block)}: payloads start more than ${String(UF2_MAX_RUNS)} address-discontiguous block runs`,
-        });
+      run.lastFileBlock = block;
+    } else
       this.#runs.push({
         familyId,
         address,
         offset: this.#arenaUsed,
         length: data.length,
         blockCount: 1,
-        firstBlock: block,
-        lastBlock: block,
+        firstFileBlock: block,
+        lastFileBlock: block,
       });
-    }
     this.#arena.set(data, this.#arenaUsed);
     this.#arenaUsed += data.length;
     return ok(undefined);
   }
 
-  #missing(): { readonly count: number; readonly named: string[] } {
-    let count = 0;
-    const named: string[] = [];
-    for (const sequence of this.#sequences.values()) {
-      const absent = sequence.declared - sequence.seen.size;
-      if (absent === 0) continue;
-      count += absent;
-      named.push(
-        `${familyText(sequence.familyId)} has ${String(sequence.seen.size)} of ${String(sequence.declared)} numbered blocks`,
-      );
-    }
-    return { count, named };
-  }
-
   /** Limitations that leave coverage unknown, then facts that do not. */
-  #limitations(): { readonly unknown: string[]; readonly known: string[] } {
+  #limitations(numbering: NumberingFacts): {
+    readonly unknown: string[];
+    readonly known: string[];
+  } {
     const unknown: string[] = [];
     const known: string[] = [];
     if (this.#blockLength > 0)
@@ -310,10 +366,13 @@ class StreamingUf2Decoder implements Uf2Decoder {
       unknown.push(
         `${String(this.#invalid)} UF2 block(s) are invalid and were excluded; the first is block ${String(this.#firstInvalid.block)} at byte offset ${String(this.#firstInvalid.block * UF2_BLOCK_BYTES)}: ${this.#firstInvalid.reason}.`,
       );
-    const missing = this.#missing();
-    if (missing.count > 0)
+    if (numbering.missing > 0)
       unknown.push(
-        `UF2 numbering declares ${String(missing.count)} block(s) that are absent: ${missing.named.slice(0, NAMED_SEQUENCES).join("; ")}${missing.named.length > NAMED_SEQUENCES ? `; and ${String(missing.named.length - NAMED_SEQUENCES)} more sequence(s)` : ""}.`,
+        `UF2 numbering declares ${String(numbering.missing)} block(s) that are absent: ${named(numbering.absent)}.`,
+      );
+    if (numbering.ambiguous.length > 0)
+      unknown.push(
+        `UF2 numbering cannot show that every copy of a block sequence is complete: ${named(numbering.ambiguous)}.`,
       );
     if (this.#outOfRange > 0)
       unknown.push(
@@ -327,12 +386,17 @@ class StreamingUf2Decoder implements Uf2Decoder {
       known.push(
         `${String(this.#notMainFlash)} UF2 block(s) are flagged not main flash (flag 0x1); their ${String(this.#notMainFlashBytes)} payload bytes are in no region.`,
       );
+    if (this.#md5 > 0 || this.#extensionTags > 0)
+      known.push(
+        `${String(this.#md5)} UF2 block(s) declare an MD5 flash region (flag 0x4000) and ${String(this.#extensionTags)} declare extension tags (flag 0x8000); both are counted, not decoded or verified.`,
+      );
     return { unknown, known };
   }
 
   #metadata(
     regions: readonly Uf2Region[],
     duplicateBytes: number,
+    numbering: NumberingFacts,
   ): Uf2Metadata {
     return {
       kind: "uf2",
@@ -345,8 +409,10 @@ class StreamingUf2Decoder implements Uf2Decoder {
       md5_block_count: this.#md5,
       extension_tag_block_count: this.#extensionTags,
       family_count: this.#families.size,
-      sequence_count: this.#sequences.size,
-      missing_block_count: this.#missing().count,
+      family_name_registry: UF2_FAMILY_REGISTRY,
+      numbering_group_count: this.#groups.size,
+      missing_block_count: numbering.missing,
+      ambiguous_numbering_group_count: numbering.ambiguous.length,
       repeated_block_count: this.#repeated,
       out_of_order_block_count: this.#outOfOrder,
       block_number_out_of_range_count: this.#outOfRange,
@@ -358,9 +424,9 @@ class StreamingUf2Decoder implements Uf2Decoder {
 }
 
 const blockSpan = (run: BlockRun): string =>
-  run.firstBlock === run.lastBlock
-    ? `block ${String(run.firstBlock)}`
-    : `blocks ${String(run.firstBlock)}-${String(run.lastBlock)}`;
+  run.firstFileBlock === run.lastFileBlock
+    ? `block ${String(run.firstFileBlock)}`
+    : `blocks ${String(run.firstFileBlock)}-${String(run.lastFileBlock)}`;
 
 /** Merge each family's runs by address; overlaps must repeat the same bytes. */
 const mergeRuns = (
@@ -368,27 +434,31 @@ const mergeRuns = (
   arena: Uint8Array,
 ): Result<
   { readonly regions: Uf2Region[]; readonly duplicateBytes: number },
-  Uf2Failure
+  RegionDecodeFailure
 > => {
   // Undeclared families sort first; other families never merge with them.
   const merged = mergeArenaRuns(runs, arena, (run) => run.familyId ?? -1);
   if (!merged.ok) return err(conflict(merged.error));
   return ok({
-    regions: merged.value.ranges.map(({ start, bytes, runs: group }) => ({
-      familyId: group[0]?.familyId ?? null,
-      start,
-      end: start + bytes.length - 1,
-      bytes,
-      blockCount: group.reduce((sum, run) => sum + run.blockCount, 0),
-      firstBlock: group.reduce(
-        (block, run) => Math.min(block, run.firstBlock),
-        Number.MAX_SAFE_INTEGER,
-      ),
-      lastBlock: group.reduce(
-        (block, run) => Math.max(block, run.lastBlock),
-        0,
-      ),
-    })),
+    regions: merged.value.ranges.map(({ start, bytes, runs: group }) => {
+      const familyId = group[0]?.familyId ?? null;
+      return {
+        familyId,
+        familyName: familyId === null ? null : uf2FamilyName(familyId),
+        start,
+        end: start + bytes.length - 1,
+        bytes,
+        blockCount: group.reduce((sum, run) => sum + run.blockCount, 0),
+        firstFileBlock: group.reduce(
+          (block, run) => Math.min(block, run.firstFileBlock),
+          Number.MAX_SAFE_INTEGER,
+        ),
+        lastFileBlock: group.reduce(
+          (block, run) => Math.max(block, run.lastFileBlock),
+          0,
+        ),
+      };
+    }),
     duplicateBytes: merged.value.duplicateBytes,
   });
 };
@@ -399,7 +469,7 @@ const conflict = ({
   run,
   existing,
   incoming,
-}: RunConflict<BlockRun>): Uf2Failure => ({
+}: RunConflict<BlockRun>): RegionDecodeFailure => ({
   kind: "format",
   message: `${familyText(run.familyId)} address ${hex32(address)} is written with different values by ${blockSpan(writer)} (0x${existing.toString(16).padStart(2, "0")}) and ${blockSpan(run)} (0x${incoming.toString(16).padStart(2, "0")})`,
 });

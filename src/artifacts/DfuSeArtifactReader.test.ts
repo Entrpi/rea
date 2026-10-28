@@ -9,6 +9,10 @@ import {
   dfuseFile,
   type DfuSeFixture,
 } from "../domain/firmware/dfuse.fixture.js";
+import { ARTIFACT_COMPARISON_EXAMPLE } from "../contracts/artifactComparisonExample.js";
+import { compareArtifacts } from "../domain/artifactComparison.js";
+import { artifactInventoryResultSchema } from "../domain/artifactGraph.js";
+import { createEvidence } from "../domain/evidence.js";
 import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
 import { scanCanonicalArtifactInventory } from "../../tests/fixtures/artifactInventory.js";
 
@@ -213,4 +217,83 @@ it("recognizes DfuSe only with its suffix, including inside a directory", async 
     await writeImage("no-suffix.dfu", bytes.subarray(0, bytes.length - 16)),
   );
   expect(root.manifest.root_format).toBe("file");
+});
+
+it("reads the suffix of a DfuSe root longer than the classification prefix", async () => {
+  const large = dfuseFile({
+    targets: [
+      {
+        alternateSetting: 0,
+        elements: [
+          { address: 0x0800_0000, data: new Uint8Array(20_000).fill(0x5a) },
+        ],
+      },
+    ],
+  });
+  const snapshot = await scanCanonicalArtifactInventory(
+    await writeImage("large.dfu", large),
+  );
+  expect(snapshot.manifest.root_format).toBe("dfuse");
+  expect(
+    snapshot.occurrences.find((row) => row.logical_path !== ".")
+      ?.source_location,
+  ).toEqual({ offset: 293, length: 20_000 });
+  // The same prefix without the suffix stays a plain file.
+  const unsuffixed = await scanCanonicalArtifactInventory(
+    await writeImage(
+      "large-no-suffix.dfu",
+      large.subarray(0, large.length - 1),
+    ),
+  );
+  expect(unsuffixed.manifest.root_format).toBe("file");
+});
+
+it("compares an element's target memory, not only its bytes and path", async () => {
+  const evidence = async (alternateSetting: number, name: string) => {
+    const inventory = artifactInventoryResultSchema.parse(
+      await scanCanonicalArtifactInventory(
+        await writeImage(
+          "firmware.dfu",
+          dfuseFile({
+            targets: [
+              {
+                alternateSetting,
+                name,
+                elements: [{ address: 0x0800_0000, data: [1, 2, 3, 4] }],
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+    return createEvidence(
+      {
+        path: "firmware.dfu",
+        sha256: inventory.manifest.root_sha256,
+        format: "dfuse",
+      },
+      ARTIFACT_COMPARISON_EXAMPLE.left.provider,
+      {
+        operation: "inventory_artifact",
+        parameters: {},
+        result: inventory,
+        confidence: "observed",
+        authority: "shipped-artifact",
+      },
+    );
+  };
+  const left = await evidence(0, "Internal Flash");
+  const path = "target-0/element-0-0x08000000-0x08000003.bin";
+  for (const right of [
+    await evidence(1, "Internal Flash"),
+    await evidence(0, "Option Bytes"),
+  ])
+    expect(
+      compareArtifacts(left, right).changes.find(
+        (change) => change.logical_path === path,
+      ),
+    ).toMatchObject({ classification: "changed", dimensions: ["metadata"] });
+  expect(
+    compareArtifacts(left, await evidence(0, "Internal Flash")).changes,
+  ).toEqual([]);
 });

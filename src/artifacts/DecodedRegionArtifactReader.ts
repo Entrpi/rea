@@ -4,6 +4,10 @@ import { setImmediate } from "node:timers/promises";
 import type { ArtifactFormatMetadata } from "../domain/artifactFormatMetadata.js";
 import type { ArtifactContainerIntegrityPair } from "../domain/artifactIntegrity.js";
 import type { Result } from "../domain/result.js";
+import type {
+  RegionDecodeFailure,
+  RegionDecoder,
+} from "../domain/firmware/regionDecoder.js";
 import {
   ArtifactReaderFailure,
   copyArtifactEntry,
@@ -18,19 +22,6 @@ import { assertArtifactReadActive } from "./ArtifactFileOperation.js";
 import { ArtifactFileSource } from "./ArtifactFileSource.js";
 import { readFileHandleChunks } from "../filesystem/readFileHandleChunks.js";
 import type { StableRegularFileDescriptor } from "../filesystem/RegularFile.js";
-
-/** A whole-file refusal from a firmware decoder; no partial regions accompany it. */
-export interface RegionDecodeFailure {
-  readonly kind: "format" | "limit";
-  readonly message: string;
-  readonly boundary?: "file-size" | "capacity";
-}
-
-/** A domain decoder fed the admitted bytes in order. */
-export interface RegionDecoder<Image> {
-  write(chunk: Uint8Array): Result<void, RegionDecodeFailure>;
-  finish(): Result<Image, RegionDecodeFailure>;
-}
 
 /** One extractable region: its inventory facts and the decoded bytes behind them. */
 export interface DecodedRegion {
@@ -79,7 +70,8 @@ export class DecodedRegionArtifactReader<Image> implements ArtifactReader {
   readonly #source: ArtifactFileSource;
   readonly #decoding: RegionDecoding<Image>;
   #prepared: Promise<void> | undefined;
-  #described: DecodedRegions | undefined;
+  /** Whole-file facts only; the region map is the sole owner of region bytes. */
+  #described: Omit<DecodedRegions, "regions"> | undefined;
   #closing = false;
 
   constructor(
@@ -260,7 +252,8 @@ export class DecodedRegionArtifactReader<Image> implements ArtifactReader {
       this.#regions.set(entry.adapterKey, region.bytes);
       index += 1;
     }
-    this.#described = described;
+    const { regions: _regions, ...facts } = described;
+    this.#described = facts;
     await this.#source.read(signal);
   }
 

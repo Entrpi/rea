@@ -81,7 +81,7 @@ const observeFatSliceHeaders = (input: {
 
 const finishClassificationEvidence = (
   prefix: Buffer,
-  suffix: Buffer,
+  suffix: Buffer | undefined,
   archiveBytes: number,
   finishAsar: (archiveBytes: number) => FinalAsarHeaderProbeObservation,
   sliceHeadersByOffset: Map<number, MachoHeaderPrefixFacts>,
@@ -112,7 +112,7 @@ const finishClassificationEvidence = (
       : undefined;
   return {
     prefix,
-    suffix,
+    ...(suffix === undefined ? {} : { suffix }),
     asarHeader: finishAsar(archiveBytes),
     ...(fatSliceHeaders === undefined ? {} : { fatSliceHeaders }),
     ...(mzWindowsHeaderSignature === undefined
@@ -283,7 +283,8 @@ export const createArtifactClassificationProbe = (
     finish(archiveBytes: number): ArtifactClassificationEvidence {
       return finishClassificationEvidence(
         retainedPrefix(),
-        suffix,
+        // Bytes the probe did not observe could still follow its last write.
+        observedBytes === archiveBytes ? suffix : undefined,
         archiveBytes,
         (bytes) => asar.finish(bytes),
         fatSliceHeadersByOffset,

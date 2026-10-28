@@ -91,8 +91,8 @@ it("inventories each family's regions with family and block facts", async () => 
         end_address: 0x2000_0002,
         length: 3,
         block_count: 1,
-        first_block: 3,
-        last_block: 3,
+        first_file_block: 3,
+        last_file_block: 3,
       },
     ],
     [
@@ -107,8 +107,8 @@ it("inventories each family's regions with family and block facts", async () => 
         end_address: 0x1000_0257,
         length: 600,
         block_count: 3,
-        first_block: 0,
-        last_block: 2,
+        first_file_block: 0,
+        last_file_block: 2,
       },
     ],
   ]);
@@ -123,7 +123,7 @@ it("leaves coverage unknown when numbered blocks are absent", async () => {
   );
   expect(snapshot.coverage.status).toBe("unknown");
   expect(snapshot.limitations).toContain(
-    "UF2 numbering declares 1 block(s) that are absent: family 0xe48bff57 (RP2XXX_ABSOLUTE) has 1 of 2 numbered blocks.",
+    "UF2 numbering declares 1 block(s) that are absent: family 0xe48bff57 (RP2XXX_ABSOLUTE) with 2 numbered blocks has 1 of them.",
   );
   expect(
     snapshot.occurrences
