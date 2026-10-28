@@ -267,6 +267,8 @@ export const projectArtifactInventoryView = (
     inventory.manifest.root_format === "godot-pck" ||
     inventory.manifest.root_format === "pyinstaller" ||
     inventory.manifest.root_format === "node-sea" ||
+    inventory.manifest.root_format === "intel-hex" ||
+    inventory.manifest.root_format === "srec" ||
     inventory.manifest.root_format === "esp-image";
   const counts = inventoryCounts(source);
   const limitations = uniqueSorted([

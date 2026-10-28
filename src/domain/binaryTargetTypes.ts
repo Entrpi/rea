@@ -260,6 +260,8 @@ export type BinaryTarget =
           | "godot-pck"
           | "dmg"
           | "pkg"
+          | "intel-hex"
+          | "srec"
           | "esp-image";
       })
   | (BinaryTargetIdentity &

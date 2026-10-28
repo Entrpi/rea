@@ -38,6 +38,8 @@ export const evidenceSubjectFormatSchema = z.enum([
   "entitlements",
   "pyinstaller",
   "node-sea",
+  "intel-hex",
+  "srec",
   "esp-image",
 ]);
 

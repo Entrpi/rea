@@ -75,6 +75,7 @@ import {
 } from "../domain/apple/appleArchiveFormat.js";
 import { hasDiskImageSignature } from "../domain/apple/diskImageFormat.js";
 import { hasGodotPckHeader } from "../domain/godotPckFormat.js";
+import { detectHexRecordEncoding } from "../domain/firmware/hexRecords.js";
 import {
   ESP8266_REFUSAL,
   recognizeEspImage,
@@ -669,6 +670,8 @@ const detectArtifactFormat = async (
     );
   if (hasZipSignature(magic)) return zipRootPackageFormat(lower);
   if (hasGodotPckHeader(magic)) return "godot-pck";
+  const hexRecords = detectHexRecordEncoding(magic);
+  if (hexRecords !== undefined) return hexRecords;
   const esp = recognizeEspImage(magic, initial.size);
   if (esp === "esp8266")
     throw new BinaryTargetError(path, ESP8266_REFUSAL, {
@@ -742,7 +745,15 @@ const isArchiveFormat = (
   >,
 ): format is Extract<BinaryTarget, { kind: "archive" }>["format"] =>
   isZipPackageFormat(format) ||
-  ["asar", "godot-pck", "dmg", "pkg", "esp-image"].includes(format);
+  [
+    "asar",
+    "godot-pck",
+    "dmg",
+    "pkg",
+    "intel-hex",
+    "srec",
+    "esp-image",
+  ].includes(format);
 
 /** Whether the leading bytes begin any executable header family, valid or not. */
 const claimsLeadingExecutableHeader = async (

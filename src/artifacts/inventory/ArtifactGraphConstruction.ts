@@ -1,4 +1,5 @@
 import { hasGodotPckHeader } from "../../domain/godotPckFormat.js";
+import { detectHexRecordEncoding } from "../../domain/firmware/hexRecords.js";
 import { recognizeEspImage } from "../../domain/firmware/espImage.js";
 import type { ArtifactClassificationEvidence } from "../ArtifactClassificationProbe.js";
 import { asarHeaderAdmissionFailure } from "../AsarHeader.js";
@@ -283,6 +284,8 @@ export const rootOccurrenceFor = (
       "pkg",
       "pyinstaller",
       "node-sea",
+      "intel-hex",
+      "srec",
       "esp-image",
     ].includes(metadata.format)
       ? "container"
@@ -574,7 +577,12 @@ const artifactRoleForFormat = (
       format: zipPackageFormatForPath(path) ?? format,
     };
   if (format === "plist") return { kind: "plist", format };
-  if (format === "godot-pck" || format === "esp-image")
+  if (
+    format === "godot-pck" ||
+    format === "intel-hex" ||
+    format === "srec" ||
+    format === "esp-image"
+  )
     return { kind: "container", format };
   return {
     kind: ["native-addon", "dynamic-library"].includes(byPath.kind)
@@ -592,6 +600,8 @@ export const classifyArtifactBytes = (
   const { prefix, mzWindowsHeaderSignature } = evidence;
   if (hasZipSignature(prefix)) return "zip";
   if (hasGodotPckHeader(prefix)) return "godot-pck";
+  const hexRecords = detectHexRecordEncoding(prefix);
+  if (hexRecords !== undefined) return hexRecords;
   if (recognizeEspImage(prefix, fileSize) === "esp-image") return "esp-image";
   if (hasBinaryPlistSignature(prefix)) return "plist";
   if (hasXmlPlistSignature(prefix)) return "plist";

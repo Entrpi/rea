@@ -457,6 +457,27 @@ it("keeps byte content format separate from path-specific package role", () => {
   });
 });
 
+it("classifies nested HEX and S-record content as containers by bytes", () => {
+  expect(
+    classifyArtifactBytesAtPath(
+      "firmware/update.txt",
+      Buffer.from(":0300300002337A1E\n:00000001FF\n"),
+    ),
+  ).toEqual({ kind: "container", format: "intel-hex" });
+  expect(
+    classifyArtifactBytesAtPath(
+      "firmware/app.s19",
+      Buffer.from("S00600004844521B\n"),
+    ),
+  ).toEqual({ kind: "container", format: "srec" });
+  expect(
+    classifyArtifactBytesAtPath(
+      "firmware/bad.hex",
+      Buffer.from(":0300300002337A1F\n"),
+    ),
+  ).toEqual({ kind: "resource", format: "file" });
+});
+
 it("classifies nested ESP images as containers by bytes", () => {
   const image = espImage({ segments: ESP32C3_APP_SEGMENTS });
   expect(classifyArtifactBytesAtPath("ota/update.dat", image)).toEqual({
