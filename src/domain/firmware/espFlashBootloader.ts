@@ -35,9 +35,11 @@ export interface EspBootloaderLocation {
 export interface EspBootloaderSearch {
   readonly location: EspBootloaderLocation | undefined;
   readonly limitations: readonly string[];
-  /** A known chip's image sits at another chip's ROM offset. */
-  readonly misplaced: boolean;
-  /** The first such image, which may be the bootloader of a later origin. */
+  /**
+   * The first image of a known chip at another chip's ROM offset, which says
+   * the dump does not start where its origin says and may be the bootloader
+   * of a later origin.
+   */
   readonly misplacedImage:
     | { readonly chip: EspChip; readonly fileOffset: number }
     | undefined;
@@ -71,7 +73,6 @@ export const locateEspBootloader = (
           chip,
         },
         limitations: [],
-        misplaced: false,
         misplacedImage: undefined,
         esp8266: false,
       };
@@ -86,7 +87,6 @@ export const locateEspBootloader = (
   return {
     location: undefined,
     limitations,
-    misplaced: misplacedImage !== undefined,
     misplacedImage,
     esp8266,
   };

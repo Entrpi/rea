@@ -69,19 +69,31 @@ export interface EspFlashDumpOrigin {
  * An image of a chip whose ROM loads the bootloader from flash `R`, at file
  * offset `F`, is the bootloader of a dump read from flash `R - F` when a
  * partition table sits where that origin puts the default table, at file
- * offset `0x8000 - (R - F)`. An ESP32 dump read from `0x1000`, as
- * `read-flash 0x1000 …` or `merge-bin --target-offset 0x1000` writes it,
- * has its bootloader at file offset 0 and its table at `0x7000`.
+ * offset `0x8000 - (R - F)`, at or after the image's `end`. An ESP32 dump
+ * read from `0x1000`, as `read-flash 0x1000 …` or
+ * `merge-bin --target-offset 0x1000` writes it, has its bootloader at file
+ * offset 0 and its table at `0x7000`.
  */
 export const espFlashDumpOrigin = async (
   read: EspFlashRead,
   fileSize: number,
-  image: { readonly chip: EspChip; readonly fileOffset: number },
+  image: {
+    readonly chip: EspChip;
+    readonly fileOffset: number;
+    /** The file offset where the image ends; no table lies before it. */
+    readonly end: number;
+  },
 ): Promise<EspFlashDumpOrigin | undefined> => {
   const flashOffset = image.chip.romBootloaderOffset - image.fileOffset;
   const tableFileOffset = ESP_PARTITION_TABLE_DEFAULT_OFFSET - flashOffset;
-  if (flashOffset <= 0 || tableFileOffset < 0 || tableFileOffset >= fileSize)
+  if (
+    flashOffset <= 0 ||
+    tableFileOffset < image.end ||
+    tableFileOffset >= fileSize
+  )
     return undefined;
+  // As at the default offset, the MD5 need not verify: the layout reports a
+  // mismatch, and the bootloader's rejection, as facts of the table.
   return (await tableAt(read, tableFileOffset)).ok
     ? { flashOffset, tableFileOffset }
     : undefined;
@@ -163,7 +175,7 @@ export const locateEspFlashLayout = async (
   // Without a bootloader, nothing in the dump confirms a default origin.
   const unconfirmed =
     bootloader.location === undefined &&
-    !bootloader.misplaced &&
+    bootloader.misplacedImage === undefined &&
     origin.source === "default"
       ? [
           `No bootloader at a ROM offset confirms that the dump starts at flash ${offsetText(origin.value)}; each partition's file offset assumes it. Pass flash_offset if the dump starts elsewhere.`,
@@ -200,11 +212,12 @@ export const locateEspFlashLayout = async (
     return err(ESP8266_REFUSAL);
   // A table found at an origin the bootloader contradicts would place every
   // partition at the wrong file offset.
-  if (bootloader.location === undefined && bootloader.misplaced) {
-    const implied =
-      bootloader.misplacedImage === undefined
-        ? undefined
-        : await espFlashDumpOrigin(read, fileSize, bootloader.misplacedImage);
+  const misplaced = bootloader.misplacedImage;
+  if (bootloader.location === undefined && misplaced !== undefined) {
+    const implied = await espFlashDumpOrigin(read, fileSize, {
+      ...misplaced,
+      end: await espImageSegmentsEnd(read, misplaced.fileOffset, fileSize),
+    });
     return err(
       `${bootloader.limitations.join(" ")} ${
         implied === undefined

@@ -46,7 +46,8 @@ refuses two kinds of dump before looking for a table:
   is not the flash address REA assumed, given or default, and a table found
   there would place every partition at the wrong file offset; pass the
   `flash_offset` where the dump starts. When a partition table sits where
-  the image's own ROM offset puts `0x8000`, the refusal names that offset.
+  the image's own ROM offset puts `0x8000`, after the image's segments, the
+  refusal names that offset.
   Without a selected format such a dump opens as its bootloader image, whose
   [ESP image](esp-image.md) facts say how to reopen it.
 - an ESP8266 image at a ROM offset. ESP8266 dumps can hold the same table

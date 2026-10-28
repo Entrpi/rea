@@ -250,7 +250,8 @@ export class EspImageArtifactReader implements ArtifactReader {
     return espFlashDumpOrigin(
       (position, length) => readEspFlashRange(context, position, length),
       initial.size,
-      { chip, fileOffset: 0 },
+      // A truncated image has no end, so no table can follow it.
+      { chip, fileOffset: 0, end: image.metadata.image_end ?? initial.size },
     );
   }
 

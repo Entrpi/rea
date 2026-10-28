@@ -20,6 +20,7 @@ import { digestCanonicalValue } from "./canonicalDigest.js";
 import { isJavaScriptSourcePath } from "./javascript/javascriptArtifactFiles.js";
 import { uniqueSorted } from "./canonicalOrdering.js";
 import { evidenceSchema, parseEvidence, type Evidence } from "./evidence.js";
+import { offsetText } from "./firmware/espImageStructures.js";
 import { jsonValueSchema } from "./jsonValue.js";
 import { prefixedDigestSchema } from "./../domain/digests.js";
 
@@ -332,11 +333,11 @@ const espFlashDumpProbes = (
     ({ logical_path }) => logical_path === ".",
   )?.format_metadata;
   if (root?.kind !== "esp-image" || root.flash_dump === null) return [];
-  const offset = `0x${root.flash_dump.flash_offset.toString(16)}`;
+  const offset = offsetText(root.flash_dump.flash_offset);
   return [
     {
       operation: "open_binary",
-      rationale: `Reopen the file with format esp-flash-image and flash_offset ${offset}, then inspect_artifact: it is a flash dump read from flash ${offset}, with a partition table at file offset 0x${root.flash_dump.table_file_offset.toString(16)}.`,
+      rationale: `Reopen the file with format esp-flash-image and flash_offset ${offset}, then inspect_artifact: it is a flash dump read from flash ${offset}, with a partition table at file offset ${offsetText(root.flash_dump.table_file_offset)}.`,
       authority: "artifact-bytes",
     },
   ];
