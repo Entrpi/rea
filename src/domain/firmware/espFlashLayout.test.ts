@@ -386,6 +386,11 @@ describe("ESP bootloader location", () => {
         "An esp32 image is at flash 0x0, but its ROM loads the bootloader from 0x1000; the dump may not start at flash 0x0.",
       ],
       misplaced: true,
+      // Its chip and offset let the caller look for the origin it implies.
+      misplacedImage: {
+        chip: expect.objectContaining({ target: "esp32" }),
+        fileOffset: 0,
+      },
       esp8266: false,
     });
   });
@@ -398,6 +403,7 @@ describe("ESP bootloader location", () => {
     expect(locateEspBootloader([probe(0, unknown)])).toMatchObject({
       location: undefined,
       misplaced: false,
+      misplacedImage: undefined,
       esp8266: false,
     });
     expect(locateEspBootloader([probe(0, esp8266Image())])).toMatchObject({
