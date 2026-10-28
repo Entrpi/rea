@@ -189,7 +189,9 @@ unchanged. Any other raw load:
 
 An entry's `role` names its function: `entry` for an entry the caller named,
 `reset` for the Reset handler. Its `basis` records how REA chose it: `caller`
-or `vector-table`.
+or `vector-table`. Ghidra names the function it seeds there `entry` whatever
+the role, as its loaders name a program entry; the role, not that name, says
+which handler it is.
 
 Identity has two levels:
 
@@ -234,7 +236,8 @@ This is decision D1 of the embedded-target work, raised in
   language ids in a provider-neutral contract. Masking odd entries hides the
   caller's value; refusing first keeps accepting them a later, additive change.
   A `role` that records how the entry was chosen mixes provenance with what the
-  entry is. Leaving the basis and the vector-table address out of session
+  entry is. Naming the seeded function after its role, as CMSIS
+  `Reset_Handler`, would claim a symbol the image does not carry. Leaving the basis and the vector-table address out of session
   identity would let a reused session report provenance or vector words that
   the current request did not produce. Putting them or the entry address in
   coordinate identity would make functions found from two entries of one image
