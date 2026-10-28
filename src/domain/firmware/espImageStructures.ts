@@ -113,8 +113,8 @@ export const decodeEspDescriptor = (
       app_elf_sha256: held(176) ? hex(bytes.subarray(144, 176)) : null,
       min_efuse_blk_rev_full: held(178) ? u16(bytes, 176) : null,
       max_efuse_blk_rev_full: held(180) ? u16(bytes, 178) : null,
-      mmu_page_size: held(181) ? (bytes[180] ?? 0) : null,
-      spi_flash_mode: held(182) ? (bytes[181] ?? 0) : null,
+      mmu_page_size: bytes[180] ?? null,
+      spi_flash_mode: bytes[181] ?? null,
     };
   }
   if (
