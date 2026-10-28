@@ -417,7 +417,8 @@ describe("raw-binary base address admission", () => {
       ).toEqual({
         ok: false,
         error: {
-          reason: "base_address applies only with architecture_variant",
+          reason:
+            "base_address applies only with architecture_variant or provider_language",
           constraint: "load_selection_rejected",
           field: "base_address",
         },
@@ -798,7 +799,7 @@ describe("raw-binary variant pairing at admission", () => {
     ],
     [
       { baseAddress: "0x8000000" },
-      "base_address applies only with architecture_variant",
+      "base_address applies only with architecture_variant or provider_language",
       "base_address",
     ],
     [

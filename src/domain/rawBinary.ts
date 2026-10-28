@@ -675,14 +675,16 @@ export const rawBinaryVariantSelectionIssue = (
       message:
         "architecture_variant requires base_address, the address of file offset 0",
     };
-  // Narrow first: only the M-profile lane is verified with a separate base.
+  // Narrow first: only the M-profile and provider-language lanes are verified
+  // with a separate base; provider-language selections are checked above.
   if (
     input.baseAddress !== undefined &&
     input.architectureVariant === undefined
   )
     return {
       field: "base_address",
-      message: "base_address applies only with architecture_variant",
+      message:
+        "base_address applies only with architecture_variant or provider_language",
     };
   if (input.entryPoint !== undefined)
     return input.vectorTableAddress === undefined
