@@ -8,20 +8,6 @@ import { promisify } from "node:util";
 
 const execute = promisify(execFile);
 
-const SOFT_SYMBOLS = [
-  "rea_riscv_isa_probe",
-  "rea_riscv_abi_pick",
-  "rea_riscv_abi_wide",
-  "rea_riscv_abi_mixed",
-  "rea_riscv_abi_split",
-  "rea_riscv_abi_pair",
-  "rea_riscv_abi_tagged",
-  "rea_riscv_abi_large",
-  "rea_riscv_abi_variadic",
-  "rea_riscv_abi_caller",
-  "rea_riscv_abi_callback",
-];
-
 /** One build per float ABI the lane verifies. */
 const BUILDS = {
   double: {
@@ -29,7 +15,6 @@ const BUILDS = {
     march: (bits) => `rv${bits}imafdc`,
     mabi: (bits) => (bits === 32 ? "ilp32d" : "lp64d"),
     flags: 5,
-    symbols: ["rea_riscv_leaf", "rea_riscv_float"],
   },
   // ESP-IDF's ESP32-C2 and C3 base string, built ilp32 as ESP-IDF does.
   soft: {
@@ -41,7 +26,6 @@ const BUILDS = {
     march: () => "rv32imc_zicsr_zifencei",
     mabi: () => "ilp32",
     flags: 1,
-    symbols: SOFT_SYMBOLS,
   },
 };
 
@@ -154,23 +138,13 @@ export async function buildRiscvFixture(directory, bits, floatAbi = "double") {
     `Compiler did not declare RVC and the ${floatAbi}-float ABI`,
   );
   assert.equal(elf.isa.xlen, bits);
+  // Every source-owned global; the verifier asserts the ones it needs.
   const symbols = {};
-  for (const name of [
-    "rea_riscv_entry",
-    "rea_riscv_probe",
-    "rea_riscv_global",
-    ...build.symbols,
-  ]) {
-    const matches = [
-      ...elf.stdout.matchAll(
-        new RegExp(
-          `^\\s*\\d+:\\s+([\\da-f]+)\\s+\\d+\\s+(?:FUNC|OBJECT)\\s+GLOBAL\\s+\\S+\\s+\\d+\\s+${name}\\s*$`,
-          "gmu",
-        ),
-      ),
-    ];
-    assert.equal(matches.length, 1, `Missing or ambiguous readelf ${name}`);
-    symbols[name] = `0x${BigInt(`0x${matches[0][1]}`).toString(16)}`;
+  for (const [, value, name] of elf.stdout.matchAll(
+    /^\s*\d+:\s+([\da-f]+)\s+\d+\s+(?:FUNC|OBJECT)\s+GLOBAL\s+\S+\s+\d+\s+(rea_riscv_\w+)\s*$/gmu,
+  )) {
+    assert.equal(symbols[name], undefined, `Ambiguous readelf symbol ${name}`);
+    symbols[name] = `0x${BigInt(`0x${value}`).toString(16)}`;
   }
   return {
     path,
