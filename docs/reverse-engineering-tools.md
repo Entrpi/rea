@@ -90,20 +90,26 @@ rea execute-rizin-command ./program iI
 ```
 
 Before a one-shot command, REA resolves the selected executable through `PATH`,
-hashes it, runs it with `-v` and reads the tool and version from its banner.
-The command then runs the same path. Evidence records the tool and version as
-the provider name and version, and records the executable path, its SHA-256 and
-the banner line in its parameters. These describe the file at that path when
+hashes it, runs it with `-v` and reads the tool and version from its banner,
+the first line of that output. The command then runs the same path. Evidence
+records the tool and version as the provider name and version, and records the
+executable path, its SHA-256 and the banner in its parameters; a banner longer
+than 2,048 characters is cut there and marked by
+`provider_version_banner_truncated`. These describe the file at that path when
 REA checked it; they cannot prove the exact bytes executed if the file changes
-before the launch. A different tool that accepts
-the same arguments, such as radare2, still runs: its Evidence names that tool
-and adds a limitation. A probe that fails, times out or prints an unrecognized
-banner leaves the version unknown, and the command still runs; a failed probe's
-exit status and bounded output are recorded in `provider_version_probe`. Each
-call's probe uses that call's `command_timeout_ms` budget and cancellation. A
-completed probe (a banner, a non-zero exit or a timeout) is reused for the same
-resolved path and SHA-256 for the life of the server process, and a later
-failure never replaces a successful reading; a cancelled probe is not reused.
+before the launch. A different tool that accepts the same arguments, such as
+radare2, still runs: its Evidence names that tool and adds a limitation. A probe
+that fails, times out, prints output that is not valid UTF-8 or prints an
+unrecognized banner leaves the version unknown, and the command still runs; the
+probe's exit status and bounded output are recorded in `provider_version_probe`.
+Each call's lookup, hash and probe use that call's `command_timeout_ms` budget
+and cancellation; a lookup or hash that reaches the deadline ends the call
+without running the command. For each resolved path, REA keeps the latest
+completed probe (a banner, a non-zero exit, a timeout or output that is not
+valid UTF-8) for the life of the server process and reuses it while the SHA-256
+matches. A new SHA-256 replaces it, and a later failure never replaces a
+successful reading of the same file. A cancelled probe, or one whose output was
+not fully collected, is not reused.
 
 Captured stdout and stderr are retained up to a 16 MiB combined limit; `output_truncated` marks output beyond that limit. One-shot commands use the `command_timeout_ms` budget described above. That 16 MiB cap has no runtime override.
 

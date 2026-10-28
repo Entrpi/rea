@@ -152,11 +152,15 @@ export class ReverseEngineeringService {
     Promise<Result<Evidence, AnalysisError>>
   >();
   /**
-   * Completed version probes (a banner, a non-zero exit or a timeout), keyed
-   * by the resolved launch path and that file's digest. Cancelled probes and
-   * probes whose cleanup is incomplete are not kept.
+   * The latest completed version probe for each resolved launch path, with
+   * the digest of the file it read; a new digest replaces the entry, and a
+   * kept banner is bounded. Cancelled probes, probes whose output was not
+   * collected and probes whose cleanup is incomplete are not kept.
    */
-  readonly #versionProbes = new Map<string, CompletedVersionProbe>();
+  readonly #versionProbes = new Map<
+    string,
+    { readonly sha256: string; readonly completed: CompletedVersionProbe }
+  >();
   #closing = false;
   #closePromise: Promise<void> | undefined;
 
@@ -920,6 +924,15 @@ export class ReverseEngineeringService {
             cause: callerCancellationCause(signal, cause),
           }),
         );
+      // Hashing past the deadline ends the call, as the lookup's deadline does.
+      if (code === "ETIMEDOUT")
+        return err(
+          new AnalysisTimeoutError(operation, timeoutMs, {
+            cause,
+            diagnostics: { phase: "executable_digest" },
+            ...reverseCommandTimeoutGuidance(timeoutMs),
+          }),
+        );
       return ok(
         unidentified(
           `the executable could not be read${code === undefined ? "" : ` (${String(code)})`}`,
@@ -930,8 +943,8 @@ export class ReverseEngineeringService {
       provider_executable_path: lookup.path,
       provider_executable_sha256: sha256,
     };
-    const key = `${lookup.path}\0${sha256}`;
-    let completed = this.#versionProbes.get(key);
+    const kept = this.#versionProbes.get(lookup.path);
+    let completed = kept?.sha256 === sha256 ? kept.completed : undefined;
     if (completed === undefined) {
       const outcome = await this.#runVersionProbe(
         operation,
@@ -944,16 +957,12 @@ export class ReverseEngineeringService {
       if (!outcome.ok) return outcome;
       completed = outcome.value;
       if (completed.status !== "unfinished")
-        this.#rememberVersionProbe(key, completed);
+        this.#rememberVersionProbe(lookup.path, sha256, completed);
     }
     if (completed.status !== "read")
       return ok(
         unidentified(
-          `its version probe (${probe.arguments.join(" ")}) ${
-            completed.status === "timed-out"
-              ? "reached the command deadline"
-              : "did not complete successfully"
-          }`,
+          `its version probe (${probe.arguments.join(" ")}) ${VERSION_PROBE_FAILURE_REASONS[completed.status]}`,
           lookup.path,
           { ...parameters, provider_version_probe: completed.diagnostics },
         ),
@@ -971,23 +980,31 @@ export class ReverseEngineeringService {
       ],
       parameters: {
         ...parameters,
-        provider_version_banner: identification.banner,
+        provider_version_banner: completed.banner,
+        provider_version_banner_truncated: completed.bannerTruncated,
       },
     });
   }
 
   /**
-   * Keep a completed probe for its launch path and digest. Concurrent first
-   * calls can each probe, so a later failure never replaces a successful
-   * reading; a success replaces an earlier failure.
+   * Keep the latest completed probe for a launch path; a new digest replaces
+   * it. Concurrent first calls can each probe the same digest, so a later
+   * failure never replaces a successful reading of it; a success replaces an
+   * earlier failure.
    */
-  #rememberVersionProbe(key: string, completed: CompletedVersionProbe): void {
+  #rememberVersionProbe(
+    path: string,
+    sha256: string,
+    completed: CompletedVersionProbe,
+  ): void {
+    const kept = this.#versionProbes.get(path);
     if (
       completed.status !== "read" &&
-      this.#versionProbes.get(key)?.status === "read"
+      kept?.sha256 === sha256 &&
+      kept.completed.status === "read"
     )
       return;
-    this.#versionProbes.set(key, completed);
+    this.#versionProbes.set(path, { sha256, completed });
   }
 
   /**
@@ -1011,9 +1028,20 @@ export class ReverseEngineeringService {
         stopSignal: "SIGTERM",
         maxBuffer: MAX_COMBINED_OUTPUT_BYTES,
       });
+      // Replacement characters could read as a version, so undecodable output
+      // identifies nothing.
+      if (output.stdoutInvalidUtf8 === true)
+        return ok({
+          status: "undecodable",
+          diagnostics: versionProbeDiagnostics(0, output),
+        });
+      const line = output.stdout.split(/\r?\n/u, 1)[0]?.trim() ?? "";
+      const banner = line.slice(0, VERSION_PROBE_TEXT_CHARS);
       return ok({
         status: "read",
-        identification: probe.identify(output.stdout),
+        identification: probe.identify(banner),
+        banner,
+        bannerTruncated: line.length > VERSION_PROBE_TEXT_CHARS,
       });
     } catch (cause) {
       const capture = execFileOutputFailure(cause);
@@ -1052,14 +1080,17 @@ export class ReverseEngineeringService {
           ),
         );
       const diagnostics = versionProbeDiagnostics(code, capture);
-      // Only an exit or the call's deadline completes a probe; a launch or
-      // collection failure is not a reading of this executable.
+      // Only an exit or the call's deadline completes a probe. A launch
+      // failure, or output that was not fully collected, is not a reading of
+      // this executable, whatever its exit status.
       return ok(
-        code === "ETIMEDOUT"
-          ? { status: "timed-out", diagnostics }
-          : typeof code === "number" || capture?.signal != null
-            ? { status: "failed", diagnostics }
-            : { status: "unfinished", diagnostics },
+        capture?.collectionFailure === true
+          ? { status: "unfinished", diagnostics }
+          : code === "ETIMEDOUT"
+            ? { status: "timed-out", diagnostics }
+            : typeof code === "number" || capture?.signal != null
+              ? { status: "failed", diagnostics }
+              : { status: "unfinished", diagnostics },
       );
     }
   }
@@ -1087,9 +1118,12 @@ type VersionProbeOutcome =
   | {
       readonly status: "read";
       readonly identification: ProviderToolIdentification;
+      /** The first stdout line, trimmed and bounded. */
+      readonly banner: string;
+      readonly bannerTruncated: boolean;
     }
   | {
-      readonly status: "failed" | "timed-out" | "unfinished";
+      readonly status: "failed" | "timed-out" | "undecodable" | "unfinished";
       readonly diagnostics: Readonly<Record<string, JsonValue>>;
     };
 type CompletedVersionProbe = Exclude<
@@ -1097,31 +1131,54 @@ type CompletedVersionProbe = Exclude<
   { readonly status: "unfinished" }
 >;
 
-// A banner is one line; this keeps a failed probe's diagnostics small in
-// Evidence while showing why it failed.
-const VERSION_PROBE_DIAGNOSTIC_CHARS = 2_048;
+/** Why a probe that read no usable banner leaves the version unknown. */
+export const VERSION_PROBE_FAILURE_REASONS = {
+  failed: "did not complete successfully",
+  "timed-out": "reached the command deadline",
+  undecodable: "printed output that is not valid UTF-8",
+  unfinished: "did not complete successfully",
+} as const satisfies Record<
+  Exclude<VersionProbeOutcome["status"], "read">,
+  string
+>;
+
+// A banner is one line; this bounds the banner a probe keeps and a failed
+// probe's diagnostics, so both stay small in Evidence and in the probe cache.
+const VERSION_PROBE_TEXT_CHARS = 2_048;
 
 /** Bounded exit facts and output of a probe that printed no usable banner. */
 const versionProbeDiagnostics = (
   code: string | number | null | undefined,
-  capture: ReturnType<typeof execFileOutputFailure>,
+  output:
+    | {
+        readonly stdout: string;
+        readonly stderr: string;
+        readonly signal?: string | null;
+        readonly outputTruncated?: boolean;
+        readonly collectionFailure?: boolean;
+      }
+    | undefined,
 ): Readonly<Record<string, JsonValue>> => {
   const bounded = (text: string): string =>
-    text.length <= VERSION_PROBE_DIAGNOSTIC_CHARS
+    text.length <= VERSION_PROBE_TEXT_CHARS
       ? text
-      : text.slice(0, VERSION_PROBE_DIAGNOSTIC_CHARS);
-  const stdout = capture?.stdout ?? "";
-  const stderr = capture?.stderr ?? "";
+      : text.slice(0, VERSION_PROBE_TEXT_CHARS);
+  const stdout = output?.stdout ?? "";
+  const stderr = output?.stderr ?? "";
   return {
-    exit_code: typeof code === "number" ? code : null,
-    signal: capture?.signal ?? null,
+    // An exit status of output that was not fully collected is not reported.
+    exit_code:
+      output?.collectionFailure !== true && typeof code === "number"
+        ? code
+        : null,
+    signal: output?.signal ?? null,
     error_code: typeof code === "string" ? code : null,
     stdout: bounded(stdout),
     stderr: bounded(stderr),
     output_truncated:
-      capture?.outputTruncated === true ||
-      stdout.length > VERSION_PROBE_DIAGNOSTIC_CHARS ||
-      stderr.length > VERSION_PROBE_DIAGNOSTIC_CHARS,
+      output?.outputTruncated === true ||
+      stdout.length > VERSION_PROBE_TEXT_CHARS ||
+      stderr.length > VERSION_PROBE_TEXT_CHARS,
   };
 };
 
@@ -1308,7 +1365,7 @@ const ownedCleanupOptions = (
 const reverseCommandTimeoutGuidance = (
   timeoutMs: number,
 ): { readonly userMessage: string; readonly remediationAction: string } => ({
-  userMessage: `This objdump or rizin command reached its ${String(timeoutMs)} ms server/provider deadline (command_timeout_ms) during target preflight or the one-shot command (deadlineExpired). This is not a Ghidra or Hopper startup deadline and not a debugger session deadline.`,
+  userMessage: `This objdump or rizin command reached its ${String(timeoutMs)} ms server/provider deadline (command_timeout_ms) during target preflight, executable identification or the one-shot command (deadlineExpired). This is not a Ghidra or Hopper startup deadline and not a debugger session deadline.`,
   remediationAction: `${
     timeoutMs < MAX_REVERSE_COMMAND_TIMEOUT_MS
       ? `Increase command_timeout_ms above ${String(timeoutMs)} (integer milliseconds from 1 to ${String(MAX_REVERSE_COMMAND_TIMEOUT_MS)}; omitted means ${String(DEFAULT_REVERSE_COMMAND_TIMEOUT_MS)}), or use --command-timeout-ms on the CLI.`

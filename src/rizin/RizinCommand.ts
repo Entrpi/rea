@@ -18,23 +18,20 @@ export const RIZIN_PROVIDER_IDENTITY = {
  * than refused.
  */
 export const identifyRizinTool = (
-  stdout: string,
+  banner: string,
 ): ProviderToolIdentification => {
-  const banner = stdout.split(/\r?\n/u, 1)[0]?.trim() ?? "";
   const match = /^(\S+) (\d\S*)/u.exec(banner);
   const tool = match?.[1];
   const version = match?.[2];
   if (tool === undefined || version === undefined)
-    return { identity: RIZIN_PROVIDER_IDENTITY, banner, limitations: [] };
+    return { identity: RIZIN_PROVIDER_IDENTITY, limitations: [] };
   if (tool === "rizin")
     return {
       identity: { ...RIZIN_PROVIDER_IDENTITY, version },
-      banner,
       limitations: [],
     };
   return {
     identity: { id: RIZIN_PROVIDER_IDENTITY.id, name: tool, version },
-    banner,
     limitations: [
       `REA_RIZIN_COMMAND selected ${tool} ${version}, not Rizin. REA ran it with Rizin's arguments; the output follows ${tool}'s command semantics, which REA has not verified.`,
     ],
