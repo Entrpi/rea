@@ -69,9 +69,9 @@ const segmentsImage = () => {
       architectureVariant: "armv7-m",
       entryPoint: undefined,
       baseAddress: "0x8000000",
-      fileBytes: 8,
+      fileBytes: 0x10,
     },
-    vectorTableWords(0x20005000, 0x08000003),
+    vectorTableWords(0x20005000, 0x08000009),
   );
   const target = { ...f.target, rawLoad };
   f.observation.language_id = "ARM:LE:32:Cortex";

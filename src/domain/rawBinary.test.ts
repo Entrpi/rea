@@ -641,6 +641,25 @@ describe.each(ARCHITECTURE_VARIANT_NAMES)(
       });
     });
 
+    it("refuses a default vector table at a base VTOR cannot hold", () => {
+      expect(
+        admitRawBinary({
+          architecture,
+          architectureVariant: variant,
+          baseAddress: "0x8000040",
+          entryPoint: undefined,
+          fileBytes: 0x200,
+        }),
+      ).toEqual({
+        ok: false,
+        error: {
+          reason:
+            "raw-binary vector table at 0x8000040 must be 128-byte aligned, as VTOR requires; it is at base_address unless vector_table_address is given",
+          constraint: "load_selection_rejected",
+        },
+      });
+    });
+
     it("reads Reset from a vector table after a header", () => {
       const read = derived({
         baseAddress: "0x10000000",
@@ -666,6 +685,7 @@ describe.each(ARCHITECTURE_VARIANT_NAMES)(
       [0x080001c4, "is even"],
       [0x090001c5, "outside the image mapped at 0x8000000..0x80001ff"],
       [0x07ffff01, "outside the image mapped at 0x8000000..0x80001ff"],
+      [0x08000005, "inside the vector-table words read at 0x8000000"],
     ])("refuses Reset word %i", (reset, reason) => {
       const result = derived({
         baseAddress: "0x8000000",
@@ -686,10 +706,12 @@ describe.each(ARCHITECTURE_VARIANT_NAMES)(
     });
 
     it.each([
-      ["0x8000002", 0x200, "must be 4-byte aligned"],
+      ["0x8000002", 0x200, "must be 128-byte aligned, as VTOR requires"],
+      // Naming the Reset slot instead of the table would read NMI as Reset.
+      ["0x8000004", 0x200, "must be 128-byte aligned, as VTOR requires"],
       ["0x8000200", 0x200, "must lie inside the image mapped at"],
-      ["0x7fffffc", 0x200, "must lie inside the image mapped at"],
-      ["0x80001fc", 0x200, "file ends before the Reset vector at 0x8000200"],
+      ["0x7ffff80", 0x200, "must lie inside the image mapped at"],
+      ["0x8000180", 0x184, "file ends before the Reset vector at 0x8000184"],
       [undefined, 4, "file ends before the Reset vector at 0x8000004"],
     ])(
       "refuses vector table %s in a %i-byte image",

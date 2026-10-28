@@ -142,11 +142,15 @@ the ARMv8.1-M one.
   clearing bit 0. Word 0, the initial stack pointer, is recorded as observed and
   is not validated.
 - Use `vector_table_address` when a header precedes the vector table, such as the
-  256-byte boot2 stage of an RP2040 image or an MCUboot header. It must be
-  4-byte aligned and inside the mapped image, and it applies only when
-  `entry_point` is omitted.
-- REA refuses a Reset word that is even, that points outside the mapped image,
-  or that lies past the end of the file.
+  256-byte boot2 stage of an RP2040 image or an MCUboot header. It applies only
+  when `entry_point` is omitted. The table, whether named or at the base, must be
+  128-byte aligned, as VTOR requires (`TBLOFF` holds address bits 31:7), and it
+  must lie inside the mapped image.
+- REA refuses a Reset word that is even, that points outside the mapped image or
+  into the 8 table bytes it read, or that lies past the end of the file. These
+  are `load_selection_rejected` refusals with the observed words in
+  `details.diagnostics`: a raw dump has no format they can violate, and the usual
+  cause is a wrong `base_address`, `vector_table_address` or variant.
 - An explicit `entry_point` must be even. An odd value is a Thumb interworking
   address, such as a word copied from the vector table. REA refuses it instead
   of clearing bit 0; `details.diagnostics` in the error give the even

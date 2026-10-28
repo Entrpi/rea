@@ -211,6 +211,8 @@ const addressWidth = (architecture: BinaryArchitecture): bigint =>
       : 0xffffffffffffffffn;
 
 const hexAddress = (value: bigint): string => `0x${value.toString(16)}`;
+/** Minimum M-profile vector-table alignment: VTOR.TBLOFF is bits 31:7. */
+const VECTOR_TABLE_ALIGNMENT = 128n;
 const hexWord = (value: number): string =>
   `0x${value.toString(16).padStart(8, "0")}`;
 
@@ -369,9 +371,12 @@ export const admitRawBinary = (input: {
     if (!parsed.ok) return parsed;
     table = parsed.value;
   }
-  if (table.value % 4n !== 0n)
+  // VTOR.TBLOFF holds address bits 31:7 wherever VTOR exists (ARMv6-M with
+  // VTOR, ARMv7-M, ARMv8-M), so a table is at least 128-byte aligned. Any less
+  // would admit a table named at its Reset slot, which reads NMI as Reset.
+  if (table.value % VECTOR_TABLE_ALIGNMENT !== 0n)
     return selectionRejected(
-      `raw-binary vector table at ${table.canonical} must be 4-byte aligned${
+      `raw-binary vector table at ${table.canonical} must be ${VECTOR_TABLE_ALIGNMENT}-byte aligned, as VTOR requires${
         input.vectorTableAddress === undefined
           ? "; it is at base_address unless vector_table_address is given"
           : ""
@@ -406,6 +411,10 @@ export const admitRawBinary = (input: {
         initial_stack_pointer: stackPointer,
         reset_vector: reset,
       };
+      // A raw dump has no format these words can violate. An even Reset word,
+      // or one outside the image or inside the words just read, almost always
+      // means the selected base, vector table or variant is wrong, so these
+      // refusals are load selections that report the words observed.
       if (resetWord % 2 === 0)
         return selectionRejected(
           `raw-binary Reset vector ${reset} at ${hexAddress(table.value + 4n)} is even; an M-profile Reset handler runs in Thumb state, so bit 0 must be set`,
@@ -415,6 +424,11 @@ export const admitRawBinary = (input: {
       if (code < start.value || code > last)
         return selectionRejected(
           `raw-binary Reset vector ${reset} points to ${hexAddress(code)}, outside the image mapped at ${mapped}`,
+          observed,
+        );
+      if (code >= table.value && code <= table.value + 7n)
+        return selectionRejected(
+          `raw-binary Reset vector ${reset} points to ${hexAddress(code)}, inside the vector-table words read at ${table.canonical}`,
           observed,
         );
       return ok({
