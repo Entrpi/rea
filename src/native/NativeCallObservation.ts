@@ -48,7 +48,11 @@ export const observeNativeCalls = async (
   resources: ArtifactResourceScope,
   signal?: AbortSignal,
 ): Promise<Result<NativeCallObservationResult, AnalysisError>> => {
-  if (target.kind !== "executable" || !isMachOFormat(target.format))
+  if (
+    target.kind !== "executable" ||
+    target.architecture === undefined ||
+    !isMachOFormat(target.format)
+  )
     return err(
       new AnalysisCapabilityUnavailableError(
         "native-macos",

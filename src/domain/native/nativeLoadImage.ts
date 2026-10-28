@@ -132,9 +132,10 @@ export const nativeRawLoadImageSchema = z.strictObject({
   limitations: z.array(z.string().min(1)),
 });
 /**
- * Version 1 of a raw load that names a separate base, an architecture variant
- * or a Reset-derived entry. A load with its base at a caller-selected entry and
- * no variant keeps the raw-binary shape above, so its saved Evidence is unchanged.
+ * Version 1 of a raw load that names a separate base, an architecture variant,
+ * a provider language or a Reset-derived entry. A load with its base at a
+ * caller-selected entry, a family decoder and no variant keeps the raw-binary
+ * shape above, so its saved Evidence is unchanged.
  */
 export const nativeSegmentsLoadImageSchema = z.strictObject({
   status: z.enum(["verified", "mismatch"]),
@@ -142,7 +143,8 @@ export const nativeSegmentsLoadImageSchema = z.strictObject({
   version: z.literal(1),
   format: z.literal("raw-binary"),
   target_sha256: digest,
-  architecture: binaryArchitectureSchema,
+  // Null when a caller-selected provider language replaces the family.
+  architecture: binaryArchitectureSchema.nullable(),
   architecture_variant: architectureVariantSchema.exactOptional(),
   language_id: z.string().min(1),
   compiler_spec_id: z.string().min(1),

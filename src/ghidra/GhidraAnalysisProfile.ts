@@ -7,12 +7,25 @@ import { createFunctionCoordinateContext } from "../domain/native/functionCoordi
 import type { JsonValue } from "../domain/jsonValue.js";
 import { createAnalysisProfile } from "../domain/analysisProfile.js";
 import type { GhidraLanguageOverride } from "../config/ghidraLanguageOverride.js";
-import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
+import type {
+  BinaryTarget,
+  ProviderLanguageRawBinaryTarget,
+} from "../domain/binaryTargetTypes.js";
+import {
+  BinaryTargetError,
+  ConfigurationError,
+} from "../domain/configurationErrors.js";
+import { ghidraFileFailure } from "./GhidraFileArtifacts.js";
+import {
+  ghidraLanguageDefinitionDigests,
+  ghidraLanguageDefinitionSchema,
+  resolveGhidraLanguageDefinition,
+  type GhidraLanguageDefinitionCommitment,
+} from "./GhidraLanguageCatalog.js";
 import {
   AnalysisCancelledError,
   AnalysisUnsupportedTargetError,
 } from "../domain/analysisErrorCore.js";
-import { ConfigurationError } from "../domain/configurationErrors.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import { err, ok, type Result } from "../domain/result.js";
@@ -42,7 +55,7 @@ import {
 import {
   GHIDRA_RAW_ENTRY_CONTEXT,
   ghidraRawBinaryLanguage,
-  ghidraVariantProcessorLabels,
+  ghidraRawProcessorLabels,
 } from "./GhidraRawBinaryLanguage.js";
 import { rawLoadIdentity } from "../domain/rawBinary.js";
 import {
@@ -144,7 +157,7 @@ const binaryLoaderPolicy = (
 ): Readonly<Record<string, JsonValue>> => ({
   target_kind: target.kind,
   target_format: target.format,
-  architecture: target.architecture,
+  architecture: target.architecture ?? null,
   available_architectures: [...target.availableArchitectures].sort(),
   import_mode: "ephemeral-source-immutable",
   ...sharedAnalysisSemantics,
@@ -260,15 +273,23 @@ export const resolveGhidraAnalysisProfile = async (
         ),
       );
     const { rawLoad } = target;
-    const language = ghidraRawBinaryLanguage(
-      target.architecture,
-      rawLoad.architectureVariant,
-    );
+    const language = ghidraRawBinaryLanguage(target);
+    // A caller-selected language commits the catalog entry it resolves to.
+    let definition: GhidraLanguageDefinitionCommitment | undefined;
+    if (target.architecture === undefined) {
+      const resolved = await resolveProviderLanguageDefinition(
+        target,
+        installation.installDir,
+        installation.providerVersion,
+        resources,
+        signal,
+      );
+      if (!resolved.ok) return resolved;
+      definition = resolved.value;
+    }
     // A legacy-equivalent load commits exactly the parameters it always did.
     const identity = rawLoadIdentity(rawLoad);
-    const processorLabels = ghidraVariantProcessorLabels(
-      rawLoad.architectureVariant,
-    );
+    const processorLabels = ghidraRawProcessorLabels(rawLoad);
     return Promise.resolve(
       ok({
         profile: createProfile({
@@ -280,7 +301,12 @@ export const resolveGhidraAnalysisProfile = async (
           loader: "BinaryLoader",
           language_id: language.languageId,
           compiler_spec_id: language.compilerSpecId,
-          language_selection: "caller-supplied-v1",
+          ...(definition === undefined
+            ? { language_selection: "caller-supplied-v1" }
+            : {
+                language_selection: "caller-provider-language-v1",
+                language_definition: definition,
+              }),
           entry_point: rawLoad.entryPoint,
           ...(identity === undefined
             ? {}
@@ -455,6 +481,49 @@ export const resolveGhidraAnalysisProfile = async (
   );
 };
 
+/**
+ * Resolve a caller-selected language against the installed catalog, then
+ * check the mapped image against the address size its entry declares.
+ */
+const resolveProviderLanguageDefinition = async (
+  target: ProviderLanguageRawBinaryTarget,
+  installDir: string,
+  providerVersion: string,
+  resources: ArtifactResourceScope,
+  signal: AbortSignal | undefined,
+): Promise<Result<GhidraLanguageDefinitionCommitment, AnalysisError>> => {
+  const { providerLanguage, baseAddress, lastAddress } = target.rawLoad;
+  let resolved: Result<GhidraLanguageDefinitionCommitment, string>;
+  try {
+    resolved = await resolveGhidraLanguageDefinition(
+      installDir,
+      providerLanguage,
+      providerVersion,
+      resources,
+      signal,
+    );
+  } catch (cause: unknown) {
+    return err(
+      ghidraFileFailure(cause, "resolve_analysis_profile", {
+        input: "provider_language",
+      }),
+    );
+  }
+  const refused = (reason: string) =>
+    err(
+      new BinaryTargetError(target.path, reason, {
+        constraint: "load_selection_rejected",
+      }),
+    );
+  if (!resolved.ok) return refused(resolved.error);
+  const bits = resolved.value.address_bits;
+  if (BigInt(lastAddress) >> BigInt(bits) !== 0n)
+    return refused(
+      `raw-binary mapping from ${baseAddress} to ${lastAddress} must fit in the ${String(bits)}-bit address size that ${providerLanguage.languageId} declares`,
+    );
+  return ok(resolved.value);
+};
+
 /** Read the import-language commitment back from a resolved profile. */
 export const ghidraProfileLanguageOverride = (
   parameters: Readonly<Record<string, unknown>>,
@@ -538,6 +607,16 @@ const createGhidraProfile = (
             ...(parameters.entry_context === undefined
               ? {}
               : { entry_context: parameters.entry_context }),
+            // A changed definition can move code under the same language ID.
+            ...(parameters.language_definition === undefined
+              ? {}
+              : {
+                  language_definition: ghidraLanguageDefinitionDigests(
+                    ghidraLanguageDefinitionSchema.parse(
+                      parameters.language_definition,
+                    ),
+                  ),
+                }),
           }),
         }
       : {}),

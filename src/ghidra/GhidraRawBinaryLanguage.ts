@@ -2,17 +2,22 @@ import type {
   ArchitectureVariant,
   RawEntryIsaMode,
 } from "../domain/architectureVariant.js";
-import type { RawBinaryLoad } from "../domain/binaryTargetTypes.js";
-import {
-  isLegacyRawLoad,
-  type RawBinaryAdmission,
-} from "../domain/rawBinary.js";
+import type {
+  RawBinaryLoad,
+  RawBinaryTarget,
+} from "../domain/binaryTargetTypes.js";
+import type { ProviderLanguageSelection } from "../domain/providerLanguage.js";
+import { isLegacyRawLoad } from "../domain/rawBinary.js";
 
-/** Bound Ghidra language for a caller-supplied raw-binary architecture. */
+/** Bound Ghidra language for a raw-binary load. */
 export interface GhidraRawBinaryLanguage {
   readonly languageId: string;
-  readonly compilerSpecId: "default" | "gcc";
-  readonly defaultAddressSpace: "ram" | "RAM";
+  readonly compilerSpecId: string;
+  /**
+   * The language's default address space, pinned for a family or variant.
+   * Absent for a caller-selected language, whose import check commits it.
+   */
+  readonly defaultAddressSpace?: "ram" | "RAM";
 }
 
 /**
@@ -63,24 +68,40 @@ export const ghidraVariantProcessorLabels = (
   variant === undefined ? undefined : "not-applied-v1";
 
 /**
+ * The label policy of a raw load: a variant's, and also not applied for a
+ * caller-selected language, whose `.pspec` labels and entries are unverified.
+ */
+export const ghidraRawProcessorLabels = (
+  load: RawBinaryLoad,
+): "not-applied-v1" | undefined =>
+  load.providerLanguage === undefined
+    ? ghidraVariantProcessorLabels(load.architectureVariant)
+    : "not-applied-v1";
+
+/**
  * Map caller-visible CPU families to generic Ghidra languages with a
  * supported generic compiler specification. These are analysis conventions,
  * not evidence of the target's original compiler. Each family has one fixed
  * byte order: m68k is big-endian and the others are little-endian. A
- * caller-named variant selects its own decoder instead of the generic one;
- * big-endian ARM and unnamed processor variants are out of scope.
+ * caller-named variant selects its own decoder instead of the generic one,
+ * and a caller-named provider language replaces the family altogether.
  */
 export const ghidraRawBinaryLanguage = (
-  architecture: RawBinaryAdmission["architecture"],
-  variant?: ArchitectureVariant,
+  target: RawBinaryTarget,
 ): GhidraRawBinaryLanguage => {
+  if (target.architecture === undefined)
+    return {
+      languageId: target.rawLoad.providerLanguage.languageId,
+      compilerSpecId: target.rawLoad.providerLanguage.compilerSpecId,
+    };
+  const variant = target.rawLoad.architectureVariant;
   if (variant !== undefined)
     return {
       languageId: GHIDRA_VARIANT_LANGUAGES[variant],
       compilerSpecId: "default",
       defaultAddressSpace: "ram",
     };
-  switch (architecture) {
+  switch (target.architecture) {
     case "6502":
       return {
         languageId: "6502:LE:16:default",
@@ -123,7 +144,13 @@ export const ghidraRawBinaryLanguage = (
 };
 
 const GENERIC_RAW_LANGUAGES =
-  "Little-endian generic Ghidra languages are used for x86, x86_64, arm, arm64, and NMOS 6502; m68k uses the big-endian 68000 default language, which decodes the 68040 superset. Big-endian ARM, 65C02, 65816, separate 68020/68030/CPU32/ColdFire variants, and other processor variants are unsupported; ARM M-profile code needs architecture_variant.";
+  "Little-endian generic Ghidra languages are used for x86, x86_64, arm, arm64, and NMOS 6502; m68k uses the big-endian 68000 default language, which decodes the 68040 superset. Big-endian ARM, 65C02, 65816, separate 68020/68030/CPU32/ColdFire variants, and other processor variants are not families; ARM M-profile code needs architecture_variant, and provider_language can select another Ghidra language, unverified.";
+
+/** What REA checked about a caller-selected language, and what it did not. */
+const callerLanguageLimitation = (
+  selection: ProviderLanguageSelection,
+): string =>
+  `The caller selected the Ghidra language ${selection.languageId} with compiler spec ${selection.compilerSpecId} (verification: unverified). REA checked that the installation defines it, that the image fits its declared address size, and that its default address space is byte-addressed and its only loaded space, but not that it decodes this image. Entry alignment is left to the language's decoder.`;
 
 /**
  * Observed with Ghidra 12.1.4, where WLS and LE decode with LLVM's mnemonics.
@@ -154,14 +181,18 @@ export const ghidraRawBinaryLimitations = (
       ]
     : [
         `Headerless raw-binary analysis maps file offset 0 at ${load.baseAddress} and seeds the entry ${load.entryPoint}. Headers are not discovered from file bytes.`,
-        load.architectureVariant === undefined
-          ? GENERIC_RAW_LANGUAGES
-          : `The caller-named ${load.architectureVariant} variant is decoded with ${language.languageId} in Thumb state. The decoder does not refuse instructions that this profile lacks, and floating-point and TrustZone state are not modeled.`,
+        load.providerLanguage !== undefined
+          ? callerLanguageLimitation(load.providerLanguage)
+          : load.architectureVariant === undefined
+            ? GENERIC_RAW_LANGUAGES
+            : `The caller-named ${load.architectureVariant} variant is decoded with ${language.languageId} in Thumb state. The decoder does not refuse instructions that this profile lacks, and floating-point and TrustZone state are not modeled.`,
         ...ghidraVariantDecoderLimitations(load.architectureVariant),
         ...(load.entrySource.kind === "vector-table"
           ? [
               `The entry is the Reset vector ${load.entrySource.resetVector} read from the vector table at ${load.entrySource.address}, with bit 0 cleared. The initial stack pointer ${load.entrySource.initialStackPointer} is recorded and not validated.`,
             ]
           : []),
-        "Only the file is mapped. SRAM, peripheral and system blocks are not created; Ghidra's processor-defined vector labels are not applied, so vectors other than Reset are neither labels nor entries; and reset, memory-mapped I/O, and boot sequences are not emulated.",
+        load.providerLanguage === undefined
+          ? "Only the file is mapped. SRAM, peripheral and system blocks are not created; Ghidra's processor-defined vector labels are not applied, so vectors other than Reset are neither labels nor entries; and reset, memory-mapped I/O, and boot sequences are not emulated."
+          : "Only the file is mapped, in the language's default address space. Ghidra's processor-defined labels and entries are not applied, and reset, memory-mapped I/O, and boot sequences are not emulated.",
       ];

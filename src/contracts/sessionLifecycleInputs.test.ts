@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { openBinaryInputSchema } from "./sessionLifecycleInputs.js";
+import {
+  openBinaryInputSchema,
+  openBinaryLoadSelection,
+} from "./sessionLifecycleInputs.js";
 
 describe("open_binary raw-binary input contract", () => {
   it("accepts header detection without architecture", () => {
@@ -129,5 +132,78 @@ describe("open_binary load input pairing", () => {
         base_address: "0x08000000",
       }),
     ).toBeUndefined();
+  });
+});
+
+describe("open_binary provider_language input", () => {
+  const sh4 = {
+    provider: "ghidra",
+    language_id: "SuperH4:LE:32:default",
+    compiler_spec_id: "default",
+  };
+  const admissible = {
+    path: "/tmp/firmware.bin",
+    format: "raw-binary",
+    provider_language: sh4,
+    base_address: "0x8c000000",
+    entry_point: "0x8c000010",
+    provider_id: "ghidra",
+  };
+  const issuePath = (input: Record<string, unknown>) => {
+    const parsed = openBinaryInputSchema.safeParse({ ...admissible, ...input });
+    return parsed.success ? undefined : parsed.error.issues[0]?.path;
+  };
+
+  it("accepts a language with an entry and its provider selected", () => {
+    expect(issuePath({})).toBeUndefined();
+    expect(
+      openBinaryLoadSelection(openBinaryInputSchema.parse(admissible)),
+    ).toEqual({
+      format: "raw-binary",
+      entryPoint: "0x8c000010",
+      baseAddress: "0x8c000000",
+      providerLanguage: {
+        provider: "ghidra",
+        languageId: "SuperH4:LE:32:default",
+        compilerSpecId: "default",
+      },
+    });
+  });
+
+  it.each([
+    [{ provider_id: undefined }, ["provider_id"]],
+    [{ provider_id: "auto" }, ["provider_id"]],
+    [{ provider_id: "hopper" }, ["provider_id"]],
+    [{ architecture: "arm" }, ["architecture"]],
+    [{ architecture_variant: "armv7-m" }, ["architecture_variant"]],
+    [{ entry_point: undefined }, ["entry_point"]],
+    [{ vector_table_address: "0x8c000000" }, ["vector_table_address"]],
+    [{ format: "dos-com" }, ["entry_point"]],
+    [
+      { format: "dos-com", base_address: undefined, entry_point: undefined },
+      ["provider_language"],
+    ],
+    [
+      { format: undefined, base_address: undefined, entry_point: undefined },
+      ["provider_language"],
+    ],
+    [
+      { provider_language: { ...sh4, provider: "hopper" } },
+      ["provider_language", "provider"],
+    ],
+    [
+      { provider_language: { ...sh4, language_id: "SuperH4" } },
+      ["provider_language", "language_id"],
+    ],
+    [
+      { provider_language: { ...sh4, compiler_spec_id: "a b" } },
+      ["provider_language", "compiler_spec_id"],
+    ],
+    [
+      { provider_language: { ...sh4, address_bits: 32 } },
+      ["provider_language"],
+    ],
+  ])("names the input to correct for %j", (input, path) => {
+    expect(issuePath(input)).toEqual(path);
   });
 });

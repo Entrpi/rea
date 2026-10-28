@@ -7,6 +7,10 @@ import {
 } from "./GhidraAnalysisSeeds.js";
 import type { GhidraLanguageOverride } from "../config/ghidraLanguageOverride.js";
 import type { GhidraRiscvCallingConvention } from "./GhidraRiscvProfile.js";
+import {
+  GHIDRA_LANGUAGE_DEFINITION_FILES,
+  type GhidraLanguageDefinitionCommitment,
+} from "./GhidraLanguageCatalog.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
 import { mkdir, readFile, realpath } from "node:fs/promises";
 import { basename, dirname, join, posix, win32 } from "node:path";
@@ -224,7 +228,23 @@ export interface GhidraRawBinaryImport {
   readonly entryContext?: { readonly register: string; readonly value: string };
   /** False imports without the language's default labels; omitted keeps them. */
   readonly applyProcessorLabels?: false;
+  /** Committed definition of a caller-selected language, checked at import. */
+  readonly languageDefinition?: GhidraLanguageDefinitionCommitment;
 }
+
+/**
+ * The prepare script's argument for a caller-selected language: the declared
+ * address size and each definition file's digest, in table order.
+ */
+export const ghidraLanguageDefinitionArgument = (
+  definition: GhidraLanguageDefinitionCommitment,
+): string =>
+  [
+    `bits=${String(definition.address_bits)}`,
+    ...GHIDRA_LANGUAGE_DEFINITION_FILES.map(
+      ({ role }) => `${role}=${definition.files[role].sha256}`,
+    ),
+  ].join(";");
 
 /** Static coordinates for an extracted Ghidra release and packaged script. */
 export interface GhidraHeadlessLauncherOptions {
@@ -1082,6 +1102,9 @@ export const ghidraHeadlessArguments = (
           rawBinary.entryContext === undefined
             ? "language-default"
             : `${rawBinary.entryContext.register}=${rawBinary.entryContext.value}`,
+          ...(rawBinary.languageDefinition === undefined
+            ? []
+            : [ghidraLanguageDefinitionArgument(rawBinary.languageDefinition)]),
         ]),
     ...(gamecubeDol === undefined
       ? []

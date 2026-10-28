@@ -262,7 +262,7 @@ describe("raw-binary load rejection diagnostics", () => {
       },
       remediation: {
         action:
-          "Correct the reported load argument (--target-format, --architecture, --architecture-variant, --entry-point, --base-address, or --vector-table-address on the CLI; format, architecture, architecture_variant, entry_point, base_address, or vector_table_address through MCP) and retry.",
+          "Correct the reported load argument (--target-format, --architecture, --architecture-variant, --entry-point, --base-address, --vector-table-address, --ghidra-language-id, --ghidra-compiler-spec-id, or --provider on the CLI; format, architecture, architecture_variant, entry_point, base_address, vector_table_address, provider_language, or provider_id through MCP) and retry.",
       },
     });
     expect(projected.message).not.toContain("Check that the path");

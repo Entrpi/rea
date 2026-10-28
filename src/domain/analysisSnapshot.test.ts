@@ -24,6 +24,7 @@ import {
 } from "./binaryTargetTypes.js";
 import {
   admittedRawLoad,
+  providerLanguageRawTarget,
   rawLoadAtEntry,
   vectorTableWords,
 } from "./rawBinary.fixture.js";
@@ -288,6 +289,63 @@ describe("analysis snapshot M-profile raw identity", () => {
     expect(analysisQueryId(snapshot, binding, "list_procedures", {})).not.toBe(
       analysisQueryId(legacy, binding, "list_procedures", {}),
     );
+  });
+});
+
+describe("analysis snapshot provider-language raw identity", () => {
+  const target = (compilerSpecId: string, baseAddress?: string) =>
+    providerLanguageRawTarget(
+      {
+        provider: "ghidra",
+        languageId: "SuperH4:LE:32:default",
+        compilerSpecId,
+      },
+      {
+        entryPoint: "0x8c000010",
+        ...(baseAddress === undefined ? {} : { baseAddress }),
+        sha256: ANALYSIS_SNAPSHOT_TARGET.sha256,
+      },
+    );
+
+  it("commits a null architecture and the caller's language", () => {
+    const snapshot = snapshotTarget(target("default", "0x8C000000"));
+    expect(snapshot).toStrictEqual({
+      sha256: ANALYSIS_SNAPSHOT_TARGET.sha256,
+      kind: "executable",
+      architecture: null,
+      format: "raw-binary",
+      entry_point: "0x8c000010",
+      raw_load: {
+        version: 1,
+        base_address: "0x8c000000",
+        provider_language: {
+          provider: "ghidra",
+          language_id: "SuperH4:LE:32:default",
+          compiler_spec_id: "default",
+        },
+        entries: [{ address: "0x8c000010", role: "entry", basis: "caller" }],
+      },
+    });
+    expect(
+      analysisSnapshotSchema.parse({
+        target: snapshot,
+        binding: snapshotBinding(ANALYSIS_SNAPSHOT_PROFILE),
+        entries: [],
+        workflow_entries: [],
+        evidence_bundle: createEvidenceBundle([]),
+      }).target,
+    ).toStrictEqual(snapshot);
+    expect(
+      snapshotMatchesTarget(snapshot, target("default", "0x8c000000")),
+    ).toBe(true);
+  });
+
+  it("partitions by compiler spec and by base", () => {
+    const snapshot = snapshotTarget(target("default", "0x8c000000"));
+    expect(
+      snapshotMatchesTarget(snapshot, target("windows", "0x8c000000")),
+    ).toBe(false);
+    expect(snapshotMatchesTarget(snapshot, target("default"))).toBe(false);
   });
 });
 

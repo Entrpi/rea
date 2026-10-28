@@ -13,6 +13,7 @@ import { err, ok, type Result } from "../domain/result.js";
 import {
   GHIDRA_RAW_ENTRY_CONTEXT,
   ghidraRawBinaryLanguage,
+  ghidraRawProcessorLabels,
 } from "./GhidraRawBinaryLanguage.js";
 import { isLegacyRawLoad, rawEntryRoleAndBasis } from "../domain/rawBinary.js";
 
@@ -385,10 +386,7 @@ export const attestGhidraRawBinaryLoadImage = (
       "Ghidra raw-binary snapshot digest does not match the admitted target",
     );
   const { rawLoad } = target;
-  const language = ghidraRawBinaryLanguage(
-    target.architecture,
-    rawLoad.architectureVariant,
-  );
+  const language = ghidraRawBinaryLanguage(target);
   const { baseAddress, entryPoint } = rawLoad;
   const base = BigInt(baseAddress);
   const last = hexAddress(base + BigInt(snapshot.bytes) - 1n);
@@ -407,11 +405,13 @@ export const attestGhidraRawBinaryLoadImage = (
   );
   // BinaryLoader's block base is independent of the Program image base.
   check("image_base", "0x0", observations.image_base);
-  check(
-    "default_address_space",
-    language.defaultAddressSpace,
-    observations.default_address_space,
-  );
+  // A caller-selected language has no pinned space; its import check commits one.
+  if (language.defaultAddressSpace !== undefined)
+    check(
+      "default_address_space",
+      language.defaultAddressSpace,
+      observations.default_address_space,
+    );
   check("source_file_count", 1, observations.source_files.length);
   check("source_file_size", snapshot.bytes, source?.size ?? null);
   check("original_file_sha256", target.sha256, source?.original_sha256 ?? null);
@@ -470,9 +470,9 @@ export const attestGhidraRawBinaryLoadImage = (
     observations.entry_points.find((entry) => entry === entryPoint) ?? null,
   );
   check("relocation_records", [], observations.relocations);
-  if (rawLoad.architectureVariant !== undefined)
-    // Processor-defined labels are not applied to a variant load, so the
-    // committed entry is the only external entry.
+  if (ghidraRawProcessorLabels(rawLoad) !== undefined)
+    // Processor-defined labels are not applied to a variant or
+    // provider-language load, so the committed entry is the only external entry.
     check("entry_points", [entryPoint], [...observations.entry_points].sort());
   if (rawLoad.entryIsaMode !== undefined) {
     // The bridge reports the register committed for this import, not one chosen by language name.
@@ -495,7 +495,8 @@ export const attestGhidraRawBinaryLoadImage = (
         version: 1,
         format: "raw-binary",
         target_sha256: target.sha256,
-        architecture: target.architecture,
+        // A provider-language load names no family.
+        architecture: target.architecture ?? null,
         ...(rawLoad.architectureVariant === undefined
           ? {}
           : { architecture_variant: rawLoad.architectureVariant }),

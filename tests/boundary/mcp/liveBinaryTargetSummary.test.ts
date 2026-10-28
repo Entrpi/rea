@@ -194,6 +194,47 @@ it.each(["draft-2020-12", "draft-07"] as const)(
 );
 
 it.each(["draft-2020-12", "draft-07"] as const)(
+  "reports a provider-language load through %s clients",
+  (draft) => {
+    const advertised = toolOutputSchemaWithMetadata(
+      toolContract("open_binary"),
+    )["~standard"].jsonSchema.output({ target: draft });
+    const validate = new AjvJsonSchemaValidator().getValidator(advertised);
+    const summary = binaryTargetSummary({
+      ...executable,
+      format: "raw-binary",
+      availableArchitectures: [],
+      rawLoad: {
+        baseAddress: "0x8c000000",
+        entryPoint: "0x8c000010",
+        entrySource: { kind: "caller" },
+        providerLanguage: {
+          provider: "ghidra",
+          languageId: "SuperH4:LE:32:default",
+          compilerSpecId: "default",
+        },
+        lastAddress: "0x8c00001f",
+      },
+    });
+    expect(summary).toEqual({
+      ...identity,
+      kind: "executable",
+      format: "raw-binary",
+      architecture: null,
+      entry_point: "0x8c000010",
+      base_address: "0x8c000000",
+      provider_language: {
+        provider: "ghidra",
+        language_id: "SuperH4:LE:32:default",
+        compiler_spec_id: "default",
+        verification: "unverified",
+      },
+    });
+    expect(validate({ result: summary }).valid).toBe(true);
+  },
+);
+
+it.each(["draft-2020-12", "draft-07"] as const)(
   "preserves canonical live summaries and rejects impossible classifications through %s clients",
   (target) => {
     const advertised = toolOutputSchemaWithMetadata(

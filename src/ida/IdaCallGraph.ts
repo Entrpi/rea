@@ -39,6 +39,7 @@ export const isX86OnlyTarget = (target: BinaryTarget): boolean =>
   target.kind === "executable" &&
   // IDA can load a managed PE with the CLI loader instead of as x86 code.
   !(target.format === "pe" && target.managed) &&
+  target.architecture !== undefined &&
   X86_FAMILIES.has(target.architecture) &&
   target.availableArchitectures.every((family) => X86_FAMILIES.has(family));
 

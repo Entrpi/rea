@@ -622,6 +622,7 @@ const selectArchitecture = (
   // tools without -arch print every slice.
   if (
     target.kind !== "executable" ||
+    target.architecture === undefined ||
     (target.availableArchitectures.length < 2 && available.length < 2)
   )
     return { status: "unfiltered" };

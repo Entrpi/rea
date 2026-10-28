@@ -17,6 +17,8 @@ import {
   AnalysisSnapshotMismatchError,
 } from "../../domain/evidenceErrors.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
+import { BinaryTargetError } from "../../domain/configurationErrors.js";
+import { providerLanguageProviderIssue } from "../../domain/providerLanguage.js";
 import { err, type Result } from "../../domain/result.js";
 import type { SessionProviderRoute } from "./SessionProviderRouter.js";
 import {
@@ -105,6 +107,20 @@ export const resolveSessionTarget = async (
   input: ResolveSessionTargetInput,
 ): Promise<Result<ResolvedSessionOpen, AnalysisError>> => {
   const { router, current, target, options } = input;
+  // A provider language belongs to one provider, which the caller must select.
+  const providerIssue =
+    target.format === "raw-binary"
+      ? providerLanguageProviderIssue(
+          target.rawLoad.providerLanguage,
+          options.providerId,
+        )
+      : undefined;
+  if (providerIssue !== undefined)
+    return err(
+      new BinaryTargetError(target.path, providerIssue, {
+        constraint: "load_selection_rejected",
+      }),
+    );
   const sameTarget = sameSessionTarget(current?.target, target);
   const resolvedRoute =
     sameTarget && options.providerId === undefined && current !== undefined

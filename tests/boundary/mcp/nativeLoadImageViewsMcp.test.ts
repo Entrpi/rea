@@ -24,7 +24,9 @@ it("preserves raw and DOL verification facts and selected DOL sections through t
         path: "/selected/fixture",
         sha256: report.target_sha256,
         format: report.format,
-        architecture: report.architecture,
+        ...(report.architecture === null
+          ? {}
+          : { architecture: report.architecture }),
       },
       { id: "ghidra", name: "Ghidra", version: "12.1.4" },
       {

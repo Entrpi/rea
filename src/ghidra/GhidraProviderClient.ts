@@ -22,6 +22,7 @@ import {
   ghidraSeedFailure,
   ghidraSeedLimitations,
 } from "./GhidraAnalysisSeeds.js";
+import { ghidraLanguageDefinitionSchema } from "./GhidraLanguageCatalog.js";
 import {
   ghidraEffectiveLanguageOverride,
   ghidraPinnedLanguage,
@@ -131,7 +132,7 @@ import {
   GHIDRA_RAW_ENTRY_CONTEXT,
   ghidraRawBinaryLanguage,
   ghidraRawBinaryLimitations,
-  ghidraVariantProcessorLabels,
+  ghidraRawProcessorLabels,
 } from "./GhidraRawBinaryLanguage.js";
 import { ghidraDolLanguage, ghidraDolSectionFile } from "./GhidraDolProfile.js";
 
@@ -282,6 +283,24 @@ export const createGhidraProviderClient = (input: {
       }),
     );
   const seeds = seedProfile.data;
+  // A caller-selected language loads only the definition its profile committed.
+  const definitionProfile = ghidraLanguageDefinitionSchema
+    .optional()
+    .safeParse(committedProfile.parameters.language_definition);
+  if (
+    !definitionProfile.success ||
+    (target.format === "raw-binary" && target.architecture === undefined) !==
+      (definitionProfile.data !== undefined)
+  )
+    return err(
+      new ProviderAdapterError("ghidra", "open_binary", {
+        diagnostics: {
+          reason:
+            "A caller-selected language opens only with the language definition that its analysis profile committed; resolve the profile again.",
+        },
+      }),
+    );
+  const languageDefinition = definitionProfile.data;
   const parameterLanguage = ghidraProfileLanguageOverride(
     committedProfile.parameters,
   );
@@ -401,10 +420,7 @@ export const createGhidraProviderClient = (input: {
   const armDwarfLimitations: string[] = [];
   const rawLanguage =
     target.format === "raw-binary"
-      ? ghidraRawBinaryLanguage(
-          target.architecture,
-          target.rawLoad.architectureVariant,
-        )
+      ? ghidraRawBinaryLanguage(target)
       : undefined;
   const targetLimitations = [
     ...(target.format === "dos-mz"
@@ -512,11 +528,12 @@ export const createGhidraProviderClient = (input: {
                       GHIDRA_RAW_ENTRY_CONTEXT[target.rawLoad.entryIsaMode],
                   }),
               // The profile commits the same label policy.
-              ...(ghidraVariantProcessorLabels(
-                target.rawLoad.architectureVariant,
-              ) === undefined
+              ...(ghidraRawProcessorLabels(target.rawLoad) === undefined
                 ? {}
                 : { applyProcessorLabels: false as const }),
+              ...(languageDefinition === undefined
+                ? {}
+                : { languageDefinition }),
             },
           }),
       ...(target.format === "gamecube-dol"

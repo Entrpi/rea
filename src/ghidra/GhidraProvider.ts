@@ -304,6 +304,18 @@ export class GhidraProvider implements AnalysisProviderCandidate {
           "Ghidra v1 cannot enforce the selected architecture when importing a universal Mach-O; analyze a thinned Mach-O slice instead.",
         diagnostics,
       };
+    // A provider language replaces the family; it must name this provider.
+    if (target.architecture === undefined)
+      return target.format === "raw-binary" &&
+        target.rawLoad.providerLanguage.provider === "ghidra"
+        ? { status: "supported", code: null, reason: null, diagnostics }
+        : {
+            status: "unsupported",
+            code: "architecture_unsupported",
+            reason:
+              "The caller-selected provider language names another provider.",
+            diagnostics,
+          };
     if (!SUPPORTED_ARCHITECTURES.has(target.architecture))
       return {
         status: "unsupported",

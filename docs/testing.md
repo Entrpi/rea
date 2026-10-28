@@ -1553,6 +1553,43 @@ lane checks:
 It records, without asserting, the prototypes that Ghidra infers for stripped
 images. It does not execute target code or qualify Windows.
 
+`npm run verify:ghidra:provider-language` checks raw images opened with a
+caller-selected Ghidra language (`provider_language`) through the compiled CLI
+and stdio MCP server. It needs Ghidra 12.1.4 and a full JDK 21, and about 700 MB
+of free space under `build/` for a temporary copy of the installation. Its
+source-owned fixtures, written as annotated hex, are:
+
+- a SuperH-4 image (`SuperH4:LE:32:default`) at base `0x8c000000`, with a
+  16-byte header before the entry: a call through `bsr` with a delay slot to a
+  routine that returns 3;
+- a 6809 image (`6809:BE:16:default`) at `0xe000` with a `bsr` call.
+
+The lane checks:
+
+- `architecture: null` and the unverified `provider_language` in the summary,
+  in Evidence subjects and in the `segments` load image;
+- the committed `language_definition`: the four files' paths and SHA-256
+  digests against the installation;
+- every fixture instruction's mnemonic (Ghidra prefixes an instruction in a
+  SuperH-4 delay slot with `_`), procedures, the call and its destination, and
+  decompilation of the SuperH-4 routine;
+- CLI/MCP parity;
+- refusals before Ghidra starts, while the session is kept: images that do not
+  fit the 6809's declared 16-bit address size, an unknown language ID, an
+  undeclared compiler spec, a language beside `architecture`, and no
+  `provider_id`;
+- refusals at import, from the preparation script: `z80:LE:16:default`, whose
+  `io` space is a second loaded space, and `avr8:LE:16:default`, whose default
+  space is word-addressed;
+- in the copy of the installation, a SuperH-4 community module installed under
+  its own language ID: its snapshot replays while the definition is unchanged;
+  after its `.cspec` changes in place, the snapshot is refused and the profile
+  and coordinate context change; restoring the file restores the identity;
+- unchanged source bytes and owned cleanup.
+
+The lane writes only to its copy; `GHIDRA_INSTALL_DIR` is read. It does not
+execute target code or qualify Windows.
+
 `npm run verify:ghidra:address-context` runs on Linux with a caller-installed
 Ghidra, full JDK, and an x86-64 ELF GCC toolchain (`CC` selects another compatible
 compiler). It builds
