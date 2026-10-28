@@ -20,7 +20,7 @@ import {
   pattern,
   signatureBlock,
   signedEspImage,
-} from "./espImage.fixture.js";
+} from "../../../tests/fixtures/espImage.js";
 
 const decode = (bytes: Uint8Array, chunkBytes = 7) => {
   const decoder = createEspImageDecoder(bytes.length);

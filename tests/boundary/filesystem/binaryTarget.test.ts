@@ -37,7 +37,7 @@ import {
   ESP32C3_APP_SEGMENTS,
   esp8266Image,
   espImage,
-} from "../../../src/domain/firmware/espImage.fixture.js";
+} from "../../fixtures/espImage.js";
 import { javaClassFile } from "../../fixtures/javaClassFile.js";
 import {
   MAX_JVM_CLASS_IDENTITY_BYTES,

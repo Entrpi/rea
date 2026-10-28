@@ -1,6 +1,10 @@
 import { Readable, Transform, pipeline } from "node:stream";
 
-import type { EspImageMetadata } from "../domain/artifactFormatMetadata.js";
+import type {
+  EspImageMetadata,
+  EspImageSegmentMetadata,
+  EspImageSignatureBlockMetadata,
+} from "../domain/artifactFormatMetadata.js";
 import {
   createEspImageDecoder,
   type EspImageFailure,
@@ -23,6 +27,13 @@ import { readFileHandleChunks } from "../filesystem/readFileHandleChunks.js";
 import type { StableRegularFileDescriptor } from "../filesystem/RegularFile.js";
 
 const LABEL = "ESP image";
+type EspImageEntry = ArtifactEntry & {
+  readonly byteOffset: number;
+  readonly declaredSize: number;
+  readonly formatMetadata:
+    | EspImageSegmentMetadata
+    | EspImageSignatureBlockMetadata;
+};
 
 /**
  * Inventory one ESP32-family image as its header-declared segments and
@@ -32,7 +43,7 @@ const LABEL = "ESP image";
 export class EspImageArtifactReader implements ArtifactReader {
   readonly format = "esp-image" as const;
   readonly #scope = new ArtifactResourceScope();
-  readonly #entries = new Map<string, ArtifactEntry>();
+  readonly #entries = new Map<string, EspImageEntry>();
   readonly #streams = new Set<Readable>();
   readonly #source: ArtifactFileSource;
   #prepared: Promise<void> | undefined;
@@ -70,6 +81,7 @@ export class EspImageArtifactReader implements ArtifactReader {
       await this.#prepared;
       await this.#source.read(signal);
     });
+    this.#assertOpen(signal);
     if (this.#coverage !== undefined)
       options?.onCoverage?.({
         ...this.#coverage,
@@ -79,18 +91,14 @@ export class EspImageArtifactReader implements ArtifactReader {
       this.#assertOpen(signal);
       yield copyArtifactEntry(entry);
     }
+    this.#assertOpen(signal);
   }
 
   async open(entry: ArtifactEntry, signal?: AbortSignal): Promise<Readable> {
     return this.#scope.run(async () => {
       this.#assertOpen(signal);
       const stored = this.#entries.get(entry.adapterKey);
-      if (
-        stored === undefined ||
-        !sameArtifactEntry(entry, stored) ||
-        stored.byteOffset === null ||
-        stored.declaredSize === null
-      )
+      if (stored === undefined || !sameArtifactEntry(entry, stored))
         throw new ArtifactReaderFailure(
           "integrity",
           `${LABEL} entry does not match its owning inventory`,
@@ -115,16 +123,39 @@ export class EspImageArtifactReader implements ArtifactReader {
       // Retirement can destroy the stream before its consumer listens.
       output.on("error", () => undefined);
       this.#streams.add(output);
-      output.once("close", () => this.#streams.delete(output));
+      let producerComplete = false;
+      const onAbort = (): void => {
+        // Preserve active read/validation errors; after production, the caller
+        // still owns buffered bytes and cancellation must retire that result.
+        if (!producerComplete || output.destroyed) return;
+        output.destroy(
+          new ArtifactReaderFailure("cancelled", `${LABEL} read cancelled`, {
+            cause: signal?.reason,
+          }),
+        );
+      };
+      const retired = new Promise<void>((resolve) => {
+        output.once("close", () => {
+          this.#streams.delete(output);
+          signal?.removeEventListener("abort", onAbort);
+          resolve();
+        });
+      });
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) onAbort();
       void this.#scope
-        .run(
-          () =>
+        .run(async () => {
+          await Promise.all([
             new Promise<void>((resolve) => {
               pipeline(source, output, () => {
+                producerComplete = true;
+                if (signal?.aborted) onAbort();
                 resolve();
               });
             }),
-        )
+            retired,
+          ]);
+        })
         .catch((cause: unknown) =>
           output.destroy(
             cause instanceof Error
@@ -182,7 +213,7 @@ export class EspImageArtifactReader implements ArtifactReader {
             : [],
         adapterKey: `esp-image:segment:${String(index)}`,
         formatMetadata: { ...segment.metadata },
-      } satisfies ArtifactEntry;
+      } satisfies EspImageEntry;
       this.#entries.set(entry.adapterKey, entry);
     }
     for (const block of image.signatureBlocks) {
@@ -199,7 +230,7 @@ export class EspImageArtifactReader implements ArtifactReader {
         limitations: [],
         adapterKey: `esp-image:signature-block:${String(block.metadata.index)}`,
         formatMetadata: { ...block.metadata },
-      } satisfies ArtifactEntry;
+      } satisfies EspImageEntry;
       this.#entries.set(entry.adapterKey, entry);
     }
     this.#metadata = image.metadata;
@@ -234,7 +265,7 @@ export class EspImageArtifactReader implements ArtifactReader {
     return image.value;
   }
 
-  #entryStream(entry: ArtifactEntry, signal?: AbortSignal): Transform {
+  #entryStream(entry: EspImageEntry, signal?: AbortSignal): Transform {
     let bytes = 0;
     const check = async (): Promise<void> => {
       if (bytes !== entry.declaredSize)

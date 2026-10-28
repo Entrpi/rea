@@ -13,9 +13,10 @@ import {
   esp8266Image,
   espImage,
   signedEspImage,
-} from "../domain/firmware/espImage.fixture.js";
+} from "../../tests/fixtures/espImage.js";
 import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
 import { scanCanonicalArtifactInventory } from "../../tests/fixtures/artifactInventory.js";
+import { awaitAcknowledgement } from "../../tests/fixtures/lifecycleAcknowledgement.js";
 
 const INVENTORY_LIMITATION =
   "ESP image inventory reads the header-declared segments, checksum, appended SHA-256, descriptor and Secure Boot v2 signature blocks. Segment classification follows ESP-IDF v6.1 should_map and should_load for a cold boot and does not check RAM ranges; signatures are not cryptographically verified, and code is not disassembled.";
@@ -291,6 +292,7 @@ it.each(["cancel", "close"] as const)(
     const controller = new AbortController();
     const reason = { stage: "decoding" };
     let completion: Promise<void> | undefined;
+    let pending: Promise<unknown> | undefined;
     // The decoder acknowledges its first chunk, so the request arrives while
     // decoding is active rather than while the file is still being admitted.
     let decoded = 0;
@@ -316,16 +318,11 @@ it.each(["cancel", "close"] as const)(
         };
       });
     try {
-      const pending = reader
+      pending = reader
         .entries(controller.signal)
         [Symbol.asyncIterator]()
         .next();
-      await Promise.race([
-        decoding,
-        pending.then(() => {
-          throw new Error("Preparation settled before decoding began");
-        }),
-      ]);
+      await awaitAcknowledgement(decoding, pending, "ESP image decoding");
       const requestedAt = decoded;
       if (action === "cancel") controller.abort(reason);
       else completion = reader.close();
@@ -342,8 +339,12 @@ it.each(["cancel", "close"] as const)(
         reader.entries()[Symbol.asyncIterator]().next(),
       ).rejects.toMatchObject({ reason: "unavailable" });
     } finally {
-      observer.mockRestore();
-      await reader.close();
+      try {
+        await reader.close();
+      } finally {
+        await pending?.catch(() => undefined);
+        observer.mockRestore();
+      }
     }
   },
 );

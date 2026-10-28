@@ -10,7 +10,7 @@ import {
   esp8266Image,
   espImage,
   signedEspImage,
-} from "../../../src/domain/firmware/espImage.fixture.js";
+} from "../../fixtures/espImage.js";
 import { ESP8266_REFUSAL } from "../../../src/domain/firmware/espImage.js";
 import { parseEvidence } from "../../../src/domain/evidence.js";
 import { artifactExtractionResultSchema } from "../../../src/domain/artifactGraph.js";
