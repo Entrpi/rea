@@ -2,10 +2,9 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 
-import {
-  ESP32C3_APP_SEGMENTS,
-  espImage,
-} from "../../src/domain/firmware/espImage.fixture.js";
+import { ESP32C3_APP_SEGMENTS, espImage } from "../fixtures/espImage.js";
+import { artifactComparisonResultSchema } from "../../src/domain/artifactComparison.js";
+import { artifactInspectionResultSchema } from "../../src/domain/artifactInspection.js";
 import { artifactInventoryResultSchema } from "../../src/domain/artifactGraph.js";
 import type { Evidence } from "../../src/domain/evidence.js";
 import { connectArtifactComparisonMcp } from "../fixtures/artifactComparisonMcp.js";

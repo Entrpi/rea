@@ -38,7 +38,7 @@ import {
   ESP32C3_BOOTLOADER_SEGMENTS,
   esp8266Image,
   espImage,
-} from "../../../src/domain/firmware/espImage.fixture.js";
+} from "../../fixtures/espImage.js";
 import { espFlashDump } from "../../../src/domain/firmware/espFlash.fixture.js";
 import { javaClassFile } from "../../fixtures/javaClassFile.js";
 import {

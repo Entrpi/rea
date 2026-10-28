@@ -71,6 +71,14 @@ export const cString = (bytes: Uint8Array): string | null => {
   }
 };
 
+/** How a descriptor REA could not read is reported; tests compare with these. */
+export const ESP_DESCRIPTOR_LIMITATIONS = {
+  fieldNotUtf8: (field: string): string =>
+    `ESP image descriptor field ${field} is not valid UTF-8; its value is omitted.`,
+  reservedBytesNotZero:
+    "ESP image segment 0 begins with the bootloader descriptor magic 0x50, but its reserved bytes are not zero; it is not read as an esp_bootloader_desc_t.",
+} as const;
+
 /**
  * Decode the descriptor that begins segment 0: `esp_app_desc_t`, which
  * ESP-IDF's bootloader reads there, or `esp_bootloader_desc_t`, which esptool
@@ -85,9 +93,7 @@ export const decodeEspDescriptor = (
   const text = (from: number, length: number, field: string): string | null => {
     const value = cString(bytes.subarray(from, from + length));
     if (value === null)
-      limitations.push(
-        `ESP image descriptor field ${field} is not valid UTF-8; its value is omitted.`,
-      );
+      limitations.push(ESP_DESCRIPTOR_LIMITATIONS.fieldNotUtf8(field));
     return value;
   };
   if (bytes.length >= ESP_APP_DESC_BYTES && u32(bytes, 0) === APP_DESC_MAGIC)
@@ -111,9 +117,7 @@ export const decodeEspDescriptor = (
   )
     return null;
   if (!allZero(bytes.subarray(1, 3)) || !allZero(bytes.subarray(64, 80))) {
-    limitations.push(
-      "ESP image segment 0 begins with the bootloader descriptor magic 0x50, but its reserved bytes are not zero; it is not read as an esp_bootloader_desc_t.",
-    );
+    limitations.push(ESP_DESCRIPTOR_LIMITATIONS.reservedBytesNotZero);
     return null;
   }
   return {

@@ -23,7 +23,7 @@ import {
   ESP32C3_APP_SEGMENTS,
   esp8266Image,
   espImage,
-} from "../../domain/firmware/espImage.fixture.js";
+} from "../../../tests/fixtures/espImage.js";
 
 it("joins only observed PE signature bytes across stream chunks", () => {
   const bytes = pe(0x8664, 8190);
