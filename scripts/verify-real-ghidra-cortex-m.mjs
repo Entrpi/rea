@@ -35,7 +35,10 @@ import {
   v8mMsplimFixture,
 } from "../tests/conformance/ghidra/cortexM.fixture.mjs";
 import { inspectVerifierGhidraInstallation } from "./lib/ghidra-installation-inspection.mjs";
-import { llvmThumbMnemonics } from "./lib/llvm-thumb-oracle.mjs";
+import {
+  llvmThumbMnemonics,
+  sameThumbMnemonic,
+} from "./lib/llvm-thumb-oracle.mjs";
 import {
   requireMcpLifecycleResult,
   requireMcpOutput,
@@ -334,38 +337,6 @@ async function verifyCase(fixture) {
   };
 }
 
-/**
- * One spelling for both decoders, which write an encoding width (ldr.w) and an
- * IT-block condition (Ghidra mov.eq, LLVM moveq) differently.
- */
-function canonicalMnemonic(name) {
-  return name
-    ?.toLowerCase()
-    .replace(/\.[nw]$/u, "")
-    .replace(/\.(eq|ne|cs|hs|cc|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le|al)$/u, "$1");
-}
-
-/**
- * Whether Ghidra and LLVM name the same instruction. A data type that gives
- * only the element size (Ghidra vldrw.32) matches one that adds signedness
- * (LLVM vldrw.u32); opposite signedness does not.
- */
-function sameMnemonic(ghidra, llvm) {
-  const left = canonicalMnemonic(ghidra) ?? "";
-  const right = canonicalMnemonic(llvm) ?? "";
-  if (left === right) return true;
-  const typed = /^(.+)\.([su]?)(8|16|32|64)$/u;
-  const a = typed.exec(left);
-  const b = typed.exec(right);
-  return (
-    a !== null &&
-    b !== null &&
-    a[1] === b[1] &&
-    a[3] === b[3] &&
-    (a[2] === "" || b[2] === "")
-  );
-}
-
 /** Ghidra's decoding at every oracle offset, in Thumb state, and its functions. */
 async function verifyDecoding(fixture, address, digest) {
   const prefix = fixture.prefix ?? 0;
@@ -397,7 +368,7 @@ async function verifyDecoding(fixture, address, digest) {
     )?.value;
     if (
       decoded.status !== "decoded" ||
-      !sameMnemonic(decoded.mnemonic, mnemonic) ||
+      !sameThumbMnemonic(decoded.mnemonic, mnemonic) ||
       tmode !== "1"
     )
       disagreements.push({

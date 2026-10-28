@@ -56,7 +56,10 @@ reports after import. Ghidra imports the ELF without its processor-defined
 labels. `ARMCortex.pspec` names the vector table at `0x0`-`0x40` and marks every
 handler slot an entry, reserved slots included, so in an image linked at `0x0`
 its names would cover the table and the code after it. The ELF's own symbols
-still name the handlers.
+still name the handlers. In a stripped image, a handler that only the vector
+table references can stay without a function; name it with an
+[analysis seed](installation.md#ghidra-import-language-and-analysis-seeds) at its
+even code address, and the pinned decoder decodes it in Thumb state.
 
 Every other ARM ELF keeps Ghidra's header-based language and the analysis
 profile that it had before this lane. That includes A- and R-profile images,
@@ -126,12 +129,13 @@ and snapshots are reused as before.
 ## Verification and limits
 
 Run `npm run verify:ghidra:cortex-m-elf` with Ghidra 12.1.4 PUBLIC, a 64-bit
-JDK 21 or later, and LLVM with Arm targets (`clang`, `ld.lld` and
-`llvm-readelf`). Select installed tools with `REA_CLANG`, `REA_LLD` and
-`REA_LLVM_READELF` when they are not on `PATH`. The lane builds committed C and
-assembly sources for each M profile, with soft-float and hard-float builds of
-one source, and uses `llvm-readelf --arch-specific` as the attribute oracle. It
-never executes target code; see [testing](testing.md).
+JDK 21 or later, and LLVM with Arm targets (`clang`, `ld.lld`, `llvm-strip`,
+`llvm-readelf` and `llvm-objdump`). Select installed tools with `REA_CLANG`,
+`REA_LLD`, `REA_LLVM_STRIP`, `REA_LLVM_READELF` and `REA_LLVM_OBJDUMP` when they
+are not on `PATH`. The lane builds committed C and assembly sources for each M
+profile, with soft-float, softfp and hard-float builds of one source, and uses
+`llvm-readelf --arch-specific` as the attribute oracle. It never executes target
+code; see [testing](testing.md).
 
 The pin is an analysis convention, not proof of the producer. The decoder does
 not refuse instructions that a smaller profile lacks, and floating-point,

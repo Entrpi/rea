@@ -126,10 +126,11 @@ const GENERIC_RAW_LANGUAGES =
   "Little-endian generic Ghidra languages are used for x86, x86_64, arm, arm64, and NMOS 6502; m68k uses the big-endian 68000 default language, which decodes the 68040 superset. Big-endian ARM, 65C02, 65816, separate 68020/68030/CPU32/ColdFire variants, and other processor variants are unsupported; ARM M-profile code needs architecture_variant.";
 
 /**
- * Observed with Ghidra 12.1.4 on the verifier's Cortex-M55 image: WLS and LE
- * decode with LLVM's mnemonics, but WLS branched 2 bytes short, LE branched 4
- * bytes past the loop start, and LE had no fall-through, so the code after the
- * loop was not disassembled.
+ * Observed with Ghidra 12.1.4, where WLS and LE decode with LLVM's mnemonics.
+ * In the raw verifier's Cortex-M55 image, WLS branched 2 bytes short, LE
+ * branched 4 bytes past the loop start, and LE had no fall-through, so the code
+ * after the loop was not disassembled. In the ELF verifier's, WLS branched to
+ * its target and LE 2 bytes past the loop start, again without a fall-through.
  */
 const GHIDRA_LOW_OVERHEAD_LOOPS =
   "Ghidra 12.1.4 decodes the ARMv8.1-M low-overhead-loop branches WLS and LE, but their targets can be wrong and LE has no fall-through, so code after such a loop may be left undisassembled.";
