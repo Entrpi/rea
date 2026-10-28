@@ -2,21 +2,121 @@ import {
   resolveEvidenceInput,
   type EvidenceLookup,
 } from "../EvidenceInputResolver.js";
-import type { AnalysisError } from "../../domain/analysisErrorBase.js";
+import { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { AnalysisInputError } from "../../domain/analysisErrorCore.js";
 import { inspectAnalysisViewValidated } from "../analysisView/AnalysisViewService.js";
+import {
+  readEvidenceFileSource,
+  type EvidenceFileReadOptions,
+} from "../analysisView/evidenceFileSource.js";
+import type { ArtifactComparisonInput } from "../../contracts/sessionToolSchemas.js";
 import { artifactInventorySummaryViewResultSchema } from "../../domain/analysisView/analysisView.js";
+import {
+  compareArtifacts,
+  type ArtifactComparisonResult,
+} from "../../domain/artifactComparison.js";
+import { ARTIFACT_COMPARISON_PROVIDER } from "../../domain/comparisonEvidenceIdentity.js";
 import {
   EvidenceIntegrityError,
   EvidenceReferenceError,
 } from "../../domain/evidenceErrors.js";
 import {
+  createEvidence,
   rebindEvidenceToTargetPath,
   type Evidence,
 } from "../../domain/evidence.js";
 import { readEvidence } from "../../domain/evidenceValidation.js";
 import { artifactInventorySummaryProjectionIds } from "../../domain/analysisView/artifactInventorySummaryProjection.js";
 import { err, ok, type Result } from "../../domain/result.js";
+
+const OPERATION = "compare_artifacts";
+
+/** Both comparison sides, each resolved to its exact complete inventory owner. */
+export interface ArtifactComparisonSources {
+  readonly left: Evidence;
+  readonly right: Evidence;
+}
+
+/** A completed comparison and the derived Evidence citing both complete inputs. */
+export interface ArtifactComparisonOutcome {
+  readonly comparison: ArtifactComparisonResult;
+  readonly evidence: Evidence;
+}
+
+/**
+ * Resolve each named side through the owner of its source: inline Evidence is
+ * authenticated here, a retained reference is read from the caller's Evidence
+ * lookup, and an Evidence file is read and authenticated by the shared file
+ * source. A summary then resolves to its exact retained parent.
+ */
+export const resolveArtifactComparisonSources = async (
+  input: ArtifactComparisonInput,
+  evidenceById: EvidenceLookup | undefined,
+  options: EvidenceFileReadOptions = {},
+): Promise<Result<ArtifactComparisonSources, AnalysisError>> => {
+  const left = await resolveSide(input, "left", evidenceById, options);
+  if (!left.ok) return left;
+  const right = await resolveSide(input, "right", evidenceById, options);
+  if (!right.ok) return right;
+  return ok({ left: left.value, right: right.value });
+};
+
+const resolveSide = async (
+  input: ArtifactComparisonInput,
+  side: "left" | "right",
+  evidenceById: EvidenceLookup | undefined,
+  options: EvidenceFileReadOptions,
+): Promise<Result<Evidence, AnalysisError>> => {
+  const source = input[side];
+  const selected = !("kind" in source)
+    ? readEvidence(source)
+    : source.kind === "retained-evidence"
+      ? resolveEvidenceInput(source, evidenceById)
+      : await readEvidenceFileSource(source.path, options, source.evidence_id, {
+          operation: OPERATION,
+          path: [side],
+        });
+  if (!selected.ok) return selected;
+  return resolveArtifactComparisonEvidence(selected.value, evidenceById, [
+    side,
+  ]);
+};
+
+/** Compare resolved inventories and derive Evidence citing both complete owners. */
+export const compareArtifactEvidence = ({
+  left,
+  right,
+}: ArtifactComparisonSources): Result<
+  ArtifactComparisonOutcome,
+  AnalysisError
+> => {
+  let comparison: ArtifactComparisonResult;
+  try {
+    comparison = compareArtifacts(left, right);
+  } catch (cause: unknown) {
+    // Typed causes already name the failed constraint; keep their issues.
+    if (cause instanceof AnalysisError) return err(cause);
+    throw cause;
+  }
+  const leftEvidenceIds = [left.evidence_id];
+  const rightEvidenceIds = [right.evidence_id];
+  return ok({
+    comparison,
+    evidence: createEvidence(undefined, ARTIFACT_COMPARISON_PROVIDER, {
+      predicateType: "rea.artifact-comparison",
+      operation: OPERATION,
+      parameters: {
+        left_evidence_ids: leftEvidenceIds,
+        right_evidence_ids: rightEvidenceIds,
+      },
+      result: comparison,
+      confidence: "derived",
+      authority: "analyst-inference",
+      limitations: comparison.limitations,
+      evidenceLinks: [...leftEvidenceIds, ...rightEvidenceIds],
+    }),
+  });
+};
 
 /**
  * Resolve an already-authenticated artifact summary's exact retained owner.
@@ -25,6 +125,7 @@ import { err, ok, type Result } from "../../domain/result.js";
 export const resolveArtifactComparisonEvidence = (
   evidence: Evidence,
   evidenceById: EvidenceLookup | undefined,
+  path: readonly (string | number)[] = [],
 ): Result<Evidence, AnalysisError> => {
   if (evidence.operation !== "inspect_analysis_view") return ok(evidence);
 
@@ -33,9 +134,9 @@ export const resolveArtifactComparisonEvidence = (
   );
   if (!summary.success)
     return err(
-      new AnalysisInputError("compare_artifacts", undefined, [
+      new AnalysisInputError(OPERATION, undefined, [
         {
-          path: ["evidence"],
+          path: [...path],
           reason: "invalid_value",
           message:
             "Artifact comparison accepts only an artifact inventory summary from inspect_analysis_view.",
