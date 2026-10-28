@@ -11,6 +11,16 @@ binaries and Ghidra projects are never committed.
   RISC-V Clang/LLD/LLVM readelf; `REA_RISCV_CLANG`, `REA_RISCV_LLD` and
   `REA_RISCV_READELF` select existing tool commands.
 
+- `../c/cortex-m.c` and `cortex-m-vectors.S` produce source-owned M-profile ARM
+  ELF executables, with an M-profile vector table, float arguments, M-profile
+  system registers, an ARMv8.1-M low-overhead loop and a handler that only the
+  vector table references.
+  `npm run verify:ghidra:cortex-m-elf` builds them for every M-profile variant,
+  with soft-float, softfp and hard-float ARMv7E-M builds and an ARMv7-A control. It
+  requires BYO Ghidra 12.1.4/JDK 21+ and LLVM with Arm targets; `REA_CLANG`,
+  `REA_LLD`, `REA_LLVM_STRIP`, `REA_LLVM_READELF` and `REA_LLVM_OBJDUMP` select
+  existing tool commands.
+
 - `inventory.c` produces separate x86-64 debug and stripped ELF executables.
   It covers imports, an external `puts` function, linker thunks, source symbols,
   direct calls, a targetless callback call, two referenced strings, and a

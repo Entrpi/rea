@@ -1006,6 +1006,7 @@ prove behavior on the verified Ghidra 12.1.4 and JDK 21 build.
 | `npm run verify:ghidra:seeds`              | POSIX; raw x86 fixture; seed ordering, BSS labels, analyzer readback, not-applicable and unknown analyzer names  | Ghidra 12.1.4 and full JDK 21                                               |
 | `npm run verify:ghidra:swift`              | macOS x64/arm64 Mach-O                                                                                           | Host Swift compiler, Ghidra 12.1.4, and full JDK 21                         |
 | `npm run verify:ghidra:riscv`              | Linux/macOS x64/arm64 host; source-owned RV32/RV64 ELF through CLI and MCP                                       | RISC-V Clang, LLD, LLVM readelf, Ghidra 12.1.4, and full JDK 21             |
+| `npm run verify:ghidra:cortex-m-elf`       | Linux/macOS x64/arm64 host; source-owned M-profile ARM ELF through CLI and MCP                                   | Arm Clang, LLD, LLVM strip/readelf/objdump, Ghidra 12.1.4, and full JDK 21  |
 | `npm run verify:ghidra:switch`             | Linux x64 ELF; GCC/Clang optimized and stripped switch fixtures                                                  | GCC, Clang, GNU nm/objdump/strip, Ghidra 12.1.4, and full JDK 21            |
 | `npm run verify:ghidra:aarch64-jump-table` | Any supported Ghidra host; AArch64 ELF; signed/unsigned byte/halfword tables; host ARM64 Mach-O                  | Clang with AArch64 target support, Ghidra 12.1.4, and full JDK 21           |
 | `npm run verify:ghidra:cross-format`       | Any supported Ghidra host; also analyzes AArch64 ELF, x86-64 PE, and x86-64 Mach-O                               | `clang`, LLD, and `lld-link` in addition to host-lane prerequisites         |
@@ -1499,6 +1500,49 @@ also checks:
 - unchanged source bytes and owned cleanup.
 
 It does not execute target code, model peripherals, or qualify Windows.
+
+`npm run verify:ghidra:cortex-m-elf` checks M-profile ARM ELF executables
+through the compiled CLI and stdio MCP server. It needs Ghidra 12.1.4, a full
+JDK 21, and LLVM with Arm targets: `clang`, `ld.lld`, `llvm-strip`,
+`llvm-readelf` and `llvm-objdump`, or `REA_CLANG`, `REA_LLD`, `REA_LLVM_STRIP`,
+`REA_LLVM_READELF` and `REA_LLVM_OBJDUMP`. It builds
+`tests/conformance/c/cortex-m.c` and `tests/conformance/ghidra/cortex-m-vectors.S`
+for:
+
+- `thumbv6m` at `0x08000000` and at `0x0`, `thumbv7m`, `thumbv8m.base` and
+  `thumbv8m.main`, soft-float;
+- `thumbv7em` with `-mfloat-abi=soft`, `softfp` and `hard`;
+- `thumbv8.1m.main` for Cortex-M55, hard-float, with a `wls`/`le` low-overhead
+  loop;
+- an `armv7a` hard-float control, which keeps Ghidra's header-based selection.
+
+Each image is opened with its symbols and DWARF, and again stripped.
+`llvm-readelf --arch-specific` is the oracle for REA's attribute reading. The
+lane checks:
+
+- the pinned language, lane, label policy and ELF facts in the profile, and the
+  language that Ghidra reports after import;
+- the session limitations, including the base-standard float limitation of
+  soft-float images;
+- LLVM's mnemonics for each checked function, decoded in Thumb state, with
+  `primask` and, for v8-M and v8.1-M Mainline, `msplim`;
+- for the ARMv8.1-M loop, that the results report the low-overhead-loop
+  limitation and that Ghidra 12.1.4 gives `le` no fall-through. The lane
+  records both branches' flow with LLVM's targets, and accepts the code after
+  the loop decoded as LLVM decodes it or left undisassembled;
+- the storage of `float` and `double` arguments and results in DWARF
+  prototypes, and the argument their decompiled code returns: VFP registers in
+  the hard-float image, and core registers under `__stdcall_softfp` in the
+  soft-float and softfp images;
+- that the vector table is not a function, and that a seeded vector-only handler
+  of a stripped image decodes in Thumb state;
+- snapshot reuse with the lane, CLI/MCP parity, a caller-selected language
+  that names the pin keeping the lane and its DWARF prototype, and a different
+  one winning over the pin;
+- unchanged source bytes and owned cleanup.
+
+It records, without asserting, the prototypes that Ghidra infers for stripped
+images. It does not execute target code or qualify Windows.
 
 `npm run verify:ghidra:address-context` runs on Linux with a caller-installed
 Ghidra, full JDK, and an x86-64 ELF GCC toolchain (`CC` selects another compatible
