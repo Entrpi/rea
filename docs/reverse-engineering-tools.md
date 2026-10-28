@@ -148,6 +148,44 @@ Through MCP, the same call is:
 is a Thumb address with its low bit set. Disassemble the handler at the even
 address, for example `pd 16 @ 0x08000108` for a Reset vector of `0x08000109`.
 
+### Multi-segment ESP images
+
+An app or bootloader image of the ESP32 family (the ESP32, ESP32-S, ESP32-C,
+ESP32-H and ESP32-P series) starts with the magic byte `0xE9` and holds several
+segments. ESP8266 images use a different header, and this recipe does not
+cover them. Each segment loads at its own address, so one `base_address` cannot
+map the image. Instead, remove the default map and add one `om` map for each
+segment, in the same command:
+
+1. Find the load address and the length of each segment, and the file offset
+   of its data. The image header is 24 bytes. Each segment starts with an
+   8-byte header that holds the load address and the data length, both 32-bit
+   little-endian, and its data follows. So the data of the first segment
+   starts at file offset `0x20`, and each later segment header follows the
+   data of the segment before it. `esptool image-info` lists the same
+   segments; esptool v4 spells it `image_info --version 2`. Its `File offs`
+   column is the offset of the 8-byte segment header, so the data starts 8
+   bytes later. A padding segment carries no code or data, and you can skip
+   it.
+2. Rizin opens the image as file descriptor 3, which `ol` shows. For each
+   segment, add this map, with `r-x` for code and `r--` for data:
+   `om 3 <load address> <length> <data offset> <permissions> <name>`. A map
+   cannot have more permissions than the opened file, which is read-only.
+3. Select the decoder with `asm_arch` and set `asm_bits` to 32. ESP32, ESP32-S2
+   and ESP32-S3 use Xtensa. The ESP32-C and ESP32-H series and ESP32-P4 use
+   RISC-V. Use the plugin name that `e asm.arch=?` lists for the installed
+   Rizin.
+
+For example, for an image with an IRAM segment of 8 bytes at `0x40080000` and
+a DRAM segment of 16 bytes at `0x3ffb0000`:
+
+```sh
+rea execute-rizin-command ./app.bin "om-*; om 3 0x40080000 0x8 0x20 r-x iram0; om 3 0x3ffb0000 0x10 0x30 r-- dram0; oml; pd 4 @ 0x40080000" --asm-arch xtensa --asm-bits 32
+```
+
+`om-*` removes the default map, which maps the whole file at address 0. The
+entry address is the 32-bit little-endian value at file offset 4.
+
 ## Cutter bridge
 
 Cutter commands use the local REA Python bridge and authenticated loopback messages.
