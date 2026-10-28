@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import type { GhidraLanguageOverride } from "../config/ghidraLanguageOverride.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import type { JsonValue } from "../domain/jsonValue.js";
@@ -99,6 +101,23 @@ export const ghidraXtensaProfileParameters = (
     },
     xtensa_support_lane: "elf32-le-exec-windowed-generic-v1",
   };
+};
+
+/**
+ * Bind a committed Xtensa profile to the target being imported. Every admitted
+ * Xtensa ELF pins the same language, so the language checks alone cannot tell
+ * a profile resolved for another image, whose ELF facts every Evidence record
+ * would then attribute to this one.
+ */
+export const ghidraXtensaProfileMismatchReason = (
+  target: BinaryTarget,
+  parameters: Readonly<Record<string, unknown>>,
+): string | null => {
+  const expected = ghidraXtensaProfileParameters(target);
+  return isDeepStrictEqual(parameters.xtensa_elf, expected.xtensa_elf) &&
+    parameters.xtensa_support_lane === expected.xtensa_support_lane
+    ? null
+    : "The committed Xtensa analysis profile was resolved for a different target; reopen the target to resolve a new profile.";
 };
 
 /** What verify:ghidra:xtensa and REA's ESP-IDF measurement establish, and what they do not. */

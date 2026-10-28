@@ -73,13 +73,14 @@ export const readXtensaElfAbi = async (
     return unavailable(
       "The image has no section header table, which is where .xtensa.info is declared.",
     );
+  // A section whose name cannot be read could be another .xtensa.info, so
+  // neither absence nor a single declaration can be established.
+  if (directory.section_names_limitation !== undefined)
+    return unavailable(directory.section_names_limitation);
   const [info, ...repeated] = directory.sections.filter(
     (section) => section.name === ".xtensa.info",
   );
-  if (info === undefined)
-    return directory.section_names_limitation === undefined
-      ? { status: "absent" }
-      : unavailable(directory.section_names_limitation);
+  if (info === undefined) return { status: "absent" };
   if (repeated.length > 0)
     return unavailable("More than one section is named .xtensa.info.");
   if (info.type !== SHT_NOTE)

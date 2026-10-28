@@ -26,7 +26,10 @@ import {
   GHIDRA_SESSION_CAPABILITIES,
   parseGhidraSessionInfo,
 } from "./GhidraSessionValues.js";
-import { ghidraXtensaLimitations } from "./GhidraXtensaProfile.js";
+import {
+  ghidraXtensaLimitations,
+  ghidraXtensaProfileMismatchReason,
+} from "./GhidraXtensaProfile.js";
 
 // Abbreviated from Ghidra 12.1.4 Processors/Xtensa/data/languages/xtensa.ldefs:
 // one compiler specification per language, with id `default` and no `gcc`.
@@ -176,6 +179,31 @@ const registerPinCases = () => {
     if (!left.ok) throw left.error;
     if (!right.ok) throw right.error;
     expect(left.value.profile?.digest).not.toBe(right.value.profile?.digest);
+  });
+
+  it("refuses a committed profile resolved for another Xtensa image", async () => {
+    const launches: GhidraClientOptions[] = [];
+    const provider = ghidra({}, capturingFactory(launches));
+    const resolved = await provider.resolveAnalysisProfile(target());
+    if (!resolved.ok || resolved.value.profile === null)
+      throw new Error("expected an Xtensa profile");
+    const { parameters } = resolved.value.profile;
+    // Both images pin the same language; only the committed ELF facts differ.
+    const other = target({ flags: 0 });
+    expect(ghidraXtensaProfileMismatchReason(target(), parameters)).toBeNull();
+    const reason = ghidraXtensaProfileMismatchReason(other, parameters);
+    expect(reason).not.toBeNull();
+    const client = provider.createClient(other, resolved.value.profile);
+    try {
+      expect(await client.execute("health", {})).toMatchObject({
+        ok: false,
+        error: { diagnostics: { reason } },
+      });
+    } finally {
+      await client.close();
+    }
+    // The refusal comes before any Ghidra launch.
+    expect(launches).toEqual([]);
   });
 
   it("imports with the pin and asserts it against the session handshake", async () => {

@@ -102,7 +102,10 @@ import {
   ghidraRiscvCallingConventionLimitations,
   ghidraRiscvLimitations,
 } from "./GhidraRiscvProfile.js";
-import { ghidraXtensaLimitations } from "./GhidraXtensaProfile.js";
+import {
+  ghidraXtensaLimitations,
+  ghidraXtensaProfileMismatchReason,
+} from "./GhidraXtensaProfile.js";
 import { ghidraPePdbLimitations } from "./GhidraPeProfile.js";
 import { unverifiedGhidraBuildLimitation } from "./GhidraReleasePolicy.js";
 import { GhidraHeadlessLauncher } from "./GhidraLauncher.js";
@@ -355,6 +358,16 @@ export const createGhidraProviderClient = (input: {
     return err(
       new ProviderAdapterError("ghidra", "open_binary", {
         diagnostics: { reason: mipsProfileMismatch },
+      }),
+    );
+  const xtensaProfileMismatch = ghidraXtensaProfileMismatchReason(
+    target,
+    committedProfile.parameters,
+  );
+  if (xtensaProfileMismatch !== null)
+    return err(
+      new ProviderAdapterError("ghidra", "open_binary", {
+        diagnostics: { reason: xtensaProfileMismatch },
       }),
     );
   const armProfileMismatch = ghidraArmProfileMismatchReason(
