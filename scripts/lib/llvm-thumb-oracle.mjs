@@ -37,17 +37,27 @@ const elf32Text = (object) => {
 };
 
 /**
- * Assemble `fixture.source` and require its bytes to equal `fixture.code`.
- * Returns LLVM's mnemonic for each instruction, keyed by image offset.
+ * Assemble `fixture.source` for its triple, and for `fixture.cpu` and
+ * `fixture.floatAbi` when it names them, and require its bytes to equal
+ * `fixture.code`. Returns LLVM's mnemonic for each instruction, keyed by image
+ * offset.
  */
 export const llvmThumbMnemonics = async (fixture, tools) => {
   const workspace = await mkdtemp(join(tmpdir(), "rea-thumb-oracle-"));
+  // Optional extensions such as MVE are enabled by the CPU, not the triple.
+  const cpu = (flag) =>
+    fixture.cpu === undefined ? [] : [`${flag}=${fixture.cpu}`];
+  // clang 19 refuses MVE under the default soft-float ABI.
+  const floatAbi =
+    fixture.floatAbi === undefined ? [] : [`-mfloat-abi=${fixture.floatAbi}`];
   try {
     const source = join(workspace, "fixture.s");
     const object = join(workspace, "fixture.o");
     await writeFile(source, fixture.source);
     await run(tools.clang, [
       `--target=${fixture.triple}`,
+      ...cpu("-mcpu"),
+      ...floatAbi,
       "-c",
       source,
       "-o",
@@ -62,6 +72,7 @@ export const llvmThumbMnemonics = async (fixture, tools) => {
       "-d",
       "--no-show-raw-insn",
       `--triple=${fixture.triple}`,
+      ...cpu("--mcpu"),
       object,
     ]);
     const mnemonics = new Map();
