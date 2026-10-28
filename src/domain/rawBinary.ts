@@ -299,9 +299,7 @@ export const admitRawBinary = (input: {
             code_address: codeAddress,
             isa_mode: variant.isaMode,
             suggestion:
-              base === undefined
-                ? "Pass code_address as entry_point, or give base_address and omit entry_point to read Reset from the vector table."
-                : "Omit entry_point to read Reset from the vector table, or pass code_address as entry_point.",
+              "Omit entry_point to read Reset from the vector table, or pass code_address as entry_point.",
           },
         );
       }
@@ -329,7 +327,7 @@ export const admitRawBinary = (input: {
   const length = validateRawBinaryLength(input.fileBytes);
   if (!length.ok)
     return err({ reason: length.error, constraint: "file_format_rejected" });
-  // Without base_address, file offset 0 maps at the entry.
+  // A legacy load has no base_address: file offset 0 maps at its entry.
   const start = base ?? entry;
   if (start === undefined)
     throw new Error("raw-binary admission lost both base and entry");
@@ -467,6 +465,18 @@ export const rawBinaryVariantSelectionIssue = (input: {
     return {
       field: "architecture_variant",
       message: `architecture_variant ${variant.name} requires architecture ${variant.architecture}`,
+    };
+  // A raw dump records neither its load address nor where Reset is; mapping it
+  // at the entry would put a vector table at Reset. A code fragment that does
+  // start at its entry passes that address as its base.
+  if (
+    input.architectureVariant !== undefined &&
+    input.baseAddress === undefined
+  )
+    return {
+      field: "base_address",
+      message:
+        "architecture_variant requires base_address, the address of file offset 0",
     };
   // Narrow first: only the M-profile lane is verified with a separate base.
   if (

@@ -62,13 +62,13 @@ export const entryPointSelectionOption = rawBinaryEntryPointSchema
 export const baseAddressSelectionOption = rawBinaryBaseAddressSchema
   .optional()
   .describe(
-    "Address of raw file offset 0 (0xhex) for an --architecture-variant image, separate from --entry-point; defaults to it",
+    "Address of raw file offset 0 (0xhex) for an --architecture-variant image, separate from --entry-point; required with --architecture-variant and refused without it",
   );
 
 export const architectureVariantSelectionOption = architectureVariantSchema
   .optional()
   .describe(
-    "ARM M-profile variant of a raw image, decoded in Thumb state; requires --architecture arm",
+    "ARM M-profile variant of a raw image, decoded in Thumb state; requires --architecture arm and --base-address",
   );
 
 export const vectorTableAddressSelectionOption =

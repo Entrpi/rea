@@ -135,6 +135,7 @@ describe("raw-binary snapshots saved before base_address", () => {
       rawLoad: admittedRawLoad({
         architecture: "arm",
         architectureVariant: "armv7-m",
+        baseAddress: "0x8000000",
         entryPoint: "0x8000000",
         fileBytes: 4,
       }),

@@ -74,12 +74,12 @@ export const openBinaryInputSchema = z
     base_address: rawBinaryBaseAddressSchema
       .optional()
       .describe(
-        "Address of raw file offset 0 (0xhex) for an architecture_variant image, separate from entry_point. Defaults to entry_point. Only with format=raw-binary.",
+        "Address of raw file offset 0 (0xhex) for an architecture_variant image, separate from entry_point. Required with architecture_variant and refused without it.",
       ),
     architecture_variant: architectureVariantSchema
       .optional()
       .describe(
-        "ARM M-profile variant of a raw image (raw dumps do not record it). Requires format=raw-binary and architecture=arm. Code is decoded in Thumb state; an odd entry_point is refused.",
+        "ARM M-profile variant of a raw image (raw dumps do not record it). Requires format=raw-binary, architecture=arm and base_address. Code is decoded in Thumb state; an odd entry_point is refused.",
       ),
     vector_table_address: rawBinaryVectorTableAddressSchema
       .optional()

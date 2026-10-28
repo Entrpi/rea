@@ -131,13 +131,16 @@ code is decoded with the ARMv7-M instruction set, and `armv8-m.main` code with
 the ARMv8.1-M one.
 
 - `base_address` maps file offset 0 at its own address, and `entry_point` must
-  then lie inside the mapped image. It is accepted only with
-  `architecture_variant`, the one lane whose verifier covers a separate base.
+  then lie inside the mapped image. It is required with `architecture_variant`
+  and refused without it, the one lane whose verifier covers a separate base. A
+  dump records neither its load address nor where Reset is, and mapping it at
+  the entry would put a vector table at Reset; a code fragment that starts at
+  its entry passes that address as `base_address`.
 - Without `entry_point`, REA reads the vector table at `vector_table_address`, or
   at `base_address` when that is omitted. Word 1 is the Reset handler with bit 0
   set for Thumb state. The vector value is observed, and the entry is derived by
   clearing bit 0. Word 0, the initial stack pointer, is recorded as observed and
-  is not validated. `base_address` is required to omit `entry_point`.
+  is not validated.
 - Use `vector_table_address` when a header precedes the vector table, such as the
   256-byte boot2 stage of an RP2040 image or an MCUboot header. It must be
   4-byte aligned and inside the mapped image, and it applies only when
@@ -208,7 +211,7 @@ This is decision D1 of the embedded-target work, raised in
 [#4246](https://github.com/morluto/rea/issues/4246).
 
 - **Choice.** `architecture_variant` naming the M profile, mapped as in the table
-  above; with it, `base_address` separate from the entry and an optional
+  above; with it, a required `base_address` separate from the entry and an optional
   `vector_table_address`; Reset read from the vector table when a variant and a
   base are given without an entry; explicit odd entries refused; the `segments`
   load image and versioned `raw_load` identity only for loads that are not

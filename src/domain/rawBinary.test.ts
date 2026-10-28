@@ -541,11 +541,13 @@ describe.each(ARCHITECTURE_VARIANT_NAMES)(
   (variant) => {
     const { architecture, isaMode } = ARCHITECTURE_VARIANTS[variant];
 
+    // A code fragment that starts at its entry passes that address as its base.
     it("admits an even Thumb entry that generic ARM would refuse", () => {
       expect(
         admitRawBinary({
           architecture,
           architectureVariant: variant,
+          baseAddress: "0x8000002",
           entryPoint: "0x8000002",
           fileBytes: 4,
         }),
@@ -564,34 +566,29 @@ describe.each(ARCHITECTURE_VARIANT_NAMES)(
       });
     });
 
-    it.each([
-      [undefined, "Pass code_address as entry_point, or give base_address"],
-      ["0x08000000", "Omit entry_point to read Reset from the vector table"],
-    ])(
-      "refuses an odd entry with base %s and gives its code address",
-      (baseAddress, suggestion) => {
-        const result = admitRawBinary({
-          architecture,
-          architectureVariant: variant,
-          entryPoint: "0x080001c5",
-          ...(baseAddress === undefined ? {} : { baseAddress }),
-          fileBytes: 0x200,
-        });
-        expect(result).toMatchObject({
-          ok: false,
-          error: {
-            reason: `raw-binary ${variant} entry_point 0x80001c5 is a Thumb interworking address with bit 0 set; its code address is 0x80001c4`,
-            constraint: "load_selection_rejected",
-            diagnostics: {
-              entry_point: "0x080001c5",
-              code_address: "0x80001c4",
-              isa_mode: isaMode,
-              suggestion: expect.stringContaining(suggestion),
-            },
+    it("refuses an odd entry and gives its code address", () => {
+      const result = admitRawBinary({
+        architecture,
+        architectureVariant: variant,
+        entryPoint: "0x080001c5",
+        baseAddress: "0x08000000",
+        fileBytes: 0x200,
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        error: {
+          reason: `raw-binary ${variant} entry_point 0x80001c5 is a Thumb interworking address with bit 0 set; its code address is 0x80001c4`,
+          constraint: "load_selection_rejected",
+          diagnostics: {
+            entry_point: "0x080001c5",
+            code_address: "0x80001c4",
+            isa_mode: isaMode,
+            suggestion:
+              "Omit entry_point to read Reset from the vector table, or pass code_address as entry_point.",
           },
-        });
-      },
-    );
+        },
+      });
+    });
 
     it("refuses a vector table address beside an explicit entry", () => {
       expect(
@@ -750,11 +747,15 @@ describe("raw-binary variant pairing at admission", () => {
   it.each([
     [
       { architectureVariant: "armv7-m" },
-      "entry_point may be omitted only with architecture_variant and base_address; Reset is then read from the vector table",
+      "architecture_variant requires base_address, the address of file offset 0",
     ],
     [
       { baseAddress: "0x8000000" },
       "base_address applies only with architecture_variant",
+    ],
+    [
+      { vectorTableAddress: "0x8000000" },
+      "entry_point may be omitted only with architecture_variant and base_address; Reset is then read from the vector table",
     ],
   ])(
     "requires a variant and a base to omit the entry: %j",
