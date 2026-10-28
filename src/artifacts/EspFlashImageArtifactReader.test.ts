@@ -166,7 +166,8 @@ describe("ESP flash layout coverage and selection", () => {
   it("keeps usable partitions beside a truncated and a missing one", async () => {
     const cut = DUMP.subarray(0, 0x2_8000);
     const snapshot = await scanCanonicalArtifactInventory(await writeDump(cut));
-    expect(snapshot.coverage.status).toBe("unknown");
+    // The table names every partition, so the end of the file hides no entry.
+    expect(snapshot.coverage.status).toBe("complete");
     const ota0 = snapshot.occurrences.find(
       ({ logical_path }) => logical_path === "partitions/ota_0.bin",
     );

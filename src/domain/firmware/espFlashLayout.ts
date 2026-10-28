@@ -345,17 +345,13 @@ export const finishEspFlashLayout = (
     plan.otadata === undefined
       ? null
       : otaFacts(plan, plan.otadata, reads.otadataRecords);
-  const incomplete = plan.input.table.partitions.some((part) => {
-    const region = plan.regions.find((item) => item.partition === part);
-    return region === undefined || region.available < part.size;
-  });
+  // The table names every partition, so one cut short or left out by the end
+  // of the file hides no entry: its entry says what the file lacks.
   return {
     otadata,
     undescribed,
     coverage:
-      undescribed.length > 0 ||
-      incomplete ||
-      plan.input.bootloader === undefined
+      undescribed.length > 0 || plan.input.bootloader === undefined
         ? "unknown"
         : "complete",
     limitations,

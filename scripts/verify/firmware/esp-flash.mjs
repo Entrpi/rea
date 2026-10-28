@@ -357,7 +357,8 @@ const damaged = async (report) => {
   assert.equal(appFacts(rea, "ota_0").image.checksum.status, "valid");
   await writeFile(path("truncated.bin"), bytes.subarray(0, 0x4_0000));
   const cut = await inspect(path("truncated.bin"));
-  assert.equal(cut.inventory.coverage.status, "unknown");
+  // Partitions cut short or left out by the end of the file hide no entry.
+  assert.equal(cut.inventory.coverage.status, "complete");
   assert.deepEqual(
     cut.root.partitions_outside_dump.map(({ label }) => label),
     ["ota_1", "keys"],

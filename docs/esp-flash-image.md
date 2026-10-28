@@ -119,10 +119,12 @@ partitions like any other, whose bytes are also `bootloader.bin` and
 `partition-table.bin`, and they are exempt from the rule that partitions
 follow the table, as in `gen_esp32part.py`.
 
-A partition that the file holds only in part is the bytes the file holds,
-with a limitation. One unreadable partition does not hide the others:
-partitions outside the dump, before its first byte or overlapping another
-are each reported while the rest stay readable.
+A partition that the file holds only in part, as when an `esptool merge-bin`
+dump ends inside its last partition, is the bytes the file holds, with an
+entry limitation that gives the size the table declares. One unreadable
+partition does not hide the others: partitions outside the dump, before its
+first byte or overlapping another are each reported while the rest stay
+readable.
 
 ### App partitions and the bootloader
 
@@ -173,8 +175,11 @@ to another partition when an app fails to load.
 Erased flash (`0xFF`) between regions is described. In a gap between
 regions, the first byte that is not erased starts an `undescribed` range to
 the end of the gap, and makes coverage `unknown`; the rest of that range is
-not examined. Coverage is also `unknown` when a partition is truncated or
-outside the dump, or when no bootloader is located.
+not examined. Coverage is also `unknown` when no bootloader is located. A
+partition cut short or left out by the end of the file does not make it
+`unknown`: the table names every partition, so no entry is hidden, and the
+entry or `partitions_outside_dump` says what the file lacks. Artifact
+comparison of two such dumps therefore classifies every partition.
 
 `extract_artifact` writes every entry as an ordinary file, `nvs_keys`
 partitions included. On a device without flash encryption an `nvs_keys`
@@ -216,8 +221,9 @@ offsets, single images that are not scanned, overlaps, primary entries,
 truncation and partitions outside the dump, index names for unsafe labels,
 repeated declarations, the otadata states and records, and each branch of
 the bootloader's selection. CLI and stdio MCP tests exercise the inputs and
-their identity and extraction, and an MCP `compare_artifacts` test compares
-partition declarations, labels that are not UTF-8 included.
+their identity and extraction. MCP `compare_artifacts` tests compare
+partition declarations, labels that are not UTF-8 included, and two dumps
+that end inside their last partition, whose partitions are each classified.
 
 The optional real lane builds its dumps with esptool and ESP-IDF's own tools:
 
@@ -250,7 +256,8 @@ otatool's own OTA logic runs unchanged. The lane then checks:
 - the relocated table, found by scanning and named with
   `partition_table_offset`, and the dump written from `0x1000`, read with
   `flash_offset` and, without it, left an ESP image;
-- an app with a flipped byte beside valid partitions, and a truncated dump.
+- an app with a flipped byte beside valid partitions, and a truncated dump,
+  read with complete coverage and its missing partitions outside the dump.
 
 The lane ran on macOS arm64 with Node 24.22.1, Homebrew Clang and LLD 21.1.8
 and ESP-IDF v5.5.2's `gen_esp32part.py`, `otatool.py` and `parttool.py`,
