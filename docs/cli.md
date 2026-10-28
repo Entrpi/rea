@@ -281,6 +281,16 @@ rea extract-artifact ./firmware.hex --json
 See [Intel HEX and S-record images](hex-records.md) for recognition, region
 names, metadata and limits.
 
+Inventory and extract UF2 or DfuSe regions:
+
+```sh
+rea inspect-artifact ./firmware.uf2 --json
+rea extract-artifact ./firmware.dfu --json
+```
+
+See [UF2 and DfuSe images](uf2-dfuse.md) for recognition, families, numbering,
+the DfuSe suffix CRC and limits.
+
 Inspect local model declarations without loading weights:
 
 ```bash

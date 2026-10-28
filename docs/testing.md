@@ -1950,6 +1950,14 @@ unknown chunks, depth limits and extracted child digests. The optional
 Neither optional toolchain is a base-lane prerequisite. See
 [firmware analysis](firmware-analysis.md) for limits and unverified formats.
 
+`npm run verify:uf2` needs only a Python that runs esptool, named by
+`REA_ESPTOOL_PYTHON` (default `python3`). It writes inputs at known addresses,
+builds UF2 files with esptool's `merge-bin --format uf2` (v4 `merge_bin`) with
+and without MD5 and with 256-byte payloads, and concatenates two chips'
+outputs. Inspection and extraction through the built CLI must return each input
+at its address under the familyID esptool itself reports. It is not part of CI.
+See [UF2 and DfuSe images](uf2-dfuse.md).
+
 ### JavaScript source recovery
 
 Build once with `npm run build:cached`, then run `npm run verify:javascript:recovery`.

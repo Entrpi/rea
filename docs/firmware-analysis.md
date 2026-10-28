@@ -300,3 +300,12 @@ file for its address regions, declared start address and record facts, then
 `extract-artifact` / `extract_artifact` for one raw file per region. Decoding is
 portable and requires no external tool. See
 [Intel HEX and S-record images](hex-records.md).
+
+## Inspect UF2 and DfuSe images
+
+Use `inspect-artifact` / `inspect_artifact` on a UF2 file for each familyID's
+address regions and its block numbering, or on a DfuSe file for its targets,
+elements and DFU suffix, then `extract-artifact` / `extract_artifact` for one
+raw file per region or element. A DfuSe suffix CRC mismatch follows
+`integrity_policy`. Decoding is portable and requires no external tool. See
+[UF2 and DfuSe images](uf2-dfuse.md).
