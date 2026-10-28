@@ -10,7 +10,6 @@ import { parseConfig } from "../../../src/config/parseConfig.js";
 import { toolContract } from "../../../src/contracts/toolContracts.js";
 import {
   parseAnalysisSnapshot,
-  snapshotEvidenceForQuery,
   snapshotMatchesBinding,
   snapshotMatchesTarget,
 } from "../../../src/domain/analysisSnapshot.js";
@@ -92,7 +91,7 @@ const segmentsImage = () => {
 };
 
 describe("raw-binary snapshots saved before base_address", () => {
-  it("replay for the same load admitted today", async () => {
+  it("keep their target and load-image facts for the same load admitted today", async () => {
     const snapshot = await historicalSnapshot();
     const f = fixtureRawBinaryLoadImage();
     const target = {
@@ -105,18 +104,19 @@ describe("raw-binary snapshots saved before base_address", () => {
     };
     const profile = await ghidraProfile(target);
     expect(snapshotMatchesTarget(snapshot.target, target)).toBe(true);
-    expect(snapshotMatchesBinding(snapshot, target, profile)).toBe(true);
-    const replayed = snapshotEvidenceForQuery(snapshot, {
-      target,
-      bindingProfile: profile,
-      operation: "inspect_native_load_image",
-      parameters: {},
-      provider: profile.provider,
-      evidenceProfile: profile,
-    });
-    if (replayed === undefined) throw new Error("snapshot did not replay");
+    // Upstream's instruction-status revision (#7823) keeps every Ghidra
+    // snapshot saved before it from replaying. Apart from that parameter, the
+    // profile is the one this snapshot recorded.
+    expect(snapshotMatchesBinding(snapshot, target, profile)).toBe(false);
+    const { instruction_status: status, ...parameters } = profile.parameters;
+    expect(status).toBe("unlisted-address-without-decode-v1");
+    expect(parameters).toEqual(snapshot.binding.analysis_profile.parameters);
     // The saved image still parses, and its facts equal what this version
     // produces. Limitation prose is not frozen; later versions may reword it.
+    const entry = snapshot.entries.find(
+      ({ operation }) => operation === "inspect_native_load_image",
+    );
+    if (entry === undefined) throw new Error("fixture has no load image");
     const current = attestGhidraRawBinaryLoadImage(
       f.snapshot,
       f.target,
@@ -124,7 +124,7 @@ describe("raw-binary snapshots saved before base_address", () => {
     );
     if (!current.ok) throw new Error(current.error);
     const { limitations: _saved, ...saved } = nativeLoadImageSchema.parse(
-      replayed.normalized_result,
+      entry.execution.result,
     );
     const { limitations: _produced, ...produced } = current.value;
     expect(saved).toEqual(produced);

@@ -217,9 +217,11 @@ an omitted `vector_table_address` equals an explicit one at the base, and REA
 reports canonical addresses only. No result retains the spelling a caller used
 yet; the decision record describes that gap.
 
-Saved `raw-binary` load images and raw snapshots stay readable and replay as
-before. REA versions without these inputs cannot replay a snapshot of a load
-that uses them, because its analysis profile differs.
+These inputs leave a load without them exactly as REA loaded it before: its
+analysis profile, snapshot target and `raw-binary` load image are unchanged, so
+its saved load images stay readable and its snapshots replay wherever they did
+without these inputs. REA versions without these inputs cannot replay a
+snapshot of a load that uses them, because its analysis profile differs.
 
 ### Decision record
 
