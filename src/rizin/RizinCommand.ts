@@ -12,17 +12,26 @@ export const RIZIN_PROVIDER_IDENTITY = {
 } as const;
 
 /**
+ * The first `-v` line Rizin and radare2 print: a plain tool token, a version,
+ * any build tokens, then `@ <os>-<arch>-<bits>` and an optional `, <package>`.
+ * Rizin 0.9.1 prints `rizin 0.9.1 @ darwin-arm-64, package: 0.9.1_2
+ * (Homebrew)`; radare2 6.1.8 prints `radare2 6.1.8 +0 abi:110 @
+ * darwin-arm_64`. A line such as `Warning: 123 …` identifies nothing.
+ */
+const VERSION_BANNER =
+  /^(?<tool>[A-Za-z][\w.+-]*) (?<version>\d[\w.+-]*)(?: [^\s@]+)* @ [A-Za-z0-9]+-[A-Za-z0-9]+[-_]\d+(?:, .*)?$/u;
+
+/**
  * Read the `-v` banner of the executable that REA_RIZIN_COMMAND selected.
- * Rizin prints `rizin <version> @ <os>-<arch>-<bits>`. radare2 also accepts
- * REA's argument list, so another tool is recorded with a limitation rather
- * than refused.
+ * radare2 also accepts REA's argument list, so another tool is recorded with
+ * a limitation rather than refused.
  */
 export const identifyRizinTool = (
   banner: string,
 ): ProviderToolIdentification | undefined => {
-  const match = /^(\S+) (\d\S*)/u.exec(banner);
-  const tool = match?.[1];
-  const version = match?.[2];
+  const match = VERSION_BANNER.exec(banner);
+  const tool = match?.groups?.tool;
+  const version = match?.groups?.version;
   if (tool === undefined || version === undefined) return undefined;
   if (tool === "rizin")
     return {

@@ -58,7 +58,7 @@ it("uses the server-selected environment unless a provider environment overrides
     writeRizin(
       overridePath,
       "provider override",
-      "radare2 6.1.8 +0 abi:110 @ test",
+      "radare2 6.1.8 +0 abi:110 @ darwin-arm_64",
     ),
     writeFile(artifactPath, "fixture"),
   ]);
@@ -77,7 +77,7 @@ it("uses the server-selected environment unless a provider environment overrides
         provider: overridePath,
         expected: "provider override",
         tool: { name: "radare2", version: "6.1.8" },
-        banner: "radare2 6.1.8 +0 abi:110 @ test",
+        banner: "radare2 6.1.8 +0 abi:110 @ darwin-arm_64",
         executable: join(overridePath, "rizin"),
       },
     ]) {

@@ -91,7 +91,9 @@ rea execute-rizin-command ./program iI
 
 Before a one-shot command, REA resolves the selected executable through `PATH`,
 hashes it, runs it with `-v` and reads the tool and version from its banner,
-the first line of that output. The command then runs the same path. Evidence
+the first line of that output, in the form Rizin and radare2 print:
+`<tool> <version>`, any build tokens, then `@ <os>-<arch>-<bits>` (for example
+`rizin 0.9.1 @ darwin-arm-64`). Any other first line identifies no tool. The command then runs the same path. Evidence
 records the tool and version as the provider name and version, and records the
 executable path, its SHA-256 and the banner in its parameters; a banner longer
 than 2,048 UTF-8 bytes is cut within that budget, between characters, and
