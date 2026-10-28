@@ -115,16 +115,19 @@ describe("raw-binary snapshots saved before base_address", () => {
       evidenceProfile: profile,
     });
     if (replayed === undefined) throw new Error("snapshot did not replay");
-    // The saved image still parses and equals what this version produces.
+    // The saved image still parses, and its facts equal what this version
+    // produces. Limitation prose is not frozen; later versions may reword it.
     const current = attestGhidraRawBinaryLoadImage(
       f.snapshot,
       f.target,
       f.observation,
     );
     if (!current.ok) throw new Error(current.error);
-    expect(nativeLoadImageSchema.parse(replayed.normalized_result)).toEqual(
-      current.value,
+    const { limitations: _saved, ...saved } = nativeLoadImageSchema.parse(
+      replayed.normalized_result,
     );
+    const { limitations: _produced, ...produced } = current.value;
+    expect(saved).toEqual(produced);
   });
 
   it("does not replay for an M-profile load of the same file", async () => {
