@@ -443,6 +443,7 @@ export type BinaryTarget =
           | ZipPackageFormat
           | "asar"
           | "godot-pck"
+          | "unityfs"
           | "dmg"
           | "pkg"
           | "intel-hex"

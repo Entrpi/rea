@@ -80,6 +80,7 @@ import {
 } from "../domain/apple/appleArchiveFormat.js";
 import { hasDiskImageSignature } from "../domain/apple/diskImageFormat.js";
 import { hasGodotPckHeader } from "../domain/godotPckFormat.js";
+import { hasUnityFsHeader } from "../domain/unityfsFormat.js";
 import { detectHexRecordEncoding } from "../domain/firmware/hexRecords.js";
 import {
   locateEspFlashLayout,
@@ -760,6 +761,7 @@ const detectArtifactFormat = async (
     );
   if (hasZipSignature(magic)) return zipRootPackageFormat(lower);
   if (hasGodotPckHeader(magic)) return "godot-pck";
+  if (hasUnityFsHeader(magic)) return "unityfs";
   const hexRecords = detectHexRecordEncoding(magic);
   if (hexRecords !== undefined) return hexRecords;
   // A C3 or S3 dump begins with its bootloader, so a layout comes first.
@@ -846,6 +848,7 @@ const isArchiveFormat = (
   [
     "asar",
     "godot-pck",
+    "unityfs",
     "dmg",
     "pkg",
     "intel-hex",

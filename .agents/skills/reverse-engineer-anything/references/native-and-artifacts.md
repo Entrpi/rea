@@ -675,6 +675,16 @@ not fresh filesystem checks. No decryption, Godot resource decoding, GDScript
 decompilation or target execution is provided. See
 [Godot PCK](https://github.com/morluto/rea/blob/main/docs/godot-pck.md).
 
+UnityFS AssetBundle containers (`.bundle`, `.ab`, YooAsset packages and other
+byte-identified files) list `CAB-*` SerializedFiles and `.resS` members with
+header and node facts; none/LZ4/LZ4HC member blocks stream on demand. Bundles
+declaring asset-bundle encryption keep header facts with unknown directory
+coverage; LZMA member bytes retain named occurrences with unavailable hashes.
+Virtual member offsets are not physical carrier locations. Format 6–8 readers
+cache one decoded block and support retained filtered/paged views. No
+decryption or SerializedFile object decoding is provided. See
+[UnityFS](https://github.com/morluto/rea/blob/main/docs/unityfs.md).
+
 ## ESP images
 
 For an ESP32-family app or bootloader image, `open_binary` then
