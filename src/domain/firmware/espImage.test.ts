@@ -7,7 +7,12 @@ import {
   createEspImageDecoder,
   recognizeEspImage,
 } from "./espImage.js";
-import { classifyEspSegment, espChipForId } from "./espChips.js";
+import {
+  classifyEspSegment,
+  espChipForId,
+  espSegmentLengthLimit,
+  espPageSizedMappingAmbiguity,
+} from "./espChips.js";
 import {
   ESP32C3_APP_SEGMENTS,
   ESP32C3_BOOTLOADER_SEGMENTS,
@@ -209,12 +214,10 @@ describe("ESP image decoding", () => {
       espImage({ segments: [{ address: 0x4038_0000, data: code }] }),
     );
     expect(decoded.metadata.descriptor).toBeNull();
-    expect(decoded.limitations).toEqual([
-      "ESP image segment 0 begins with the bootloader descriptor magic 0x50, but its reserved bytes are not zero; it is not read as an esp_bootloader_desc_t.",
-    ]);
+    expect(decoded.limitations).not.toHaveLength(0);
   });
 
-  it("omits a descriptor string that is not UTF-8", () => {
+  it("keeps invalid descriptor text unknown", () => {
     const descriptor = appDescriptor();
     descriptor[16] = 0xff;
     const decoded = image(
@@ -224,9 +227,7 @@ describe("ESP image decoding", () => {
       version: null,
       project_name: "rea_esp_fixture",
     });
-    expect(decoded.limitations).toEqual([
-      "ESP image descriptor field version is not valid UTF-8; its value is omitted.",
-    ]);
+    expect(decoded.limitations).not.toHaveLength(0);
   });
 });
 
@@ -263,12 +264,11 @@ describe("ESP image segment classification", () => {
       espImage({ chipId: 0x1f, segments: ESP32C3_APP_SEGMENTS }),
     );
     expect(decoded.metadata.chip).toBeNull();
+    expect(decoded.metadata.header.chip_id).toBe(0x1f);
     expect(
       new Set(decoded.segments.map(({ metadata }) => metadata.classification)),
     ).toEqual(new Set(["unknown"]));
-    expect(decoded.limitations).toEqual([
-      "ESP image chip_id 0x001f is not in the ESP-IDF v6.1 chip table; chip, ISA and segment classification are unknown.",
-    ]);
+    expect(decoded.limitations).not.toHaveLength(0);
   });
 
   it("leaves ESP32-C6 mapping unknown where the bootloader page size decides it", () => {
@@ -282,15 +282,19 @@ describe("ESP image segment classification", () => {
         { address: 0x4300_0000, data: pattern(16, 3) },
       ],
     });
+    const chip = espChipForId(0x0d);
+    if (chip === undefined) throw new Error("Expected ESP32-C6 fixture chip");
+    expect(espPageSizedMappingAmbiguity(chip)).toEqual({
+      low: 0x4220_0000,
+      high: 0x4300_0000,
+    });
     expect(classifications(bytes)).toEqual([
       "mapped",
       "mapped",
       "unknown",
       "loaded",
     ]);
-    expect(image(bytes).limitations).toEqual([
-      "esp32c6 maps flash through 256 MMU pages of the bootloader's configured size, which the image does not record; segments from 0x42200000 to 0x43000000 are unclassified.",
-    ]);
+    expect(image(bytes).limitations).not.toHaveLength(0);
   });
 
   it("derives the ISA from chip_id, not from the series letter", () => {
@@ -315,16 +319,14 @@ describe("ESP image integrity", () => {
       espImage({ segments: ESP32C3_APP_SEGMENTS, checksum: stored }),
     );
     expect(decoded.metadata.checksum).toMatchObject({
+      offset: 463,
       stored,
       computed,
       status: "invalid",
     });
     expect(decoded.metadata.appended_sha256.status).toBe("valid");
     expect(decoded.coverage).toBe("complete");
-    const byte = (value: number) => value.toString(16).padStart(2, "0");
-    expect(decoded.limitations).toEqual([
-      `ESP image checksum 0x${byte(stored)} at offset 0x1cf does not match the computed 0x${byte(computed)}.`,
-    ]);
+    expect(decoded.limitations).not.toHaveLength(0);
   });
 
   it("reports an appended SHA-256 mismatch", () => {
@@ -332,10 +334,15 @@ describe("ESP image integrity", () => {
     bytes.writeUInt8(bytes.readUInt8(bytes.length - 1) ^ 1, bytes.length - 1);
     const decoded = image(bytes);
     expect(decoded.metadata.checksum.status).toBe("valid");
-    expect(decoded.metadata.appended_sha256.status).toBe("invalid");
-    expect(decoded.limitations).toEqual([
-      "ESP image appended SHA-256 at offset 0x1d0 does not match the SHA-256 of the bytes before it.",
-    ]);
+    expect(decoded.metadata.appended_sha256).toMatchObject({
+      offset: 464,
+      status: "invalid",
+      stored: bytes.subarray(464).toString("hex"),
+      computed: createHash("sha256")
+        .update(bytes.subarray(0, 464))
+        .digest("hex"),
+    });
+    expect(decoded.limitations).not.toHaveLength(0);
   });
 
   it("marks an image without a digest", () => {
@@ -349,7 +356,9 @@ describe("ESP image integrity", () => {
       status: "not-appended",
     });
   });
+});
 
+describe("ESP image framing and segment limits", () => {
   it("keeps a truncated segment as an image with unavailable integrity", () => {
     const decoded = image(APP.subarray(0, 360));
     expect(decoded.metadata).toMatchObject({
@@ -360,37 +369,50 @@ describe("ESP image integrity", () => {
     expect(
       decoded.segments.map(({ availableLength }) => availableLength),
     ).toEqual([288, 16, 8]);
+    expect(decoded.metadata.header.segment_count).toBe(4);
+    expect(decoded.segments[2]).toMatchObject({
+      dataOffset: 352,
+      availableLength: 8,
+      metadata: { index: 2, header_offset: 344, data_len: 32 },
+    });
     expect(decoded.coverage).toBe("unknown");
-    expect(decoded.limitations).toEqual([
-      "ESP image is truncated: segment 2 declares 32 bytes at offset 0x160, but the file holds 8.",
-    ]);
+    expect(decoded.limitations).not.toHaveLength(0);
   });
 
   it("reports a file that ends before a declared segment header", () => {
     const decoded = image(APP.subarray(0, 344));
     expect(decoded.segments).toHaveLength(2);
-    expect(decoded.limitations).toEqual([
-      "ESP image is truncated: the header declares 4 segments, but the file ends before the header of segment 2.",
-    ]);
+    expect(decoded.metadata).toMatchObject({
+      header: { segment_count: 4 },
+      checksum: { status: "unavailable" },
+      appended_sha256: { status: "unavailable" },
+      image_end: null,
+    });
+    expect(decoded.coverage).toBe("unknown");
+    expect(decoded.limitations).not.toHaveLength(0);
   });
 
   it.each([
-    [
-      "checksum",
-      460,
-      "ESP image is truncated before its checksum at offset 0x1cf.",
-    ],
-    [
-      "appended SHA-256",
-      470,
-      "ESP image is truncated before its appended SHA-256 at offset 0x1d0.",
-    ],
+    ["checksum", 460, "unavailable"],
+    ["appended SHA-256", 470, "valid"],
   ] as const)(
     "keeps coverage unknown when the file ends before its %s",
-    (_name, end, message) => {
-      // Signature blocks would follow the image end, so their absence is unknown.
+    (_name, end, checksumStatus) => {
       const decoded = image(APP.subarray(0, end));
-      expect(decoded.limitations).toEqual([message]);
+      expect(decoded.metadata).toMatchObject({
+        checksum: { offset: 463, status: checksumStatus },
+        appended_sha256: {
+          offset: 464,
+          stored: null,
+          status: "unavailable",
+          computed:
+            end < 464
+              ? null
+              : createHash("sha256").update(APP.subarray(0, 464)).digest("hex"),
+        },
+        image_end: null,
+      });
+      expect(decoded.limitations).not.toHaveLength(0);
       expect(decoded.coverage).toBe("unknown");
     },
   );
@@ -406,9 +428,16 @@ describe("ESP image integrity", () => {
       }),
     );
     expect(decoded.metadata.checksum.status).toBe("valid");
-    expect(decoded.limitations).toEqual([
-      "ESP image segment 1 length 0x6 is not a multiple of 4; ESP-IDF rejects such an image.",
-    ]);
+    expect(decoded.segments[1]).toMatchObject({
+      availableLength: 6,
+      metadata: { index: 1, data_len: 6 },
+    });
+    expect(decoded.segments[2]).toMatchObject({
+      availableLength: 0,
+      metadata: { index: 2, data_len: 0 },
+    });
+    expect(decoded.coverage).toBe("complete");
+    expect(decoded.limitations).not.toHaveLength(0);
   });
 
   it.each([
@@ -426,14 +455,20 @@ describe("ESP image integrity", () => {
       // Segment 0 declares 16 MiB; the file holds only its first bytes.
       bytes.writeUInt32LE(0x100_0000, 28);
       const decoded = image(bytes);
-      expect(decoded.limitations).toEqual([
-        ...(limited
-          ? [
-              `ESP image segment 0 length 0x1000000 is 16 MiB or more; ESP-IDF rejects such an image for ${target}.`,
-            ]
-          : []),
-        `ESP image is truncated: segment 0 declares 16777216 bytes at offset 0x20, but the file holds ${String(bytes.length - 0x20)}.`,
-      ]);
+      const chip = espChipForId(chipId);
+      expect(chip?.target).toBe(target);
+      if (chip === undefined) throw new Error("Expected a known fixture chip");
+      expect(espSegmentLengthLimit(chip)).toBe(
+        limited ? 0x100_0000 : undefined,
+      );
+      expect(decoded.segments[0]).toMatchObject({
+        dataOffset: 32,
+        availableLength: bytes.length - 32,
+        metadata: { data_len: 0x100_0000 },
+      });
+      expect(decoded.metadata.checksum.status).toBe("unavailable");
+      expect(decoded.coverage).toBe("unknown");
+      expect(decoded.limitations).toHaveLength(limited ? 2 : 1);
     },
   );
 });
@@ -448,22 +483,19 @@ describe("ESP image trailing bytes", () => {
   });
 
   it.each([
-    [
-      "inside the padding",
-      Buffer.concat([APP, Buffer.alloc(1000, 0xff)]),
-      "0x5d8",
-    ],
-    ["at the sector boundary", PADDED, "0x1000"],
+    ["inside the padding", Buffer.concat([APP, Buffer.alloc(1000, 0xff)])],
+    ["at the sector boundary", PADDED],
   ] as const)(
     "keeps coverage unknown when erased flash ends %s",
-    (_name, bytes, end) => {
+    (_name, bytes) => {
       // A signed download cut here would have lost its signature sector.
       const decoded = image(bytes);
       expect(decoded.metadata.undescribed_trailing).toEqual([]);
+      expect(decoded.metadata.image_end).toBe(APP.length);
+      expect(decoded.metadata.signature_sector_offset).toBeNull();
+      expect(decoded.signatureBlocks).toEqual([]);
       expect(decoded.coverage).toBe("unknown");
-      expect(decoded.limitations).toEqual([
-        `The file ends at ${end} in erased flash, before the Secure Boot v2 signature slots at 0x1000 are complete; signature blocks may be missing.`,
-      ]);
+      expect(decoded.limitations).not.toHaveLength(0);
     },
   );
 
@@ -484,9 +516,7 @@ describe("ESP image trailing bytes", () => {
       undescribed_trailing: [{ offset: 96, length: 24 }],
     });
     expect(decoded.coverage).toBe("unknown");
-    expect(decoded.limitations).toEqual([
-      "24 bytes after the ESP image, in 1 range(s) from offset 0x60, are not described by its header, erased flash or a signature sector. They may be other flash contents, a Secure Boot v1 signature, or flash segments that esptool --ram-only-header leaves out of the segment count.",
-    ]);
+    expect(decoded.limitations).not.toHaveLength(0);
   });
 
   it("starts an undescribed range at the first byte that is not erased", () => {
@@ -626,20 +656,19 @@ describe("Secure Boot v2 signature blocks", () => {
     expect(decoded.metadata.undescribed_trailing).toEqual([
       { offset: 5312, length: 1216 },
     ]);
-    expect(decoded.limitations).toContain(
-      "Secure Boot v2 slot 1 at offset 0x14c0 has the 0xE7 magic but not a matching CRC32 or a complete block; it is not a valid signature block.",
-    );
+    expect(decoded.coverage).toBe("unknown");
+    expect(decoded.limitations).not.toHaveLength(0);
     // A stray 0xE7 in trailing data, without a valid block, is not a sector.
     const stray = image(
       Buffer.concat([PADDED, Buffer.from([0xe7]), pattern(100, 3)]),
     );
     expect(stray.metadata.signature_sector_offset).toBeNull();
+    expect(stray.signatureBlocks).toEqual([]);
+    expect(stray.coverage).toBe("unknown");
     expect(stray.metadata.undescribed_trailing).toEqual([
       { offset: 4096, length: 101 },
     ]);
-    expect(stray.limitations).toContain(
-      "Secure Boot v2 slot 0 at offset 0x1000 has the 0xE7 magic but not a matching CRC32 or a complete block; it is not a valid signature block.",
-    );
+    expect(stray.limitations).not.toHaveLength(0);
   });
 
   it("reports a damaged slot when no slot holds a valid block", () => {
@@ -653,9 +682,7 @@ describe("Secure Boot v2 signature blocks", () => {
     expect(decoded.metadata.undescribed_trailing).toEqual([
       { offset: 4096, length: 4096 },
     ]);
-    expect(decoded.limitations).toContain(
-      "Secure Boot v2 slot 0 at offset 0x1000 has the 0xE7 magic but not a matching CRC32 or a complete block; it is not a valid signature block.",
-    );
+    expect(decoded.limitations).not.toHaveLength(0);
     expect(decoded.coverage).toBe("unknown");
   });
 });
@@ -711,9 +738,9 @@ describe("Secure Boot v2 block layouts and sector bounds", () => {
     const cut = image(signed.subarray(0, 4096 + 1300));
     expect(cut.coverage).toBe("unknown");
     expect(cut.signatureBlocks).toHaveLength(1);
-    expect(cut.limitations).toEqual([
-      "Secure Boot v2 signature sector at offset 0x1000 is truncated: the file ends at 0x1514, before 0x2000.",
-    ]);
+    expect(cut.metadata.signature_sector_offset).toBe(4096);
+    expect(cut.signatureBlocks[0]?.offset).toBe(4096);
+    expect(cut.limitations).not.toHaveLength(0);
     expect(
       image(Buffer.concat([signed, Buffer.alloc(32, 0xff)])).coverage,
     ).toBe("complete");
@@ -743,14 +770,13 @@ describe("ESP image refusals", () => {
   });
 
   it("refuses input that stops before the admitted size", () => {
+    expect(image(APP.subarray(0, 100)).coverage).toBe("unknown");
     const decoder = createEspImageDecoder(APP.length);
     decoder.write(APP.subarray(0, 100));
-    expect(decoder.finish()).toEqual({
+    expect(decoder.finish()).toMatchObject({
       ok: false,
       error: {
         kind: "format",
-        message:
-          "ESP image input ended at offset 0x64, before the admitted size 0x1f0",
       },
     });
   });

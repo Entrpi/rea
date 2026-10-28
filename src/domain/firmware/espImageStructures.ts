@@ -81,7 +81,7 @@ export const decodeEspDescriptor = (
     const value = cString(bytes.subarray(from, from + length));
     if (value === null)
       limitations.push(
-        `ESP image descriptor field ${field} is not valid UTF-8; its value is omitted.`,
+        `ESP image descriptor field ${field} is not valid UTF-8; its text is unknown.`,
       );
     return value;
   };
