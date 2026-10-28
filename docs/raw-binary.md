@@ -184,7 +184,8 @@ unchanged. Any other raw load:
 - returns the `segments` load image (`layout: "segments"`, `version: 1`): one
   segment backed by the whole file at the base, one entry with its `isa_mode`,
   `role` and `basis`, and, when the basis is the vector table, `vector_table`
-  with the table address and the two words read from it.
+  with the table address and the two words read from it, as full-width 32-bit
+  words such as `0x080001c5`; the entry holds the canonical code address.
 
 An entry's `role` names its function: `entry` for an entry the caller named,
 `reset` for the Reset handler. Its `basis` records how REA chose it: `caller`

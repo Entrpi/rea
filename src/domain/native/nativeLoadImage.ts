@@ -175,8 +175,10 @@ export const nativeSegmentsLoadImageSchema = z.strictObject({
     )
     .min(1),
   // Present only for an entry whose basis is the vector table: the table address
-  // and the two words read from it. The initial stack pointer is observed and
-  // not validated.
+  // and the two words read from it. Like other format words REA reports (GPU
+  // code-object flags, metadata tokens), the words keep their full 32-bit width;
+  // they are not addresses, and the entry holds Reset's canonical code address.
+  // The initial stack pointer is observed and not validated.
   vector_table: z
     .strictObject({
       address: nativeAddressObservationSchema,

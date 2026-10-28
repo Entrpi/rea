@@ -213,6 +213,7 @@ const addressWidth = (architecture: BinaryArchitecture): bigint =>
 const hexAddress = (value: bigint): string => `0x${value.toString(16)}`;
 /** Minimum M-profile vector-table alignment: VTOR.TBLOFF is bits 31:7. */
 const VECTOR_TABLE_ALIGNMENT = 128n;
+/** A 32-bit word as read, at full width, unlike a canonical address. */
 const hexWord = (value: number): string =>
   `0x${value.toString(16).padStart(8, "0")}`;
 
