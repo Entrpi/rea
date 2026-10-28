@@ -347,9 +347,6 @@ export const espFlashPartitionMetadataSchema = z.strictObject({
   written_end: uint32.nullable(),
   written_bytes: uint32.nullable(),
 });
-export type EspFlashPartitionMetadata = z.infer<
-  typeof espFlashPartitionMetadataSchema
->;
 
 /** ESP image facts for a region of a dump; offsets are relative to the region. */
 export const espFlashImageFactsSchema = z.strictObject({
@@ -473,16 +470,6 @@ export const espFlashImageMetadataSchema = z.strictObject({
   undescribed: z.array(byteRange),
 });
 export type EspFlashImageMetadata = z.infer<typeof espFlashImageMetadataSchema>;
-
-/** Declaration identity that is stable across archive layout changes. */
-export const pyInstallerEntryDeclaration = (
-  metadata: PyInstallerEntryMetadata,
-) => ({
-  container: metadata.container,
-  container_name: metadata.container_name,
-  source_name: metadata.source_name,
-  type_code: metadata.type_code,
-});
 
 export const artifactFormatMetadataSchema = z.discriminatedUnion("kind", [
   godotPckMetadataSchema,
