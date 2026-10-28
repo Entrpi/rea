@@ -79,10 +79,12 @@ const gate = () => {
 const posix = it.skipIf(process.platform === "win32");
 
 posix(
-  "records the version from the banner, runs the file it hashed, and probes once per digest",
+  "records the version from the banner, runs the path it hashed, and probes once per path and digest",
   async () => {
     const { executable, path, digest } = await fixture();
-    const run = runner(() => "rizin 0.9.1 @ linux-x86-64\ncommit: abc");
+    // Homebrew's Rizin 0.9.1 printed this banner, package suffix included.
+    const banner = "rizin 0.9.1 @ darwin-arm-64, package: 0.9.1_2 (Homebrew)";
+    const run = runner(() => `${banner}\ncommit: abc`);
     const service = new TestReverseEngineeringService({
       run,
       environment: { REA_RIZIN_COMMAND: "rizin", PATH: dirname(executable) },
@@ -103,7 +105,7 @@ posix(
         provider_executable: "rizin",
         provider_executable_path: executable,
         provider_executable_sha256: await digest(),
-        provider_version_banner: "rizin 0.9.1 @ linux-x86-64",
+        provider_version_banner: banner,
       });
     }
     expect(probes(run)).toBe(1);
