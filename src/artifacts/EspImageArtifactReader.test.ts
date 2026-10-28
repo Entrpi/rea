@@ -1,4 +1,4 @@
-import { ESP_IMAGE_INVENTORY_LIMITATION } from "./inventory/reader.js";
+import { ESP_IMAGE_LIMITATIONS } from "../domain/firmware/espImageFacts.js";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -44,7 +44,7 @@ it("inventories segments and signature blocks with root and entry facts", async 
     scope: "container-entries",
     status: "complete",
   });
-  expect(snapshot.limitations).toEqual([ESP_IMAGE_INVENTORY_LIMITATION]);
+  expect(snapshot.limitations).toEqual([ESP_IMAGE_LIMITATIONS.inventoryScope]);
   const root = snapshot.occurrences.find((row) => row.logical_path === ".");
   expect(root).toMatchObject({
     artifact_kind: "container",
@@ -140,7 +140,7 @@ it("reports truncation and undescribed trailing bytes as coverage", async () => 
     throw new Error("Expected partial fixture facts", { cause: decoded.error });
   expect(truncated.limitations).toEqual(
     expect.arrayContaining([
-      ESP_IMAGE_INVENTORY_LIMITATION,
+      ESP_IMAGE_LIMITATIONS.inventoryScope,
       ...decoded.value.limitations,
     ]),
   );
@@ -149,6 +149,7 @@ it("reports truncation and undescribed trailing bytes as coverage", async () => 
   );
   expect(segment).toMatchObject({
     declared_size: 8,
+    limitations: [ESP_IMAGE_LIMITATIONS.segmentEntryTruncated(2, 32, 8)],
     source_location: { offset: 352, length: 8 },
     format_metadata: {
       kind: "esp-image-segment",
@@ -157,7 +158,6 @@ it("reports truncation and undescribed trailing bytes as coverage", async () => 
       data_len: 32,
     },
   });
-  expect(segment?.limitations).not.toHaveLength(0);
   const extended = await scanCanonicalArtifactInventory(
     await writeImage(Buffer.concat([APP, Buffer.from("trailing data")])),
   );

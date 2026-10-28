@@ -16,9 +16,7 @@ import {
   ZIP_NON_ENTRY_LIMITATION,
 } from "../../domain/zipPackageFormat.js";
 import type { StableRegularFileDescriptor } from "../../filesystem/RegularFile.js";
-
-export const ESP_IMAGE_INVENTORY_LIMITATION =
-  "ESP image inventory reads the header-declared segments, checksum, appended SHA-256, descriptor and Secure Boot v2 signature blocks. Segment classification follows ESP-IDF v6.1 should_map and should_load for a cold boot and does not check RAM ranges; signatures are not cryptographically verified, and code is not disassembled.";
+import { ESP_IMAGE_LIMITATIONS } from "../../domain/firmware/espImageFacts.js";
 
 export const createReader = (
   path: string,
@@ -83,7 +81,7 @@ export const inventoryCoverage = (
             ]
           : []),
         ...(reader.format === "esp-image"
-          ? [ESP_IMAGE_INVENTORY_LIMITATION]
+          ? [ESP_IMAGE_LIMITATIONS.inventoryScope]
           : []),
         ...(reader.format === "uimage"
           ? [

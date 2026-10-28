@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
+import { ESP_IMAGE_LIMITATIONS } from "./espImageFacts.js";
+import { ESP_DESCRIPTOR_LIMITATIONS } from "./espImageStructures.js";
 
 import {
   ESP8266_REFUSAL,
@@ -214,7 +216,9 @@ describe("ESP image decoding", () => {
       espImage({ segments: [{ address: 0x4038_0000, data: code }] }),
     );
     expect(decoded.metadata.descriptor).toBeNull();
-    expect(decoded.limitations).not.toHaveLength(0);
+    expect(decoded.limitations).toEqual([
+      ESP_DESCRIPTOR_LIMITATIONS.reservedBytesNotZero,
+    ]);
   });
 
   it("keeps invalid descriptor text unknown", () => {
@@ -227,7 +231,9 @@ describe("ESP image decoding", () => {
       version: null,
       project_name: "rea_esp_fixture",
     });
-    expect(decoded.limitations).not.toHaveLength(0);
+    expect(decoded.limitations).toEqual([
+      ESP_DESCRIPTOR_LIMITATIONS.fieldNotUtf8("version"),
+    ]);
   });
 });
 
@@ -268,7 +274,9 @@ describe("ESP image segment classification", () => {
     expect(
       new Set(decoded.segments.map(({ metadata }) => metadata.classification)),
     ).toEqual(new Set(["unknown"]));
-    expect(decoded.limitations).not.toHaveLength(0);
+    expect(decoded.limitations).toEqual([
+      ESP_IMAGE_LIMITATIONS.unknownChip(0x1f),
+    ]);
   });
 
   it("leaves ESP32-C6 mapping unknown where the bootloader page size decides it", () => {
@@ -294,7 +302,13 @@ describe("ESP image segment classification", () => {
       "unknown",
       "loaded",
     ]);
-    expect(image(bytes).limitations).not.toHaveLength(0);
+    expect(image(bytes).limitations).toEqual([
+      ESP_IMAGE_LIMITATIONS.unclassifiedPages(
+        "esp32c6",
+        0x4220_0000,
+        0x4300_0000,
+      ),
+    ]);
   });
 
   it("derives the ISA from chip_id, not from the series letter", () => {
@@ -326,7 +340,9 @@ describe("ESP image integrity", () => {
     });
     expect(decoded.metadata.appended_sha256.status).toBe("valid");
     expect(decoded.coverage).toBe("complete");
-    expect(decoded.limitations).not.toHaveLength(0);
+    expect(decoded.limitations).toEqual([
+      ESP_IMAGE_LIMITATIONS.checksumMismatch(stored, 0x1cf, computed),
+    ]);
   });
 
   it("reports an appended SHA-256 mismatch", () => {
@@ -342,7 +358,9 @@ describe("ESP image integrity", () => {
         .update(bytes.subarray(0, 464))
         .digest("hex"),
     });
-    expect(decoded.limitations).not.toHaveLength(0);
+    expect(decoded.limitations).toEqual([
+      ESP_IMAGE_LIMITATIONS.digestMismatch(0x1d0),
+    ]);
   });
 
   it("marks an image without a digest", () => {
@@ -376,7 +394,9 @@ describe("ESP image framing and segment limits", () => {
       metadata: { index: 2, header_offset: 344, data_len: 32 },
     });
     expect(decoded.coverage).toBe("unknown");
-    expect(decoded.limitations).not.toHaveLength(0);
+    expect(decoded.limitations).toEqual([
+      ESP_IMAGE_LIMITATIONS.truncatedSegment(2, 32, 0x160, 8),
+    ]);
   });
 
   it("reports a file that ends before a declared segment header", () => {
@@ -389,7 +409,9 @@ describe("ESP image framing and segment limits", () => {
       image_end: null,
     });
     expect(decoded.coverage).toBe("unknown");
-    expect(decoded.limitations).not.toHaveLength(0);
+    expect(decoded.limitations).toEqual([
+      ESP_IMAGE_LIMITATIONS.truncatedSegmentHeaders(4, 2),
+    ]);
   });
 
   it.each([
@@ -412,11 +434,17 @@ describe("ESP image framing and segment limits", () => {
         },
         image_end: null,
       });
-      expect(decoded.limitations).not.toHaveLength(0);
+      expect(decoded.limitations).toEqual([
+        checksumStatus === "unavailable"
+          ? ESP_IMAGE_LIMITATIONS.truncatedBeforeChecksum(463)
+          : ESP_IMAGE_LIMITATIONS.truncatedBeforeDigest(464),
+      ]);
       expect(decoded.coverage).toBe("unknown");
     },
   );
+});
 
+describe("ESP image segment constraints", () => {
   it("reports an unaligned segment length that ESP-IDF rejects", () => {
     const decoded = image(
       espImage({
@@ -437,7 +465,9 @@ describe("ESP image framing and segment limits", () => {
       metadata: { index: 2, data_len: 0 },
     });
     expect(decoded.coverage).toBe("complete");
-    expect(decoded.limitations).not.toHaveLength(0);
+    expect(decoded.limitations).toEqual([
+      ESP_IMAGE_LIMITATIONS.segmentLengthUnaligned(1, 6),
+    ]);
   });
 
   it.each([
@@ -468,7 +498,24 @@ describe("ESP image framing and segment limits", () => {
       });
       expect(decoded.metadata.checksum.status).toBe("unavailable");
       expect(decoded.coverage).toBe("unknown");
-      expect(decoded.limitations).toHaveLength(limited ? 2 : 1);
+      expect(decoded.limitations).toEqual([
+        ...(limited
+          ? [
+              ESP_IMAGE_LIMITATIONS.segmentLengthTooLarge(
+                0,
+                0x100_0000,
+                0x100_0000,
+                target,
+              ),
+            ]
+          : []),
+        ESP_IMAGE_LIMITATIONS.truncatedSegment(
+          0,
+          0x100_0000,
+          0x20,
+          bytes.length - 0x20,
+        ),
+      ]);
     },
   );
 });
@@ -516,7 +563,9 @@ describe("ESP image trailing bytes", () => {
       undescribed_trailing: [{ offset: 96, length: 24 }],
     });
     expect(decoded.coverage).toBe("unknown");
-    expect(decoded.limitations).not.toHaveLength(0);
+    expect(decoded.limitations).toEqual([
+      ESP_IMAGE_LIMITATIONS.undescribedTrailing(24, 1, 0x60),
+    ]);
   });
 
   it("starts an undescribed range at the first byte that is not erased", () => {
