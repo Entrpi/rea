@@ -509,6 +509,11 @@ const declarationsByKind: {
   },
 };
 
+/** Kinds whose declarations artifact comparison compares, in table order. */
+export const COMPARED_FORMAT_METADATA_KINDS = Object.entries(
+  declarationsByKind,
+).flatMap(([kind, entry]) => ("declaration" in entry ? [kind] : []));
+
 /** A declaration that artifact comparison compares within its kind. */
 export interface FormatMetadataDeclaration {
   readonly kind: FormatMetadataKind;

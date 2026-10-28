@@ -49,7 +49,9 @@ const commit = (inventory: ArtifactInventoryResult) => {
 
 const observation = (
   facts: Pick<ArtifactOccurrence, "hash_status"> &
-    Partial<Pick<ArtifactOccurrence, "unpacked" | "format_metadata">>,
+    Partial<
+      Pick<ArtifactOccurrence, "unpacked" | "format_metadata" | "executable">
+    >,
   changedContent = false,
 ) => {
   const source = changedContent
@@ -186,6 +188,7 @@ const recordObservation = (
   record: {
     readonly content?: string;
     readonly encrypted?: boolean;
+    readonly executable?: boolean;
     readonly limitations?: string[];
   } = {},
 ) => {
@@ -222,7 +225,7 @@ const recordObservation = (
     artifact_format: "unknown",
     declared_size: 0,
     compressed_size: null,
-    executable: false,
+    executable: record.executable ?? false,
     encrypted,
     hash_status:
       sha256 !== undefined
@@ -309,6 +312,22 @@ it("retains a changed declaration when content is unavailable", () => {
       { classification: "changed", dimensions: ["metadata", "availability"] },
     ],
   });
+  // Declared dimensions keep the schema order, ahead of availability.
+  expect(
+    compareArtifacts(
+      declared(espImageSegment),
+      observation({
+        hash_status: "unavailable",
+        format_metadata: movedSegment,
+        executable: true,
+      }),
+    ).changes,
+  ).toMatchObject([
+    {
+      classification: "changed",
+      dimensions: ["executable", "metadata", "availability"],
+    },
+  ]);
 });
 
 it.each([
@@ -387,7 +406,7 @@ it("compares node-less records by declaration and keeps content changes", () => 
   ]);
 });
 
-it("compares a node-less record's encryption but not its limitations", () => {
+it("compares a node-less record's occurrence fields but not its limitations", () => {
   // A PYZ namespace record and the reader's caveat for it.
   const namespace: FormatMetadata = {
     ...runtimeOption,
@@ -412,9 +431,46 @@ it("compares a node-less record's encryption but not its limitations", () => {
     }),
   ]);
   expect(result.limitations).toEqual([FORMAT_DECLARATION_UNKNOWN_LIMITATION]);
+  // A record's `executable` marking is a declared field like `encrypted`.
+  expect(
+    compareArtifacts(
+      plain,
+      recordObservation(namespace, { executable: true, limitations: [caveat] }),
+    ).changes,
+  ).toEqual([
+    expect.objectContaining({
+      logical_path: "record",
+      classification: "changed",
+      dimensions: ["executable"],
+    }),
+  ]);
   // Limitations describe the observation, so a caveat alone is no change.
   expect(compareArtifacts(plain, recordObservation(namespace))).toMatchObject({
     status: "unchanged",
     changes: [],
   });
+});
+
+it("does not compare limitation wording beside content", () => {
+  // Readers write no node limitations; a hand-built inventory can.
+  const worded = (limitation: string) => {
+    const inventory = artifactInventoryResultSchema.parse(
+      ARTIFACT_COMPARISON_EXAMPLE.left.normalized_result,
+    );
+    inventory.nodes = inventory.nodes.map((node) => ({
+      ...node,
+      limitations: [limitation],
+    }));
+    inventory.occurrences = inventory.occurrences.map((occurrence) => ({
+      ...occurrence,
+      limitations: [limitation],
+    }));
+    return commit(inventory);
+  };
+  expect(
+    compareArtifacts(
+      worded("Bytes were read."),
+      worded("All bytes were read."),
+    ),
+  ).toMatchObject({ status: "unchanged", changes: [] });
 });

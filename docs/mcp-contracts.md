@@ -1221,8 +1221,9 @@ support for omitted historical values.
 known and differ. If only one value is known, storage comparison is unknown;
 when both are omitted, storage is not compared.
 
-`compare_artifacts` also compares the declarations in `format_metadata` of
-PyInstaller entries, Node SEA members and ESP image segments; each format's
+`compare_artifacts` also compares the declarations in the `format_metadata`
+of PyInstaller entries (`pyinstaller-entry`), Node SEA members
+(`node-sea-entry`) and ESP image segments (`esp-image-segment`); each format's
 guide names the compared fields. A changed declaration is a metadata change,
 including when content is unavailable. A declaration that only one side
 records, or that the other side records as another kind, is unknown and adds a
@@ -1230,13 +1231,35 @@ limitation. Other kinds are not compared: their fields record layout, come
 from the artifact's own bytes, or repeat occurrence fields, except Godot PCK
 source paths, which [Godot PCK archives](godot-pck.md) explains.
 
-Every occurrence records `encrypted`, and `compare_artifacts` reports a
-metadata change when it differs, including when content is unavailable. A
-member that becomes encrypted therefore compares `changed` in `metadata` and
-`availability`, not `unknown`. For a node-less metadata record with a
-compared declaration, only that declaration, the `encrypted` value and any
-recorded ASAR storage decide the comparison. REA does not compare the
-record's unread payload or its limitations, which describe the observation.
+Every occurrence records `entry_kind`, `executable` and `encrypted`, and
+`compare_artifacts` compares them even when content is unavailable. A
+different entry kind or `encrypted` value is a `metadata` change, and a
+different `executable` value is an `executable` change. A symlink's own
+permission bits never mark it `executable`, because running a symlink runs
+its target. When either side's content is unavailable, the change also
+includes `availability`. For example, REA does not read symlink targets, so
+a non-executable file that becomes a symlink compares `changed` in
+`metadata` and `availability`, not `unknown`. Declared sizes do not count
+without content: REA compares observed sizes. For a node-less metadata
+record with a compared declaration, only that declaration, these fields and
+any recorded ASAR storage decide the comparison. Such a record adds
+`availability` only when a declaration is unknown. REA does not compare the
+record's unread payload.
+
+When either side has no content, `compare_artifacts` also compares the
+occurrences' `declared_integrity` claims, which Godot PCK and ASAR readers
+record. Claims of one algorithm that differ declare different content, so the
+path compares `changed` in `metadata` and `availability`; equal claims add no
+change, because REA cannot verify them. With content on both sides, the
+observed bytes decide.
+
+`compare_artifacts` does not compare limitations. They explain what an
+observation could establish, such as a case collision with another
+occurrence or a symlink target that REA did not read, and their wording can
+change between REA versions. A path therefore compares as if its
+limitations were equal, even when a limitation is the only record of a fact,
+such as an ASAR block integrity table. The result repeats each inventory's
+limitations, and occurrence limitations stay in the inventory Evidence.
 
 POSIX letter-colon names such as `a:b` remain valid logical
 names; Windows extraction refuses names its filesystem cannot materialize.

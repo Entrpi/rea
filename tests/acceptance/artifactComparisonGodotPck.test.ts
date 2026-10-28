@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -100,6 +101,62 @@ it("reports a Godot PCK member that becomes encrypted", async () => {
       dimensions: ["metadata", "availability"],
       left_occurrence_id: member(plain).occurrence_id,
       right_occurrence_id: member(encrypted).occurrence_id,
+    },
+  ]);
+});
+
+it("compares encrypted Godot PCK members by their declared MD5", async () => {
+  const { inspect, compare } = await connectPackComparison();
+  // Godot hashes a member's unencrypted bytes, so every export of one script
+  // declares the same MD5 whatever its random IV.
+  const encrypted = (name: string, ciphertext: string, script: string) =>
+    inspect(name, {
+      path: "res://scenes/main.gd",
+      data: ciphertext,
+      flags: 1,
+      md5: createHash("md5").update(script).digest(),
+    });
+  const first = await encrypted("first.pck", "ciphertext A", "extends Node\n");
+  const again = await encrypted("again.pck", "ciphertext B", "extends Node\n");
+  const edited = await encrypted(
+    "edited.pck",
+    "ciphertext C",
+    "extends Sprite2D\n",
+  );
+  const memberChanges = async (left: Evidence, right: Evidence) =>
+    (await compare(left, right)).changes.filter(
+      ({ logical_path }) => logical_path !== ".",
+    );
+
+  // Equal claims are unverified, so they do not establish equality.
+  expect(await memberChanges(first, again)).toMatchObject([
+    {
+      logical_path: "scenes/main.gd",
+      classification: "unknown",
+      dimensions: ["availability"],
+    },
+  ]);
+  // An all-zero MD5 is no claim, and one claim alone proves no change.
+  const unclaimed = await inspect("unclaimed.pck", {
+    path: "res://scenes/main.gd",
+    data: "ciphertext D",
+    flags: 1,
+    md5: Buffer.alloc(16),
+  });
+  expect(member(unclaimed)).not.toHaveProperty("declared_integrity");
+  expect(await memberChanges(first, unclaimed)).toMatchObject([
+    {
+      logical_path: "scenes/main.gd",
+      classification: "unknown",
+      dimensions: ["availability"],
+    },
+  ]);
+  // Claims that differ declare different content.
+  expect(await memberChanges(first, edited)).toMatchObject([
+    {
+      logical_path: "scenes/main.gd",
+      classification: "changed",
+      dimensions: ["metadata", "availability"],
     },
   ]);
 });
