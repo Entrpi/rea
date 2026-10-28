@@ -91,6 +91,63 @@ rea execute-rizin-command ./program iI
 
 Captured stdout and stderr are retained up to a 16 MiB combined limit; `output_truncated` marks output beyond that limit. One-shot commands use the `command_timeout_ms` budget described above. That 16 MiB cap has no runtime override.
 
+### Decoder and map inputs
+
+Four optional inputs select how Rizin decodes the artifact and where it maps
+it. REA passes each one to Rizin before the artifact path:
+
+| Input          | CLI option       | Rizin argument | Example              |
+| -------------- | ---------------- | -------------- | -------------------- |
+| `asm_arch`     | `--asm-arch`     | `-a`           | `arm`, `x86`, `6502` |
+| `asm_bits`     | `--asm-bits`     | `-b`           | `16` for Thumb       |
+| `asm_cpu`      | `--asm-cpu`      | `-e asm.cpu=`  | `cortexm`            |
+| `base_address` | `--base-address` | `-m`           | `0x08000000`         |
+
+Rizin 0.9.1 refuses `-e asm.arch=` and `-e asm.bits=` at startup, and Rizin
+0.7.4 accepts them, so REA uses `-a` and `-b`, which both accept. Rizin applies
+`-e` settings after `-a` and `-b`, so `asm_cpu` applies to the selected arch. `base_address` is the address of file offset 0,
+as in REA's raw-binary inputs: Rizin maps a raw image there. For a format that
+Rizin loads from its headers, such as ELF, Rizin's loader decides how the map
+address applies. Evidence records each input and the complete argument list.
+
+REA checks only the spelling. Arch and CPU names contain letters, digits, `_`,
+`.`, `+` and `-`, and start with a letter or a digit. `asm_bits` is an integer
+from 1 to 64. `base_address` is `0x` followed by 1 to 16 hexadecimal digits.
+Rizin owns the names, and its builds differ: for example, the Homebrew build of
+Rizin 0.9.1 has no `xtensa` or `riscv` plugin, while the official static Linux
+build of Rizin 0.7.4 has both. The commands `e asm.arch=?` and `e asm.cpu=?`
+list what the installed Rizin supports. To use another build, set
+`REA_RIZIN_COMMAND`. When Rizin cannot apply an arch or bits value, it uses
+another value and exits with status 0. Rizin 0.9.1 keeps its default and
+reports the value on stderr. Rizin 0.7.4 reports an unknown arch on stderr, but
+for `arm` it used 16 bits instead of 8 without a message. Both accept any
+`asm.cpu` value. Evidence therefore states that REA does not confirm the
+decoder or the map that Rizin used. To check them, start the command with
+`e asm.arch; e asm.bits; e asm.cpu; oml`.
+
+This call reads a Cortex-M flash dump at its address, in Thumb state:
+
+```sh
+rea execute-rizin-command ./flash.bin "e asm.arch; e asm.bits; oml; pxw 8 @ 0x08000000" --asm-arch arm --asm-bits 16 --asm-cpu cortexm --base-address 0x08000000
+```
+
+Through MCP, the same call is:
+
+```json
+{
+  "path": "/firmware/flash.bin",
+  "command": "e asm.arch; e asm.bits; oml; pxw 8 @ 0x08000000",
+  "asm_arch": "arm",
+  "asm_bits": 16,
+  "asm_cpu": "cortexm",
+  "base_address": "0x08000000"
+}
+```
+
+`pxw 8` prints the initial stack pointer and the Reset vector. The Reset vector
+is a Thumb address with its low bit set. Disassemble the handler at the even
+address, for example `pd 16 @ 0x08000108` for a Reset vector of `0x08000109`.
+
 ## Cutter bridge
 
 Cutter commands use the local REA Python bridge and authenticated loopback messages.

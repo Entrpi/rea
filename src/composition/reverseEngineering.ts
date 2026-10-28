@@ -7,6 +7,7 @@ import {
 } from "../objdump/ObjdumpCommand.js";
 import {
   rizinCommand,
+  rizinCommandLimitations,
   RIZIN_PROVIDER_IDENTITY,
 } from "../rizin/RizinCommand.js";
 import { resolveWindowsProviderExecutable } from "./resolveWindowsProviderExecutable.js";
@@ -32,6 +33,7 @@ export const createReverseEngineeringCommandPort = (
       platform,
     ),
     arguments: rizinCommand(input),
+    limitations: rizinCommandLimitations(input),
     identity: RIZIN_PROVIDER_IDENTITY,
   }),
 });
