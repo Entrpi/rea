@@ -17,6 +17,7 @@ import { artifactExtractionResultSchema } from "../../../src/domain/artifactGrap
 
 // The compiled stdio fixture checks advertised schemas against their dialect and
 // validates actual tool responses, avoiding a second source server module graph.
+// Full-profile retained-view schema work needs the compiled MCP boundary budget.
 it.each(["full", "compact"] as const)(
   "exposes ESP image facts and segment extraction through MCP (%s)",
   async (profile) => {
@@ -27,6 +28,7 @@ it.each(["full", "compact"] as const)(
     ]);
     await writeFile(path, image);
     const { call } = await connectLocalToolsMcp({
+      REA_MCP_TOOL_FAMILIES: "session,artifact,application",
       REA_MCP_INPUT_SCHEMA_PROFILE: profile,
     });
     let outputRoot: string | undefined;
@@ -90,4 +92,5 @@ it.each(["full", "compact"] as const)(
         await rm(outputRoot, { recursive: true, force: true });
     }
   },
+  60_000,
 );

@@ -24,6 +24,7 @@ it.each(["full", "compact"] as const)(
     });
     await writeFile(path, bytes);
     const { call } = await connectLocalToolsMcp({
+      REA_MCP_TOOL_FAMILIES: "session,artifact",
       REA_MCP_INPUT_SCHEMA_PROFILE: profile,
     });
     let outputRoot: string | undefined;
