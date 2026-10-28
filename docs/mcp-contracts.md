@@ -1234,8 +1234,9 @@ when both are omitted, storage is not compared.
 
 `compare_artifacts` also compares the declarations in the `format_metadata`
 of PyInstaller entries (`pyinstaller-entry`), Node SEA members
-(`node-sea-entry`), ESP image segments (`esp-image-segment`) and ESP flash
-partitions (`esp-flash-partition`); each format's
+(`node-sea-entry`), ESP image segments (`esp-image-segment`), ESP flash
+partitions (`esp-flash-partition`) and Intel HEX/S-record regions
+(`hex-record-region`); each format's
 guide names the compared fields. A changed declaration is a metadata change,
 including when content is unavailable. A declaration that only one side
 records, or that the other side records as another kind, is unknown and adds a
