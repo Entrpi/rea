@@ -146,6 +146,18 @@ export const ESP_IMAGE_LIMITATIONS = {
     available: number,
   ): string =>
     `ESP image segment ${String(index)} is truncated: its header declares ${String(declared)} bytes; the file holds ${String(available)}.`,
+  signatureDigestMismatch: (slot: number, offset: number): string =>
+    `Secure Boot v2 signature block in slot ${String(slot)} at offset ${offsetText(offset)} records an image digest that does not match the bytes before its sector.`,
+  invalidSignatureSlot: (slot: number, offset: number): string =>
+    `Secure Boot v2 slot ${String(slot)} at offset ${offsetText(offset)} has the 0xE7 magic but not a matching CRC32 or a complete block; it is not a valid signature block.`,
+  signatureSlotsCut: (fileSize: number, sector: number): string =>
+    `The file ends at ${offsetText(fileSize)} in erased flash, before the Secure Boot v2 signature slots at ${offsetText(sector)} are complete; signature blocks may be missing.`,
+  signatureSectorTruncated: (
+    sector: number,
+    fileSize: number,
+    sectorEnd: number,
+  ): string =>
+    `Secure Boot v2 signature sector at offset ${offsetText(sector)} is truncated: the file ends at ${offsetText(fileSize)}, before ${offsetText(sectorEnd)}.`,
 } as const;
 
 /** Derive chip, classification, integrity, descriptor and coverage facts. */
@@ -452,14 +464,22 @@ const trailingFacts = (
     };
   });
   for (const { index, offset, bytes, kind } of slots) {
-    if (kind === "block")
-      blocks.push({
-        offset,
-        metadata: decodeEspSignatureBlock(bytes, index, observed.signedContent),
-      });
-    else if (kind === "other" && bytes[0] === 0xe7)
+    if (kind === "block") {
+      const metadata = decodeEspSignatureBlock(
+        bytes,
+        index,
+        observed.signedContent,
+      );
+      blocks.push({ offset, metadata });
+      // A definite contradiction, like a checksum mismatch; the signature
+      // itself stays unverified.
+      if (metadata.image_digest_matches === false)
+        limitations.push(
+          ESP_IMAGE_LIMITATIONS.signatureDigestMismatch(index, offset),
+        );
+    } else if (kind === "other" && bytes[0] === 0xe7)
       limitations.push(
-        `Secure Boot v2 slot ${String(index)} at offset ${offsetText(offset)} has the 0xE7 magic but not a matching CRC32 or a complete block; it is not a valid signature block.`,
+        ESP_IMAGE_LIMITATIONS.invalidSignatureSlot(index, offset),
       );
   }
   const sectorEnd = sector + ESP_FLASH_SECTOR_BYTES;
@@ -471,9 +491,7 @@ const trailingFacts = (
     if (undescribed.length > 0 || fileSize >= slotsEnd)
       return { blocks, undescribed, truncated: false };
     // Erased padding cut short may be a signed image that lost its sector.
-    limitations.push(
-      `The file ends at ${offsetText(fileSize)} in erased flash, before the Secure Boot v2 signature slots at ${offsetText(sector)} are complete; signature blocks may be missing.`,
-    );
+    limitations.push(ESP_IMAGE_LIMITATIONS.signatureSlotsCut(fileSize, sector));
     return { blocks, undescribed, truncated: true };
   }
   for (const { offset, bytes, kind } of slots)
@@ -483,7 +501,11 @@ const trailingFacts = (
   add(observed.restFirstUnerased, fileSize);
   if (fileSize < sectorEnd) {
     limitations.push(
-      `Secure Boot v2 signature sector at offset ${offsetText(sector)} is truncated: the file ends at ${offsetText(fileSize)}, before ${offsetText(sectorEnd)}.`,
+      ESP_IMAGE_LIMITATIONS.signatureSectorTruncated(
+        sector,
+        fileSize,
+        sectorEnd,
+      ),
     );
     return { blocks, undescribed, truncated: true };
   }
