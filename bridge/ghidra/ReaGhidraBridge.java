@@ -558,6 +558,12 @@ public final class ReaGhidraBridge extends HeadlessScript {
         String riscvCallingConvention = currentProgram.getOptions(ghidra.program.model.listing.Program.PROGRAM_INFO)
             .getString("REA RISC-V calling convention", null);
         if (riscvCallingConvention != null) result.add("riscv_calling_convention", JsonParser.parseString(riscvCallingConvention));
+        // Written by ReaGhidraDwarfCallingConvention before auto-analysis; REA
+        // requires it exactly when the committed profile names a DWARF prototype.
+        String dwarfCallingConvention = currentProgram.getOptions(ghidra.program.model.listing.Program.PROGRAM_INFO)
+            .getString("REA DWARF calling convention", null);
+        if (dwarfCallingConvention != null)
+            result.add("dwarf_calling_convention", JsonParser.parseString(dwarfCallingConvention));
         return result;
     }
 

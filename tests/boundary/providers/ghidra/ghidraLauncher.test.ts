@@ -203,6 +203,83 @@ describe("Ghidra raw-binary loader", () => {
   });
 });
 
+describe("Ghidra header-selected import with a pinned language", () => {
+  const base = {
+    projectRoot: "/tmp/project",
+    targetPath: "/tmp/firmware.elf",
+    bridgeScriptPath: "/package/bridge/ReaGhidraBridge.java",
+    descriptorPath: "/tmp/session.json",
+    ghidraLogPath: "/tmp/ghidra.log",
+    scriptLogPath: "/tmp/script.log",
+    languageOverride: {
+      languageId: "ARM:LE:32:Cortex",
+      compilerSpecId: "default",
+    },
+  } as const;
+
+  it("imports an M-profile ARM ELF without processor-defined labels", () => {
+    const arguments_ = ghidraHeadlessArguments({
+      ...base,
+      applyProcessorLabels: false,
+    });
+    expectOptions(arguments_, [
+      ["-loader-applyLabels", "false"],
+      ["-processor", "ARM:LE:32:Cortex"],
+      ["-cspec", "default"],
+    ]);
+    // The ELF loader is still selected from the header.
+    expect(arguments_).not.toContain("-loader");
+  });
+
+  it("keeps the loader's label default without the policy", () => {
+    expect(ghidraHeadlessArguments(base)).not.toContain("-loader-applyLabels");
+  });
+
+  it("selects the DWARF prototype before auto-analysis", () => {
+    const arguments_ = ghidraHeadlessArguments({
+      ...base,
+      applyProcessorLabels: false,
+      dwarfCallingConvention: "__stdcall_softfp",
+    });
+    const prepare = arguments_.indexOf("-preScript");
+    expect(arguments_.slice(prepare, prepare + 3)).toEqual([
+      "-preScript",
+      join("/package/bridge", "ReaGhidraDwarfCallingConvention.java"),
+      "__stdcall_softfp",
+    ]);
+    expect(prepare).toBeLessThan(arguments_.indexOf("-postScript"));
+    expect(
+      ghidraHeadlessArguments(base).some((argument) =>
+        argument.endsWith("ReaGhidraDwarfCallingConvention.java"),
+      ),
+    ).toBe(false);
+  });
+
+  it("refuses a DWARF prototype without a pinned language or with an existing project", () => {
+    const { languageOverride: _language, ...unpinned } = base;
+    expect(() =>
+      ghidraHeadlessArguments({
+        ...unpinned,
+        dwarfCallingConvention: "__stdcall_softfp",
+      }),
+    ).toThrow(/applies only to a header-selected import/u);
+    expect(() =>
+      ghidraHeadlessArguments({
+        ...unpinned,
+        existingProject: { programName: "firmware.elf" },
+        dwarfCallingConvention: "__stdcall_softfp",
+      }),
+    ).toThrow(/existing project opens without analysis/u);
+  });
+
+  it("refuses the label policy without a pinned language", () => {
+    const { languageOverride: _language, ...unpinned } = base;
+    expect(() =>
+      ghidraHeadlessArguments({ ...unpinned, applyProcessorLabels: false }),
+    ).toThrow(/requires a header-selected import with a language override/u);
+  });
+});
+
 describe("Ghidra GameCube DOL loader", () => {
   const dolBase = {
     platform: "darwin" as const,

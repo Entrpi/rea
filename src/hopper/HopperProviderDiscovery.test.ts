@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { parseConfig } from "../config/parseConfig.js";
+import { ARM_ELF_HEADER } from "../domain/binaryTarget.fixture.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import { silentLogger } from "../logger.js";
 import { HopperProvider } from "./HopperProvider.js";
@@ -113,26 +114,43 @@ const databaseTarget = (): BinaryTarget => ({
 const executableTarget = (
   format: "mach-o" | "elf" | "pe",
   architecture: "x86" | "x86_64" | "arm" | "arm64",
-): BinaryTarget =>
-  format === "pe"
+): BinaryTarget => {
+  const identity = {
+    path: "/tmp/fixture",
+    sha256: "b".repeat(64),
+    kind: "executable",
+  } as const;
+  if (format === "pe")
+    return {
+      ...identity,
+      format,
+      architecture,
+      availableArchitectures: [architecture],
+      executableRole: "application",
+      managed: false,
+    };
+  if (format !== "elf")
+    return {
+      ...identity,
+      format,
+      architecture,
+      availableArchitectures: [architecture],
+    };
+  return architecture === "arm"
     ? {
-        path: "/tmp/fixture",
-        sha256: "b".repeat(64),
-        kind: "executable",
+        ...identity,
         format,
         architecture,
         availableArchitectures: [architecture],
-        executableRole: "application",
-        managed: false,
+        arm: ARM_ELF_HEADER,
       }
     : {
-        path: "/tmp/fixture",
-        sha256: "b".repeat(64),
-        kind: "executable",
+        ...identity,
         format,
         architecture,
         availableArchitectures: [architecture],
       };
+};
 
 const artifactTarget = (): BinaryTarget => ({
   path: "/tmp/app.asar",

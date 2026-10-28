@@ -24,6 +24,10 @@ import {
   ghidraMipsLanguageOverride,
 } from "./GhidraMipsProfile.js";
 import {
+  ghidraArmLanguageOverride,
+  ghidraArmProfileParameters,
+} from "./GhidraArmProfile.js";
+import {
   ghidraRiscvLanguageOverride,
   ghidraRiscvProfileParameters,
 } from "./GhidraRiscvProfile.js";
@@ -88,6 +92,7 @@ export const ghidraPinnedLanguage = (
 ): GhidraLanguageOverride | undefined =>
   ghidraMipsLanguageOverride(target) ??
   ghidraRiscvLanguageOverride(target) ??
+  ghidraArmLanguageOverride(target) ??
   ghidraPowerPcLanguage(target) ??
   ghidraXtensaLanguage(target);
 
@@ -299,12 +304,16 @@ export const resolveGhidraAnalysisProfile = async (
   const dosCom = target.format === "dos-com";
   const dos = dosMz || dosCom;
   const pinnedLanguage = ghidraPinnedLanguage(target);
-  const callerMaySelectLegacyMipsLanguage =
-    target.architecture === "mips" && isLegacyMipsAdmission(target);
+  // A deliberate override still wins over these pins: PowerPC variants such
+  // as Gekko, and lanes pinned after their targets already loaded under a
+  // caller-selected language (legacy MIPS and M-profile ARM ELF).
+  const callerMaySelectLanguage =
+    target.architecture === "powerpc" ||
+    target.architecture === "arm" ||
+    (target.architecture === "mips" && isLegacyMipsAdmission(target));
   if (
     pinnedLanguage !== undefined &&
-    target.architecture !== "powerpc" &&
-    !callerMaySelectLegacyMipsLanguage &&
+    !callerMaySelectLanguage &&
     languageOverride !== undefined &&
     (languageOverride.languageId !== pinnedLanguage.languageId ||
       (languageOverride.compilerSpecId !== undefined &&
@@ -429,6 +438,7 @@ export const resolveGhidraAnalysisProfile = async (
         ...analyzerParameters,
         ...ghidraMipsProfileParameters(target, languageOverride),
         ...ghidraRiscvProfileParameters(target),
+        ...ghidraArmProfileParameters(target, languageOverride),
         ...ghidraPowerPcProfileParameters(target),
         ...ghidraXtensaProfileParameters(target),
         ...(pspExtension?.ok === true

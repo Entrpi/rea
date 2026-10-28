@@ -103,6 +103,13 @@ const sessionInfoSchema = z
       })
       .strict()
       .optional(),
+    dwarf_calling_convention: z
+      .object({
+        calling_convention: z.string().min(1),
+        status: z.enum(["applied", "not_applicable"]),
+      })
+      .strict()
+      .optional(),
     capabilities: z.array(capabilitySchema),
     target: z
       .object({

@@ -43,6 +43,7 @@ import type {
   UniversalMachOSlice,
 } from "../domain/binaryTargetTypes.js";
 import { err, ok, type Result } from "../domain/result.js";
+import { readArmElfAttributes } from "./ArmElfAttributes.js";
 import { readMipsElfMetadata } from "./MipsElfMetadata.js";
 import { readXtensaElfAbi } from "./XtensaElfMetadata.js";
 import {
@@ -1115,6 +1116,23 @@ const readElfMetadata = async (
         ),
       },
     });
+  // Only a little-endian ELF32 image can select an M-profile ARM lane.
+  if (
+    parsed.value.architecture === "arm" &&
+    parsed.value.arm.elfClass === 32 &&
+    parsed.value.arm.byteOrder === "little"
+  ) {
+    const attributes = await readArmElfAttributes(
+      handle,
+      parsed.value.arm,
+      () => throwIfTargetResolutionCancelled(signal),
+    );
+    if (!attributes.ok) return attributes;
+    return ok({
+      ...parsed.value,
+      arm: { ...parsed.value.arm, attributes: attributes.value },
+    });
+  }
   if (parsed.value.architecture !== "mips" || parsed.value.mips.elfClass !== 32)
     return parsed;
   const declarations = await readMipsElfMetadata(

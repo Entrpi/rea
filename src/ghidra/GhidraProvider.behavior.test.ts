@@ -37,7 +37,11 @@ import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
 import { parseConfig } from "../config/parseConfig.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import { parseExecutableHeader } from "../domain/binaryTarget.js";
-import { elf, thinMach } from "../domain/binaryTarget.fixture.js";
+import {
+  ARM_ELF_HEADER,
+  elf,
+  thinMach,
+} from "../domain/binaryTarget.fixture.js";
 import { GhidraProvider } from "./GhidraProvider.js";
 import type { GhidraTargetSnapshot } from "./GhidraClient.js";
 import type { GhidraProviderClientFactory } from "./GhidraProviderClient.js";
@@ -2936,17 +2940,35 @@ describe("Ghidra PDB coverage", () => {
 const executableTarget = (
   format: "mach-o" | "elf" | "pe",
   architecture: Extract<BinaryTarget, { format: "pe" }>["architecture"],
-): BinaryTarget =>
-  format === "pe"
-    ? peTarget(architecture)
+): BinaryTarget => {
+  if (format === "pe") return peTarget(architecture);
+  const identity = {
+    path: "/tmp/fixture",
+    sha256: "a".repeat(64),
+    kind: "executable",
+  } as const;
+  if (format === "mach-o")
+    return {
+      ...identity,
+      format,
+      architecture,
+      availableArchitectures: [architecture],
+    };
+  return architecture === "arm"
+    ? {
+        ...identity,
+        format,
+        architecture,
+        availableArchitectures: [architecture],
+        arm: ARM_ELF_HEADER,
+      }
     : {
-        path: "/tmp/fixture",
-        sha256: "a".repeat(64),
-        kind: "executable",
+        ...identity,
         format,
         architecture,
         availableArchitectures: [architecture],
       };
+};
 
 const peTarget = (
   architecture: Extract<BinaryTarget, { format: "pe" }>["architecture"],

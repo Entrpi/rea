@@ -172,6 +172,41 @@ describe("Ghidra RISC-V calling-convention report", () => {
   });
 });
 
+describe("Ghidra DWARF calling convention report", () => {
+  it.each(["applied", "not_applicable"])("accepts the %s outcome", (status) => {
+    const report = { calling_convention: "__stdcall_softfp", status };
+    const parsed = parseGhidraSessionInfo(
+      { ...session(), dwarf_calling_convention: report },
+      expected,
+    );
+    if (!parsed.ok) throw parsed.error;
+    expect(parsed.value.dwarf_calling_convention).toEqual(report);
+  });
+  it.each([
+    [
+      "an unknown status",
+      { calling_convention: "__stdcall_softfp", status: "skipped" },
+    ],
+    ["an empty name", { calling_convention: "", status: "applied" }],
+    [
+      "an undeclared field",
+      {
+        calling_convention: "__stdcall_softfp",
+        status: "applied",
+        functions: 1,
+      },
+    ],
+    ["a non-object report", "__stdcall_softfp"],
+  ])("rejects %s", (_label, report) => {
+    expect(
+      parseGhidraSessionInfo(
+        { ...session(), dwarf_calling_convention: report },
+        expected,
+      ).ok,
+    ).toBe(false);
+  });
+});
+
 describe("Ghidra disabled analyzer report", () => {
   const valid = {
     format: "rea-ghidra-disabled-analyzers-v1",
