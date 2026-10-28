@@ -554,6 +554,11 @@ rea compare left.json right.json --record_pairs '[{"left_evidence_id":"ev_<left-
 Migration: replace `rea compare-bundles` with `rea compare`; the former command
 has been removed. The MCP tool remains `compare_bundles`.
 
+`rea compare` compares records by Evidence identity and explicit pairs. It does
+not read artifact contents: the inventories of two builds are unresolved
+records, or one opaque change when you pair them. Use `compare-artifacts`,
+described at the end of this section, to compare their contents.
+
 `--record_pairs` supplies an explicit JSON array of observation pairs, matching
 MCP `compare_bundles.record_pairs`. Pair IDs must exist on their named sides and
 be one-to-one. Without pairs, one-sided membership remains unknown; REA does
