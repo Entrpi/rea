@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { crc32 } from "node:zlib";
 
 import { describe, expect, it } from "vitest";
 import { ESP_IMAGE_LIMITATIONS } from "./espImageFacts.js";
@@ -784,6 +785,25 @@ describe("Secure Boot v2 block layouts and sector bounds", () => {
       image_digest_matches: null,
       public_key_sha256: null,
       signature_status: "unverified",
+    });
+  });
+
+  it("hashes a P-192 key as espsecure does, with its point zero-padded to 64 bytes", () => {
+    // espsecure packs ECDSA blocks as "<BBBx32sB64s64s1031x": a 48-byte P-192
+    // point is zero-padded to 64 bytes, so its signature still starts at 101.
+    const point = Buffer.concat([pattern(48, 7), Buffer.alloc(16)]);
+    const block = signatureBlock("ecdsa-p256", PADDED);
+    block[36] = 1; // CURVE_ID_P192
+    point.copy(block, 37);
+    pattern(64, 8).copy(block, 101); // (r, s), not part of the key
+    block.writeUInt32LE(crc32(block.subarray(0, 1196)), 1196);
+    const metadata = image(Buffer.concat([PADDED, sector([block])]))
+      .signatureBlocks[0]?.metadata;
+    // _digest_sbv2_public_key: SHA-256 of the curve ID and the padded point.
+    expect(metadata).toMatchObject({
+      scheme: "ecdsa",
+      curve_id: 1,
+      public_key_sha256: sha256(Buffer.concat([Buffer.from([1]), point])),
     });
   });
 
