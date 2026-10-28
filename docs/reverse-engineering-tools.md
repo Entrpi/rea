@@ -90,10 +90,12 @@ rea execute-rizin-command ./program iI
 ```
 
 Before a one-shot command, REA resolves the selected executable through `PATH`,
-hashes it, runs that file with `-v` and reads the tool and version from its
-banner. The command then runs the same file. Evidence records the tool and
-version as the provider name and version, and records the executable path, its
-SHA-256 and the banner line in its parameters. A different tool that accepts
+hashes it, runs it with `-v` and reads the tool and version from its banner.
+The command then runs the same path. Evidence records the tool and version as
+the provider name and version, and records the executable path, its SHA-256 and
+the banner line in its parameters. These describe the file at that path when
+REA checked it; they cannot prove the exact bytes executed if the file changes
+before the launch. A different tool that accepts
 the same arguments, such as radare2, still runs: its Evidence names that tool
 and adds a limitation. A probe that fails, times out or prints an unrecognized
 banner leaves the version unknown, and the command still runs; a failed probe's
