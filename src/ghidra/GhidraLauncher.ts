@@ -6,6 +6,7 @@ import {
   type GhidraSeedCommitment,
 } from "./GhidraAnalysisSeeds.js";
 import type { GhidraLanguageOverride } from "../config/ghidraLanguageOverride.js";
+import type { GhidraRiscvCallingConvention } from "./GhidraRiscvProfile.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
 import { mkdir, readFile, realpath } from "node:fs/promises";
 import { basename, dirname, join, posix, win32 } from "node:path";
@@ -260,6 +261,8 @@ export interface GhidraHeadlessLauncherOptions {
   readonly pspExtension?: GhidraPspExtension;
   /** Remap typed float storage for the soft-float o32 ABI after analysis. */
   readonly mipsSoftFloat?: true;
+  /** Apply this committed RISC-V calling-convention policy after analysis. */
+  readonly riscvCallingConvention?: GhidraRiscvCallingConvention;
   /** Spawn seam for provider-boundary lifecycle tests. */
   readonly spawnProcess?: typeof spawnOwnedProviderProcess;
   /** LaunchSupport probe seam for Java-free launcher fixtures. */
@@ -430,6 +433,11 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
         ...(this.options.mipsSoftFloat === undefined
           ? {}
           : { mipsSoftFloat: this.options.mipsSoftFloat }),
+        ...(this.options.riscvCallingConvention === undefined
+          ? {}
+          : {
+              riscvCallingConvention: this.options.riscvCallingConvention,
+            }),
         projectRoot: paths.projectRoot,
         targetPath: session.targetPath,
         ...(existingProject === undefined ? {} : { existingProject }),
@@ -782,6 +790,7 @@ export interface GhidraHeadlessArgumentOptions {
   readonly scriptLogPath: string;
   readonly psp?: true;
   readonly mipsSoftFloat?: true;
+  readonly riscvCallingConvention?: GhidraRiscvCallingConvention;
   readonly dosMz?: true;
   readonly dosCom?: true;
   readonly rawBinary?: GhidraRawBinaryImport;
@@ -807,6 +816,7 @@ type ExistingProjectOptions = Pick<
   | "rawBinary"
   | "languageOverride"
   | "mipsSoftFloat"
+  | "riscvCallingConvention"
   | "seedPath"
   | "disabledAnalyzers"
 > & { readonly analysisSeeds?: GhidraSeedCommitment };
@@ -849,6 +859,10 @@ const validateExistingProjectOptions = (
       throw new Error(
         "MIPS soft-float storage applies only to a fresh import.",
       );
+    if (options.riscvCallingConvention !== undefined)
+      throw new Error(
+        "A RISC-V calling-convention policy applies only to a fresh import.",
+      );
     if (
       options.seedPath !== undefined ||
       options.analysisSeeds !== undefined ||
@@ -880,6 +894,7 @@ export const ghidraHeadlessArguments = (
       options.dosMz === true ||
       options.dosCom === true ||
       options.mipsSoftFloat === true ||
+      options.riscvCallingConvention !== undefined ||
       rawBinary !== undefined ||
       override !== undefined)
   )
@@ -908,6 +923,17 @@ export const ghidraHeadlessArguments = (
   )
     throw new Error(
       "MIPS soft-float storage applies only to a generic MIPS ELF import.",
+    );
+  if (
+    options.riscvCallingConvention !== undefined &&
+    (options.psp === true ||
+      options.mipsSoftFloat === true ||
+      options.dosMz === true ||
+      options.dosCom === true ||
+      rawBinary !== undefined)
+  )
+    throw new Error(
+      "A RISC-V calling-convention policy applies only to a generic RISC-V ELF import.",
     );
   if (
     override !== undefined &&
@@ -1072,6 +1098,16 @@ export const ghidraHeadlessArguments = (
           scriptPath.join(bridgeDirectory, GHIDRA_BRIDGE_SOURCES.mipsSoftFloat),
         ]
       : []),
+    ...(options.riscvCallingConvention === undefined
+      ? []
+      : [
+          "-postScript",
+          scriptPath.join(
+            bridgeDirectory,
+            GHIDRA_BRIDGE_SOURCES.riscvCallingConvention,
+          ),
+          options.riscvCallingConvention,
+        ]),
     "-postScript",
     // Ghidra checks the caller's cwd before scriptPath for a basename. Select
     // the packaged source explicitly so unrelated entries cannot shadow it.
