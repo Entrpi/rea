@@ -187,11 +187,41 @@ posix(
 
 posix.each([
   [
-    "radare2 6.1.8 +0 abi:110 @ darwin-arm_64",
+    // radare2 6.1.8's real first line; later lines are not read.
+    "radare2 6.1.8 +0 abi:110 @ darwin-arm_64\nbirth: git.6.1.8 2026-06-23__11:48:36\ncommit: 6.1.8",
     "radare2 6.1.8 +0 abi:110 @ darwin-arm_64",
     { id: "rizin", name: "radare2", version: "6.1.8" },
     "banner",
     "not Rizin",
+  ],
+  [
+    // Rizin 0.9.1's real banner from Homebrew.
+    "rizin 0.9.1 @ darwin-arm-64, package: 0.9.1_2 (Homebrew)",
+    "rizin 0.9.1 @ darwin-arm-64, package: 0.9.1_2 (Homebrew)",
+    { id: "rizin", name: "Rizin", version: "0.9.1" },
+    "banner",
+    "comes from its -v banner",
+  ],
+  [
+    "Warning: 123 plugins could not be loaded",
+    "Warning: 123 plugins could not be loaded",
+    { id: "rizin", name: "Rizin", version: null },
+    "assumed",
+    RIZIN_VERSION_PROBE.assumedIdentity,
+  ],
+  [
+    "Processing 3 plugins\nrizin 0.9.1 @ linux-x86-64",
+    "Processing 3 plugins",
+    { id: "rizin", name: "Rizin", version: null },
+    "assumed",
+    RIZIN_VERSION_PROBE.assumedIdentity,
+  ],
+  [
+    "rizin 0.9.1",
+    "rizin 0.9.1",
+    { id: "rizin", name: "Rizin", version: null },
+    "assumed",
+    RIZIN_VERSION_PROBE.assumedIdentity,
   ],
   [
     "Usage: tool [options]",

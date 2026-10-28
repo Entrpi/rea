@@ -238,7 +238,7 @@ import { appendFileSync, writeFileSync } from "node:fs";
 const versionProbe = process.argv.includes("-v");
 appendFileSync(process.env.REA_TEST_INVOCATIONS, versionProbe ? "probe\\n" : "command\\n");
 if (versionProbe && process.env.REA_TEST_HANG !== "version probe") {
-  process.stdout.write("rizin 0.0.0 @ test\\n");
+  process.stdout.write("rizin 0.9.1 @ linux-x86-64\\n");
   process.exit(0);
 }
 writeFileSync(process.env.REA_TEST_PROVIDER_PID, String(process.pid));
