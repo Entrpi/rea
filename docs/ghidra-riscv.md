@@ -358,14 +358,21 @@ REA_RISCV_OBJDUMP=/path/to/llvm/bin/llvm-objdump \
 npm run verify:ghidra:riscv
 ```
 
-The lane builds four `ET_EXEC` fixtures from committed freestanding C and
+The lane builds seven `ET_EXEC` fixtures from committed freestanding C and
 assembly sources:
 
 - RV32 and RV64 double-float builds (`rv{32,64}imafdc`) of `riscv.c`.
 - An RV32 soft-float build of `riscv-float-abi.c` with ESP32-C3's
-  `-march=rv32imc_zicsr_zifencei -mabi=ilp32`, typed with DWARF.
-- The same objects linked with `--strip-all`. Every allocated section keeps
-  its address and bytes, so the typed build's symbols locate its functions.
+  `-march=rv32imc_zicsr_zifencei -mabi=ilp32`, and an RV32 single-float build
+  with ESP32-H4's `-march=rv32imafc_zicsr_zifencei -mabi=ilp32f`, both typed
+  with DWARF.
+- The same objects of each linked with `--strip-all`. Every allocated section
+  keeps its address and bytes, so the typed build's symbols locate its
+  functions.
+- The single-float build with `REA_RISCV_ABI_UNMODELLED`, which adds a
+  function that passes and returns a three-field structure, a `_Float16`
+  function, and a function-pointer type that passes the three-field
+  structure.
 
 Independent LLVM readelf observations establish ELF declarations,
 `Tag_RISCV_arch` and symbol addresses. Public CLI and stdio MCP workflows verify
@@ -374,30 +381,40 @@ committed lane and policy, decoded probe bytes, global data, and direct calls.
 They validate advertised MCP output schemas and both JSON representations, save
 and reopen snapshots, and check unchanged source bytes and owned cleanup.
 
-For the soft-float builds the lane also checks:
+For the soft- and single-float builds the lane also checks:
 
-- `fence.i` and `csrr` decode, as ESP32-C3's Zifencei and Zicsr declare.
-- An LLVM objdump reading of `rea_riscv_abi_caller` finds each call-site word
-  where the [ilp32 policy](#ilp32) puts it: an unaligned `double` in `a1`/`a2`,
-  the `a7`/stack split, two floats in an integer pair, a large structure and a
-  `long double` passed by reference (the pointed-to copies hold the source
-  values), aligned variadic pairs, and an indirect call.
-- `inspect_native_api` reports `__rea_ilp32` with exactly that storage for the
-  typed build, and one integer word per location for the stripped build.
-- The caller's pseudocode passes the source constants through that storage and
-  names no floating-point register.
-- Retained Evidence states the prototype outcome; the stripped build has no
+- `fence.i` and `csrr` decode, as ESP32-C3's and H4's Zifencei and Zicsr
+  declare, and `fmv.w.x` and `fmv.x.w` decode in the single-float build.
+- An LLVM objdump reading of the callers finds each call-site word, in integer
+  and float registers and on the stack, where the [ilp32](#ilp32) or
+  [ilp32f](#ilp32f) policy puts it. The ilp32 calls cover an unaligned `double`
+  in `a1`/`a2`, the `a7`/stack split, two floats in an integer pair, a large
+  structure and a `long double` passed by reference (the pointed-to copies hold
+  the source values), aligned variadic pairs, and an indirect call. The ilp32f
+  calls add floats in `fa0`–`fa7`, two-float and float-and-integer structures
+  both ways round, float registers running out, and an indirect call with a
+  float-and-integer structure.
+- `inspect_native_api` reports the policy's prototype with exactly that storage
+  for the typed builds, and for the stripped builds the storage Ghidra infers
+  from the registers each function reads.
+- The callers' pseudocode passes the source constants through that storage. In
+  the soft-float builds it names no floating-point register; in the typed
+  single-float build it names no register value that a prototype leaves out.
+- Retained Evidence states the prototype outcome; the stripped builds have no
   function definitions.
+- The unmodelled build is admitted by its headers, then refused over MCP and
+  the CLI with the bridge's reason, which names its three signatures.
 
 Header-mutated copies check admission. The RV32 double-float image relabelled as
-soft-float (`e_flags` `0x1`), refused before this lane, is admitted through the
-soft-float lane over CLI and MCP. The soft-float image relabelled as
-single-float, RV64 soft-float, and unsupported high bits are refused with their
-reasons. Failures retain the diagnostic workspace; successful runs remove it and
-report the observed process lineage.
+soft-float (`e_flags` `0x1`) or single-float (`0x3`), refused before these
+lanes, is admitted through them over CLI and MCP. The soft-float image
+relabelled as single-float lacks F and is refused; RV64 soft- and single-float
+and unsupported high bits are refused with their reasons. Failures retain the
+diagnostic workspace; successful runs remove it and report the observed process
+lineage.
 
 Module tests cover admission, malformed headers and attribute sections, the
 handshake, and the conformance checks against recorded LLVM and Ghidra output.
 Call-graph completeness, string inventories, dynamic linkage, Andes or RVE/TSO
-images, big-endian targets, ilp32f images, and decoding beyond the probes are
-**not** established by this lane.
+images, big-endian targets, ilp32f images from GCC or ESP-IDF, and decoding
+beyond the probes are **not** established by this lane.
