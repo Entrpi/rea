@@ -265,7 +265,10 @@ This is decision D1 of the embedded-target work, raised in
   the Ghidra profile, launcher, bridge and load-image attestation, and
   snapshots.
 - **Costs of change.** Code: renaming an input is an alias with a deprecation
-  period; remapping a variant is one table row. Compatibility: the `segments`
+  period; remapping a variant or adding an M profile is one table row. Every
+  row is an ARM M profile, and the base requirement, Reset derivation and label
+  policy hold for all of them; a variant of another family would first make
+  those per-row properties of the table. Compatibility: the `segments`
   shape and `raw_load` are permanent once released, so changes ship as
   `version: 2`. Their variant and instruction-set values are closed sets, so a
   version that predates a new value refuses the Evidence or snapshot instead of
@@ -346,8 +349,9 @@ exercised.
 
 - Headers are not discovered from file bytes. REA does not guess load
   addresses, profiles, vector-table locations, or memory maps.
-- Big-endian ARM and processor variants other than the ARM M profiles are
-  unsupported. m68k is the only big-endian family.
+- Big-endian ARM is unsupported, and m68k is the only big-endian family.
+  `architecture_variant` names only the ARM M profiles; no other processor of a
+  family, such as the 65C02 or ColdFire, can be selected.
 - An M-profile load maps one segment: the file at its base. SRAM, peripheral and
   system blocks are not created, and only the Reset vector is read. Ghidra's
   processor-defined vector labels are not applied, so other vectors are neither
