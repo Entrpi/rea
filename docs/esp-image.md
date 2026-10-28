@@ -112,7 +112,10 @@ A `--ram-only-header` image puts RAM segments first, so its app descriptor is
 not in segment 0 and its role is unknown. `mmu_page_size` keeps ESP-IDF's
 name and value: the MMU page size as a base-2 logarithm, as
 `esp_app_desc_t` declares it, so `16` means 64 KiB. It is `0` in images built
-before ESP-IDF v5.4.
+before ESP-IDF v5.4. `spi_flash_mode` is the next byte, which ESP-IDF v6.1
+names, kept as stored and not interpreted; releases that reserve it leave it
+`0`. A file that ends inside the app descriptor's reserved tail still yields
+every field; the segment's truncation is reported as usual.
 
 ## Segments
 

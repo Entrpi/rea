@@ -22,6 +22,8 @@ export const ESP_APP_DESC_BYTES = 256;
 export const ESP_SIGNATURE_BLOCK_BYTES = 1216;
 const ERASED = 0xff;
 const APP_DESC_MAGIC = 0xabcd_5432;
+/** `esp_app_desc_t` through `spi_flash_mode`; REA does not read the reserved tail. */
+const APP_DESC_FIELD_BYTES = 182;
 const BOOTLOADER_DESC_MAGIC = 0x50;
 const BOOTLOADER_DESC_BYTES = 80;
 const SIGNATURE_MAGIC = 0xe7;
@@ -74,7 +76,7 @@ export const cString = (bytes: Uint8Array): string | null => {
 /** How a descriptor REA could not read is reported; tests compare with these. */
 export const ESP_DESCRIPTOR_LIMITATIONS = {
   fieldNotUtf8: (field: string): string =>
-    `ESP image descriptor field ${field} is not valid UTF-8; its value is omitted.`,
+    `ESP image descriptor field ${field} is not valid UTF-8; its text is unknown.`,
   reservedBytesNotZero:
     "ESP image segment 0 begins with the bootloader descriptor magic 0x50, but its reserved bytes are not zero; it is not read as an esp_bootloader_desc_t.",
 } as const;
@@ -96,7 +98,8 @@ export const decodeEspDescriptor = (
       limitations.push(ESP_DESCRIPTOR_LIMITATIONS.fieldNotUtf8(field));
     return value;
   };
-  if (bytes.length >= ESP_APP_DESC_BYTES && u32(bytes, 0) === APP_DESC_MAGIC)
+  // A file that ends in the reserved tail still holds every field.
+  if (bytes.length >= APP_DESC_FIELD_BYTES && u32(bytes, 0) === APP_DESC_MAGIC)
     return {
       kind: "app",
       offset,
@@ -110,6 +113,7 @@ export const decodeEspDescriptor = (
       min_efuse_blk_rev_full: u16(bytes, 176),
       max_efuse_blk_rev_full: u16(bytes, 178),
       mmu_page_size: bytes[180] ?? 0,
+      spi_flash_mode: bytes[181] ?? 0,
     };
   if (
     bytes.length < BOOTLOADER_DESC_BYTES ||

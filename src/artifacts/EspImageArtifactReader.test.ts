@@ -1,10 +1,10 @@
+import { ESP_IMAGE_LIMITATIONS } from "../domain/firmware/espImageFacts.js";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { expect, it, vi } from "vitest";
 
 import { EspImageArtifactReader } from "./EspImageArtifactReader.js";
-import { ESP_IMAGE_LIMITATIONS } from "../domain/firmware/espImageFacts.js";
 import { ArtifactResourceScope } from "./ArtifactResourceScope.js";
 import type { ArtifactEntry } from "./ArtifactReader.js";
 import { extractArtifact } from "./extraction/ArtifactExtraction.js";
@@ -25,8 +25,6 @@ import {
 import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
 import { scanCanonicalArtifactInventory } from "../../tests/fixtures/artifactInventory.js";
 import { awaitAcknowledgement } from "../../tests/fixtures/lifecycleAcknowledgement.js";
-
-const INVENTORY_LIMITATION = ESP_IMAGE_LIMITATIONS.inventoryScope;
 
 const APP = espImage({ segments: ESP32C3_APP_SEGMENTS });
 // An erased slot between two blocks must not hide the later block.
@@ -53,7 +51,7 @@ it("inventories segments and signature blocks with root and entry facts", async 
     scope: "container-entries",
     status: "complete",
   });
-  expect(snapshot.limitations).toEqual([INVENTORY_LIMITATION]);
+  expect(snapshot.limitations).toEqual([ESP_IMAGE_LIMITATIONS.inventoryScope]);
   const root = snapshot.occurrences.find((row) => row.logical_path === ".");
   expect(root).toMatchObject({
     artifact_kind: "container",
@@ -136,19 +134,36 @@ it("inventories segments and signature blocks with root and entry facts", async 
 });
 
 it("reports truncation and undescribed trailing bytes as coverage", async () => {
+  const bytes = APP.subarray(0, 360);
   const truncated = await scanCanonicalArtifactInventory(
-    await writeImage(APP.subarray(0, 360)),
+    await writeImage(bytes),
   );
   expect(truncated.manifest.root_format).toBe("esp-image");
   expect(truncated.coverage.status).toBe("unknown");
-  expect(truncated.limitations).toContain(
-    ESP_IMAGE_LIMITATIONS.truncatedSegment(2, 32, 0x160, 8),
+  const decoder = espImageDecoding.createEspImageDecoder(bytes.length);
+  decoder.write(bytes);
+  const decoded = decoder.finish();
+  if (!decoded.ok)
+    throw new Error("Expected partial fixture facts", { cause: decoded.error });
+  expect(truncated.limitations).toEqual(
+    expect.arrayContaining([
+      ESP_IMAGE_LIMITATIONS.inventoryScope,
+      ...decoded.value.limitations,
+    ]),
   );
-  expect(
-    truncated.occurrences.find((row) => row.logical_path === "segment-02.bin"),
-  ).toMatchObject({
+  const segment = truncated.occurrences.find(
+    (row) => row.logical_path === "segment-02.bin",
+  );
+  expect(segment).toMatchObject({
     declared_size: 8,
     limitations: [ESP_IMAGE_LIMITATIONS.segmentEntryTruncated(2, 32, 8)],
+    source_location: { offset: 352, length: 8 },
+    format_metadata: {
+      kind: "esp-image-segment",
+      index: 2,
+      header_offset: 344,
+      data_len: 32,
+    },
   });
   const extended = await scanCanonicalArtifactInventory(
     await writeImage(Buffer.concat([APP, Buffer.from("trailing data")])),

@@ -268,6 +268,11 @@ export const espAppDescriptorSchema = z.strictObject({
    * 0 in images built before ESP-IDF v5.4.
    */
   mmu_page_size: uint8,
+  /**
+   * The byte ESP-IDF v6.1 names `spi_flash_mode`, as stored; REA does not
+   * interpret it. Releases that reserve this byte leave it zero.
+   */
+  spi_flash_mode: uint8,
 });
 
 /** `esp_bootloader_desc_t` fields, as ESP-IDF names them. */
