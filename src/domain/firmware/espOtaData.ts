@@ -68,23 +68,41 @@ export const decodeEspOtaRecord = (
   };
 };
 
-export const ESP_OTA_SELECTION_ASSUMPTIONS = [
-  "Records are used as written: the bootloader may first mark a pending-verify record aborted when app rollback is enabled.",
+const RECORDS_ASSUMPTION =
+  "Records are used as written: the bootloader may first mark a pending-verify record aborted when app rollback is enabled.";
+/** What a derived selection leaves out, whatever selected it. */
+const BOOT_ASSUMPTIONS = [
   "Anti-rollback, which compares the app's secure_version with eFuse, is not applied.",
   "The selected app is not checked for a loadable image; the bootloader falls back to other partitions when it fails to load or is not declared.",
   "Factory-reset and test-app GPIO holds and a wake from deep sleep, which can override the selection, are not applied.",
 ] as const;
 
-export interface EspOtaSelection {
+/**
+ * The branch of `bootloader_utility_get_selected_boot_partition` that
+ * selects the app: `no-otadata` for a table without an otadata partition,
+ * `none` for its INVALID_INDEX, after which the bootloader resets, and
+ * `unknown` when the dump lacks a record the bootloader reads.
+ */
+export type EspBootSelectionBasis =
+  | "otadata"
+  | "factory-fallback"
+  | "ota_0-fallback"
+  | "no-otadata"
+  | "none"
+  | "unknown";
+
+export interface EspBootSelection {
+  readonly basis: EspBootSelectionBasis;
   /** The record the bootloader reads as active: the higher valid `ota_seq`. */
   readonly active_record: 0 | 1 | null;
   /** `(ota_seq - 1) % ota_app_count`, the bootloader's slot arithmetic. */
   readonly slot: number | null;
   /** The table index of the selected app; null when none is declared. */
   readonly partition_index: number | null;
-  /** The bootloader's branch; `none` is its INVALID_INDEX, which resets. */
-  readonly basis: "otadata" | "factory-fallback" | "ota_0-fallback" | "none";
+  /** What the derivation leaves out; empty when nothing is selected. */
   readonly assumptions: readonly string[];
+  /** Rollback, anti-rollback and load fallback decide it at boot. */
+  readonly running_partition: "unknown";
 }
 
 /** `bootloader_common_ota_select_invalid`, which does not check the CRC. */
@@ -93,47 +111,72 @@ const unusable = ({ ota_seq, ota_state }: EspOtaRecord): boolean =>
 
 /**
  * Derive the app partition the bootloader would select, as
- * `bootloader_utility_get_selected_boot_partition` does without app
- * rollback or anti-rollback:
+ * `select_partition_number` and `bootloader_utility_get_selected_boot_partition`
+ * do without app rollback or anti-rollback:
+ * - a table `esp_partition_table_verify` rejects (an MD5 mismatch or a
+ *   second MD5 entry): none, because loading it fails and the bootloader
+ *   resets;
+ * - no otadata partition, or one at offset 0: the factory index
+ *   (`no-otadata`), whether or not a factory app is declared;
  * - an otadata partition smaller than two sectors: none, because
- *   `read_otadata` fails and the bootloader resets;
- * - both records unusable, or no OTA app: the factory app when one is
- *   declared, else boot index 0 (`ota_0`);
+ *   `read_otadata` fails;
+ * - no OTA app, or both records unusable: the factory app when one is
+ *   declared, else boot index 0 (`ota_0`); without an OTA app the records
+ *   do not matter;
  * - otherwise the valid record with the higher `ota_seq` (record 0 on a
  *   tie), whose slot is `(ota_seq - 1) % ota_app_count`;
  * - no valid record, as after a CRC mismatch: the factory index, whether
  *   or not a factory app is declared.
- * Unknown (null) when the dump lacks a record the bootloader would read.
+ * `unknown` when the dump lacks a record the bootloader would read.
  */
-export const selectEspOtaSlot = (
-  records: readonly EspOtaRecord[],
+export const selectEspBootPartition = (
   boot: EspBootPartitions,
-  otadataSize: number,
-): EspOtaSelection | null => {
-  const assumptions = [...ESP_OTA_SELECTION_ASSUMPTIONS];
+  otadata:
+    | {
+        readonly offset: number;
+        readonly size: number;
+        readonly records: readonly EspOtaRecord[];
+      }
+    | undefined,
+  tableRejected = false,
+): EspBootSelection => {
   const selection = (
-    basis: EspOtaSelection["basis"],
-    fields: Partial<Omit<EspOtaSelection, "basis" | "assumptions">> = {},
-  ): EspOtaSelection => ({
+    basis: EspBootSelectionBasis,
+    fields: Partial<
+      Pick<EspBootSelection, "active_record" | "slot" | "partition_index">
+    > = {},
+  ): EspBootSelection => ({
+    basis,
     active_record: null,
     slot: null,
     partition_index: null,
     ...fields,
-    basis,
-    assumptions,
+    assumptions:
+      basis === "none" || basis === "unknown"
+        ? []
+        : basis === "no-otadata"
+          ? [...BOOT_ASSUMPTIONS]
+          : [RECORDS_ASSUMPTION, ...BOOT_ASSUMPTIONS],
+    running_partition: "unknown",
   });
-  const factory = selection("factory-fallback", {
-    partition_index: boot.factory?.index ?? null,
-  });
-  if (otadataSize < ESP_OTA_DATA_MIN_BYTES) return selection("none");
-  if (records.length < 2) return null;
-  if (records.every(unusable) || boot.otaAppCount === 0)
-    return boot.factory !== undefined
+  const factoryIndex = { partition_index: boot.factory?.index ?? null };
+  if (tableRejected) return selection("none");
+  // The bootloader takes an otadata partition at offset 0 for none.
+  if (otadata === undefined || otadata.offset === 0)
+    return selection("no-otadata", factoryIndex);
+  const { records, size } = otadata;
+  if (size < ESP_OTA_DATA_MIN_BYTES) return selection("none");
+  const factory = selection("factory-fallback", factoryIndex);
+  const fallback =
+    boot.factory !== undefined
       ? factory
       : selection("ota_0-fallback", {
           slot: 0,
           partition_index: boot.otaSlots.get(0)?.index ?? null,
         });
+  if (boot.otaAppCount === 0) return fallback;
+  if (records.length < 2) return selection("unknown");
+  if (records.every(unusable)) return fallback;
   const valid = records.filter(({ valid }) => valid);
   const [first, second] = valid;
   const active =

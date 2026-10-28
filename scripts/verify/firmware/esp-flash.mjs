@@ -198,7 +198,7 @@ const defaultLayout = async (report) => {
   assert.equal(appFacts(rea, "ota_1").status, "erased");
   await assertOtaAgrees("c3 slot 0", file, rea);
   assert.deepEqual(
-    [rea.root.otadata.selected.slot, rea.root.otadata.selected.basis],
+    [rea.root.boot_selection.slot, rea.root.boot_selection.basis],
     [0, "otadata"],
   );
   const extraction = await assertExtraction("c3", file, rea);
@@ -207,8 +207,8 @@ const defaultLayout = async (report) => {
   await otatool(file, 0, ["switch_ota_partition", "--slot", "1"]);
   const switched = await inspect(file);
   await assertOtaAgrees("c3 slot 1", file, switched);
-  assert.equal(switched.root.otadata.selected.slot, 1);
-  assert.equal(switched.root.otadata.running_partition, "unknown");
+  assert.equal(switched.root.boot_selection.slot, 1);
+  assert.equal(switched.root.boot_selection.running_partition, "unknown");
   // Erased records leave the bootloader's factory fallback.
   await otatool(file, 0, ["erase_otadata"]);
   const erased = await inspect(file);
@@ -218,8 +218,8 @@ const defaultLayout = async (report) => {
   );
   assert.deepEqual(
     [
-      erased.root.otadata.selected.basis,
-      erased.root.otadata.selected.partition_index,
+      erased.root.boot_selection.basis,
+      erased.root.boot_selection.partition_index,
     ],
     ["factory-fallback", factory?.format_metadata.index],
   );
@@ -253,6 +253,18 @@ const primaryEntries = async (report) => {
   );
   const extraction = await assertExtraction("primary", file, rea);
   await assertTableAgrees("primary", rea, extraction);
+  // Without otadata the bootloader selects the factory index.
+  const factory = rea.inventory.occurrences.find(
+    ({ format_metadata: m }) => m?.label === "factory",
+  );
+  assert.deepEqual(
+    [
+      rea.root.otadata,
+      rea.root.boot_selection.basis,
+      rea.root.boot_selection.partition_index,
+    ],
+    [null, "no-otadata", factory?.format_metadata.index],
+  );
   report.cases.push({
     name: "primary.bin",
     partitions: extraction.artifacts.length - 2,
@@ -327,6 +339,11 @@ const esp32Origin = async (report) => {
     "esp-image",
     "no origin, no layout",
   );
+  // The table at file offset 0x7000 shows where the dump was read from.
+  assert.deepEqual(guessed.root.flash_dump, {
+    flash_offset: 0x1000,
+    table_file_offset: 0x7000,
+  });
   const flags = [
     "--target-format",
     "esp-flash-image",
@@ -357,11 +374,13 @@ const damaged = async (report) => {
   assert.equal(appFacts(rea, "ota_0").image.checksum.status, "valid");
   await writeFile(path("truncated.bin"), bytes.subarray(0, 0x4_0000));
   const cut = await inspect(path("truncated.bin"));
-  assert.equal(cut.inventory.coverage.status, "unknown");
-  assert.deepEqual(
-    cut.root.partitions_outside_dump.map(({ label }) => label),
-    ["ota_1", "keys"],
-  );
+  // Partitions past the end of the file are entries holding no bytes.
+  assert.equal(cut.inventory.coverage.status, "complete");
+  assert.deepEqual(cut.root.partitions_outside_dump, []);
+  const empty = cut.inventory.occurrences
+    .filter(({ declared_size: size }) => size === 0)
+    .map(({ format_metadata: m }) => m?.label);
+  assert.deepEqual(empty, ["keys", "ota_1"]);
   assert.ok(
     cut.inventory.occurrences.some(
       ({ logical_path }) => logical_path === "partitions/factory.bin",
@@ -369,7 +388,7 @@ const damaged = async (report) => {
   );
   report.cases.push(
     { name: "corrupt.bin", factory: "invalid" },
-    { name: "truncated.bin", outside: ["ota_1", "keys"] },
+    { name: "truncated.bin", without_bytes: empty },
   );
 };
 

@@ -1,11 +1,20 @@
 import type { EspImageMetadata } from "../domain/artifactFormatMetadata.js";
+import { espChipForId } from "../domain/firmware/espChips.js";
+import {
+  espFlashDumpOrigin,
+  type EspFlashDumpOrigin,
+} from "../domain/firmware/espFlashLocation.js";
 import {
   createEspImageDecoder,
   type EspImageFailure,
 } from "../domain/firmware/espImage.js";
 import type { EspImage } from "../domain/firmware/espImageFacts.js";
-import { ESP_SIGNATURE_BLOCK_BYTES } from "../domain/firmware/espImageStructures.js";
+import {
+  ESP_SIGNATURE_BLOCK_BYTES,
+  offsetText,
+} from "../domain/firmware/espImageStructures.js";
 import { ArtifactReaderFailure } from "./ArtifactReader.js";
+import { readEspFlashRange } from "./EspFlashRegionReads.js";
 import {
   PositionalArtifactReader,
   type PositionalArtifactEntries,
@@ -80,14 +89,54 @@ export class EspImageArtifactReader extends PositionalArtifactReader {
       } satisfies PositionalArtifactEntry;
       entries.push(entry);
     }
-    this.#metadata = image.metadata;
+    const dump = await this.#flashDump(image, signal);
+    this.#metadata = {
+      ...image.metadata,
+      flash_dump:
+        dump === undefined
+          ? null
+          : {
+              flash_offset: dump.flashOffset,
+              table_file_offset: dump.tableFileOffset,
+            },
+    };
+    const limitations = [
+      ...image.limitations,
+      ...(dump === undefined ? [] : [flashDumpLimitation(image, dump)]),
+    ];
     return {
       entries,
       coverage:
-        image.coverage === "unknown" || image.limitations.length > 0
-          ? { status: image.coverage, limitations: [...image.limitations] }
+        image.coverage === "unknown" || limitations.length > 0
+          ? { status: image.coverage, limitations }
           : undefined,
     };
+  }
+
+  /**
+   * Whether this image is the bootloader at the start of a flash dump read
+   * from a later flash address. An app carries `esp_app_desc_t` and is not.
+   */
+  async #flashDump(
+    image: EspImage,
+    signal?: AbortSignal,
+  ): Promise<EspFlashDumpOrigin | undefined> {
+    const chip = espChipForId(image.metadata.header.chip_id);
+    if (
+      chip === undefined ||
+      chip.romBootloaderOffset === 0 ||
+      image.metadata.descriptor?.kind === "app"
+    )
+      return undefined;
+    this.assertOpen(signal);
+    const { handle, initial } = await this.verifyCarrier(signal);
+    const context = { handle, fileSize: initial.size, signal };
+    return espFlashDumpOrigin(
+      (position, length) => readEspFlashRange(context, position, length),
+      initial.size,
+      // A truncated image has no end, so no table can follow it.
+      { chip, fileOffset: 0, end: image.metadata.image_end ?? initial.size },
+    );
   }
 
   /** Stream the carrier once, stopping when later bytes cannot matter. */
@@ -114,6 +163,12 @@ export class EspImageArtifactReader extends PositionalArtifactReader {
     return image.value;
   }
 }
+
+const flashDumpLimitation = (
+  image: EspImage,
+  dump: EspFlashDumpOrigin,
+): string =>
+  `This file looks like a flash dump read from flash ${offsetText(dump.flashOffset)}, not one ESP image: its ${image.metadata.chip?.target ?? "ESP"} image at file offset 0 is where the ROM loads the bootloader from ${offsetText(dump.flashOffset)}, and a partition table sits at file offset ${offsetText(dump.tableFileOffset)}, which is flash 0x8000 from that origin. Reopen it with format esp-flash-image and flash_offset ${offsetText(dump.flashOffset)}.`;
 
 const decodeFailure = (failure: EspImageFailure): ArtifactReaderFailure =>
   failure.kind === "unsupported"

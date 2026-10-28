@@ -45,7 +45,11 @@ refuses two kinds of dump before looking for a table:
   bootloader at the start of a dump read from `0x1000`. The dump's origin
   is not the flash address REA assumed, given or default, and a table found
   there would place every partition at the wrong file offset; pass the
-  `flash_offset` where the dump starts.
+  `flash_offset` where the dump starts. When a partition table sits where
+  the image's own ROM offset puts `0x8000`, after the image's segments, the
+  refusal names that offset.
+  Without a selected format such a dump opens as its bootloader image, whose
+  [ESP image](esp-image.md) facts say how to reopen it.
 - an ESP8266 image at a ROM offset. ESP8266 dumps can hold the same table
   format, and they keep the [ESP image](esp-image.md) reader's ESP8266
   refusal.
@@ -87,8 +91,10 @@ The root `format_metadata` (`esp-flash-image`) records:
   (`default`, `caller` or `scan`), the partition count and the MD5 `status`
   (`valid`, `invalid` or `absent`) with the stored and computed digests;
 - `apps`: ESP image facts for each app partition the dump holds;
-- `otadata`: the OTA records and the derived selection;
-- `partitions_outside_dump`: declared partitions with no bytes in the file;
+- `otadata`: the otadata partition's records, or null without one;
+- `boot_selection`: the app the bootloader would select, for every table;
+- `partitions_outside_dump`: declared partitions that begin before the
+  dump's first byte, which have no entry;
 - `undescribed`: ranges outside every region, each from a byte that is not
   erased flash to the end of its gap.
 
@@ -113,26 +119,61 @@ UTF-8), `label_hex` (the label's bytes when it is not UTF-8, else null),
 encryption stores the partition; it does not establish that the dump's
 bytes are ciphertext.
 
+Each partition entry also records where the bytes the dump holds are
+written, relative to the partition's start: `written_offset`, the first
+byte that is not erased flash (`0xFF`), `written_end`, just past the last
+such byte, and `written_bytes`, how many bytes are not `0xFF`. A partition
+erased throughout has null offsets and `written_bytes` `0`; a partition the
+file holds none of has all three null. The range bounds the written
+bytes and does not say whether erased flash lies between them; extract the
+partition to read them.
+
 ESP-IDF 5.3 and later may declare primary `bootloader` and `partition_table`
 entries over the bootloader region and the table sector. They are
 partitions like any other, whose bytes are also `bootloader.bin` and
 `partition-table.bin`, and they are exempt from the rule that partitions
 follow the table, as in `gen_esp32part.py`.
 
-A partition that the file holds only in part is the bytes the file holds,
-with a limitation. One unreadable partition does not hide the others:
-partitions outside the dump, before its first byte or overlapping another
-are each reported while the rest stay readable.
+Every partition from the dump's first byte on is an entry holding the bytes
+the file has. One that the file holds only in part, as when an `esptool
+merge-bin` dump ends inside its last partition, has an entry limitation that
+gives the size the table declares; one that lies past the end of the file is
+an entry with no bytes and a limitation, and has no image facts. A partition
+that begins before the dump's first byte has no entry and is listed in
+`partitions_outside_dump`. One unreadable partition does not hide the
+others: partitions outside the dump or overlapping another are each reported
+while the rest stay readable.
 
 ### App partitions and the bootloader
 
-Each app partition and the bootloader region carry ESP image `facts`:
+Each app partition and the bootloader region carry their entry's `path`
+and ESP image `facts`:
 `status` is `esp-image`, `erased` (the image header bytes are erased flash,
 as in an empty OTA slot) or `unrecognized` (ciphertext or other data). For an
 image they hold the [ESP image](esp-image.md) root facts, `segments`,
 `signature_blocks`, `coverage` and `limitations`, with offsets relative to
 the region. Extract a partition and inspect it as an ESP image for its
 segments as entries.
+
+The summary view (`inspect_artifact` with `detail: "summary"`, or the
+inventory summary of `inspect_analysis_view`) reports the root facts under
+their own kind, `esp-flash-image-summary`, and gives each of these images a
+`summary` instead of its `facts`: `status`, `chip`, `entry_addr`,
+`segment_count`, `load_ranges` (the load address, declared length and
+classification of each segment that is mapped, loaded or unclassified),
+`signature_block_count`, the `descriptor` kind with the fields that tell
+builds apart (an app's `project_name`, `version`, `idf_ver`,
+`secure_version` and `app_elf_sha256`; a bootloader's `version`, `idf_ver`
+and `secure_version`), the `checksum` and `appended_sha256` statuses,
+`coverage` and `limitations`. The default complete detail keeps the full
+facts, every segment included, and the summary's `inventory_evidence_ids`
+name the Evidence that holds them.
+
+`erased` is the bootloader's view: with no image header at the start of the
+slot, it finds no app there. An erased slot can still hold data further in,
+even a complete app image. When it does, its entry's `written_offset` and
+`written_end` say where, and a limitation says that the slot holds bytes the
+bootloader does not read; REA does not look for images in them.
 
 ### OTA data
 
@@ -145,8 +186,11 @@ record the partition and the dump hold: its `ota_seq`, `seq_label`,
 `ota_seq` seeded with `0xFFFFFFFF`) and whether the bootloader would treat
 it as valid.
 
-`selected` is derived as `bootloader_utility_get_selected_boot_partition`
-does without app rollback or anti-rollback. `basis` names its branch:
+### Boot selection
+
+`boot_selection` is present for every table. It is derived as
+`bootloader_utility_get_selected_boot_partition` does without app rollback
+or anti-rollback, and `basis` names its branch:
 
 - `otadata`: the valid record with the higher `ota_seq` (record 0 on a tie)
   selects slot `(ota_seq - 1) % ota_app_count`, indexed by OTA subtype;
@@ -154,27 +198,48 @@ does without app rollback or anti-rollback. `basis` names its branch:
   a factory app is declared; or records are set but none is valid, as after
   a CRC mismatch, which selects the factory index whether or not a factory
   app is declared;
-- `ota_0-fallback`: no record is usable and no factory app is declared, so
-  the bootloader selects boot index 0;
-- `none`: the otadata partition is smaller than two 4 KiB sectors, so the
-  bootloader cannot read it and resets without selecting an app.
+- `ota_0-fallback`: no record is usable, or the table has no OTA app, and no
+  factory app is declared, so the bootloader selects boot index 0;
+- `no-otadata`: the table declares no otadata partition, or one at offset 0,
+  which the bootloader takes for none, so it selects the factory index, as in
+  the common factory-only layout;
+- `none`: the bootloader rejects the table, for an MD5 mismatch or a second
+  MD5 entry, or cannot read an otadata partition smaller than two 4 KiB
+  sectors, and resets without selecting an app;
+- `unknown`: the dump lacks an otadata record the bootloader reads.
 
-`partition_index` is null when the table declares no partition for the
-selected slot or fallback; the bootloader then tries the other apps.
-`selected` is null when the dump lacks a record the bootloader reads. Its
-`assumptions` list what the derivation leaves out, among them factory-reset
-and test-app GPIO holds and a wake from deep sleep. `running_partition` is
-always `unknown`: at boot the bootloader may first mark a pending-verify
-record aborted, check the app's secure version against eFuse, and fall back
-to another partition when an app fails to load.
+Without an OTA app the records do not matter, so a dump that lacks them
+still selects a fallback. REA does not compare the partitions with the
+flash size in the bootloader header, which the bootloader also checks.
+
+`active_record` and `slot` are set for `otadata` and `slot` for
+`ota_0-fallback`. `partition_index` is null when the table declares no
+partition for the selected slot or fallback; the bootloader then tries the
+other apps. `assumptions` list what the derivation leaves out: records used
+as written (for the branches that read them), anti-rollback, load fallback,
+and factory-reset and test-app GPIO holds and a wake from deep sleep; they
+are empty for `none` and `unknown`. `running_partition` is always
+`unknown`: at boot the bootloader may first mark a pending-verify record
+aborted, check the app's secure version against eFuse, and fall back to
+another partition when an app fails to load.
 
 ## Coverage and extraction
 
 Erased flash (`0xFF`) between regions is described. In a gap between
 regions, the first byte that is not erased starts an `undescribed` range to
 the end of the gap, and makes coverage `unknown`; the rest of that range is
-not examined. Coverage is also `unknown` when a partition is truncated or
-outside the dump, or when no bootloader is located.
+not examined. Coverage is also `unknown` when no bootloader is located, or
+when a declared partition begins before the dump's first byte, since it has
+no entry. A partition cut short or left out by the end of the file does not
+make it `unknown`: its entry holds the bytes the file has, none for one past
+the end, and its limitation says what the file lacks. Coverage describes the
+inventory of the file, not the observation of every declared flash byte.
+
+So artifact comparison classifies every partition entry of two dumps. Where
+both lack the same bytes, as two `merge-bin` dumps of the same layout do,
+the entries are equal; a dump against a longer one reports each partition
+it cuts short or lacks as `changed`, and that entry's limitation says the
+file did not hold the bytes.
 
 `extract_artifact` writes every entry as an ordinary file, `nvs_keys`
 partitions included. On a device without flash encryption an `nvs_keys`
@@ -216,8 +281,9 @@ offsets, single images that are not scanned, overlaps, primary entries,
 truncation and partitions outside the dump, index names for unsafe labels,
 repeated declarations, the otadata states and records, and each branch of
 the bootloader's selection. CLI and stdio MCP tests exercise the inputs and
-their identity and extraction, and an MCP `compare_artifacts` test compares
-partition declarations, labels that are not UTF-8 included.
+their identity and extraction. MCP `compare_artifacts` tests compare
+partition declarations, labels that are not UTF-8 included, two dumps that
+end inside their last partition, and such a dump against a full one.
 
 The optional real lane builds its dumps with esptool and ESP-IDF's own tools:
 
@@ -246,20 +312,24 @@ otatool's own OTA logic runs unchanged. The lane then checks:
   source is unchanged;
 - a table with the primary `bootloader` and `partition_table` entries that
   `--primary-bootloader-offset` fills, read with complete coverage and no
-  overlap or misplacement limitation;
+  overlap or misplacement limitation; it has no otadata, so its boot
+  selection is `no-otadata` with the factory app;
 - the relocated table, found by scanning and named with
   `partition_table_offset`, and the dump written from `0x1000`, read with
-  `flash_offset` and, without it, left an ESP image;
-- an app with a flipped byte beside valid partitions, and a truncated dump.
+  `flash_offset` and, without it, left an ESP image whose `flash_dump`
+  names `flash_offset` `0x1000`;
+- an app with a flipped byte beside valid partitions, and a truncated dump,
+  read with complete coverage and its missing partitions as entries with no
+  bytes.
 
 The lane ran on macOS arm64 with Node 24.22.1, Homebrew Clang and LLD 21.1.8
 and ESP-IDF v5.5.2's `gen_esp32part.py`, `otatool.py` and `parttool.py`,
 once with esptool v5.6.0 and once with 4.12.0. Its `gen_esp32part.py` is
 identical to v6.1's, and its otatool and parttool differ only in import style
 and esptool command spelling. All checks passed in both runs. With v5.6.0 and
-the build already cached, the run took 19.6 s elapsed, 14.7 s user CPU and
-5.1 s system CPU under `/usr/bin/time -l`; the largest single process peaked
-at a 256 MiB resident set, and the combined peak of all processes was not
+the build already cached, the run took 21.8 s elapsed, 15.9 s user CPU and
+5.7 s system CPU under `/usr/bin/time -l`; the largest single process peaked
+at a 258 MiB resident set, and the combined peak of all processes was not
 measured.
 
 The lane does not establish:

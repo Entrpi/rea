@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
-const uint32 = z.number().int().min(0).max(0xffff_ffff);
+export const uint32 = z.number().int().min(0).max(0xffff_ffff);
 
 /** Parsed source fields owned by the PCK adapter, independent of content hashes. */
 export const godotPckMetadataSchema = z.strictObject({
@@ -127,7 +127,7 @@ export const nodeSeaEntryDeclaration = (
   metadata: z.infer<typeof nodeSeaEntryMetadataSchema>,
 ) => ({ role: metadata.role, source_path: metadata.source_path });
 
-const uint8 = z.number().int().min(0).max(0xff);
+export const uint8 = z.number().int().min(0).max(0xff);
 const uint16 = z.number().int().min(0).max(0xffff);
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/u);
 const byteRange = z.strictObject({ offset, length: offset });
@@ -140,7 +140,7 @@ const espChipFactsSchema = z.strictObject({
 });
 
 /** `esp_app_desc_t` fields, as ESP-IDF names them; strings stop at NUL. */
-const espAppDescriptorSchema = z.strictObject({
+export const espAppDescriptorSchema = z.strictObject({
   kind: z.literal("app"),
   offset,
   secure_version: uint32,
@@ -157,7 +157,7 @@ const espAppDescriptorSchema = z.strictObject({
 });
 
 /** `esp_bootloader_desc_t` fields, as ESP-IDF names them. */
-const espBootloaderDescriptorSchema = z.strictObject({
+export const espBootloaderDescriptorSchema = z.strictObject({
   kind: z.literal("bootloader"),
   offset,
   secure_version: uint8,
@@ -215,6 +215,17 @@ export const espImageMetadataSchema = z.strictObject({
       espAppDescriptorSchema,
       espBootloaderDescriptorSchema,
     ])
+    .nullable(),
+  /**
+   * Set when the file is a flash dump read from a later flash address: this
+   * image is not an app, its chip's ROM loads the bootloader from
+   * `flash_offset`, and a partition table sits at `table_file_offset`, where
+   * that origin puts the default `0x8000`. Reopen the file as
+   * `esp-flash-image` with that `flash_offset`. Null otherwise, and in the
+   * nested facts of a flash layout.
+   */
+  flash_dump: z
+    .strictObject({ flash_offset: uint32, table_file_offset: offset })
     .nullable(),
 });
 export type EspImageMetadata = z.infer<typeof espImageMetadataSchema>;
@@ -290,12 +301,24 @@ export const espFlashPartitionMetadataSchema = z.strictObject({
   readonly: z.boolean(),
   /** Flag bits other than `encrypted` and `readonly`, which ESP-IDF ignores. */
   unknown_flags: uint32,
+  /**
+   * Observed in the bytes the dump holds, from the partition's start: the
+   * first byte that is not 0xFF and just past the last, null when every byte
+   * is erased, and how many bytes are not 0xFF. All null for a partition the
+   * dump holds none of.
+   */
+  written_offset: uint32.nullable(),
+  written_end: uint32.nullable(),
+  written_bytes: uint32.nullable(),
 });
 export type EspFlashPartitionMetadata = z.infer<
   typeof espFlashPartitionMetadataSchema
 >;
 
-/** What a partition entry declares; its index is layout. */
+/**
+ * What a partition entry declares; its index is layout, and the written
+ * fields are observed from its bytes, which content comparison covers.
+ */
 export const espFlashPartitionDeclaration = (
   metadata: EspFlashPartitionMetadata,
 ) => ({
@@ -311,7 +334,7 @@ export const espFlashPartitionDeclaration = (
 });
 
 /** ESP image facts for a region of a dump; offsets are relative to the region. */
-const espFlashImageFactsSchema = z.strictObject({
+export const espFlashImageFactsSchema = z.strictObject({
   /** An ESP image, erased flash, or bytes that are not one, such as ciphertext. */
   status: z.enum(["esp-image", "erased", "unrecognized"]),
   image: espImageMetadataSchema.nullable(),
@@ -349,9 +372,13 @@ export const espFlashImageMetadataSchema = z.strictObject({
   }),
   /** From the bootloader's `chip_id`; null without a located bootloader. */
   chip: espChipFactsSchema.nullable(),
-  /** The image at its chip's ROM offset, through the partition table. */
+  /**
+   * The image at its chip's ROM offset, through the partition table; `path`
+   * is its entry.
+   */
   bootloader: z
     .strictObject({
+      path: z.string(),
       flash_address: uint32,
       region_size: offset,
       facts: espFlashImageFactsSchema,
@@ -374,11 +401,18 @@ export const espFlashImageMetadataSchema = z.strictObject({
         .nullable(),
     }),
   }),
-  /** Declared partitions with no bytes in the dump, which have no entry. */
+  /**
+   * Declared partitions that begin before the dump's first byte, which have
+   * no entry. A partition past the dump's end is an entry with no bytes.
+   */
   partitions_outside_dump: z.array(espFlashPartitionMetadataSchema),
-  /** ESP image facts for each app partition the dump holds. */
+  /** ESP image facts for each app partition the dump holds, by its entry. */
   apps: z.array(
-    z.strictObject({ partition_index: uint8, facts: espFlashImageFactsSchema }),
+    z.strictObject({
+      path: z.string(),
+      partition_index: uint8,
+      facts: espFlashImageFactsSchema,
+    }),
   ),
   /** The otadata partition the bootloader uses: the last one declared. */
   otadata: z
@@ -386,30 +420,34 @@ export const espFlashImageMetadataSchema = z.strictObject({
       partition_index: uint8,
       /** The records the dump holds, at most one per sector. */
       records: z.array(espOtaRecordSchema).max(2),
-      /**
-       * Derived from both records under the stated assumptions; null when
-       * the dump lacks one. `partition_index` is null when the table
-       * declares no partition for the selected slot or fallback, and `none`
-       * is the bootloader's INVALID_INDEX, after which it resets.
-       */
-      selected: z
-        .strictObject({
-          active_record: z.union([z.literal(0), z.literal(1)]).nullable(),
-          slot: uint8.nullable(),
-          partition_index: uint8.nullable(),
-          basis: z.enum([
-            "otadata",
-            "factory-fallback",
-            "ota_0-fallback",
-            "none",
-          ]),
-          assumptions: z.array(z.string()),
-        })
-        .nullable(),
-      /** Rollback, anti-rollback and load fallback decide it at boot. */
-      running_partition: z.literal("unknown"),
     })
     .nullable(),
+  /**
+   * The app the bootloader would select, derived for every table under the
+   * stated assumptions. `basis` names the branch: `otadata`,
+   * `factory-fallback` and `ota_0-fallback` from the otadata records,
+   * `no-otadata` for a table without otadata (the factory index), `none`
+   * for the bootloader's INVALID_INDEX, after which it resets, and
+   * `unknown` when the dump lacks a record the bootloader reads.
+   * `partition_index` is null when the table declares no partition for the
+   * selected slot or fallback.
+   */
+  boot_selection: z.strictObject({
+    basis: z.enum([
+      "otadata",
+      "factory-fallback",
+      "ota_0-fallback",
+      "no-otadata",
+      "none",
+      "unknown",
+    ]),
+    active_record: z.union([z.literal(0), z.literal(1)]).nullable(),
+    slot: uint8.nullable(),
+    partition_index: uint8.nullable(),
+    assumptions: z.array(z.string()),
+    /** Rollback, anti-rollback and load fallback decide it at boot. */
+    running_partition: z.literal("unknown"),
+  }),
   /**
    * Ranges outside every described region, each from a byte that is not
    * erased flash to the end of its gap.
