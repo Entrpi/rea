@@ -37,7 +37,7 @@ export const identifyRizinTool = (
   };
 };
 
-/** Identify the selected tool; the service reuses a completed probe per launch path and digest. */
+/** Identify the selected tool; the service probes before every command. */
 export const RIZIN_VERSION_PROBE: ProviderVersionProbe = {
   arguments: ["-v"],
   identify: identifyRizinTool,

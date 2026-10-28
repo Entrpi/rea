@@ -109,14 +109,11 @@ where `stdout_invalid_utf8` and `stderr_invalid_utf8` mark output that was not
 valid UTF-8 and so holds replacement characters.
 Each call's lookup, hash and probe use that call's `command_timeout_ms` budget
 and cancellation; a lookup or hash that reaches the deadline ends the call
-without running the command. For each resolved path, REA keeps the latest
-probe whose outcome describes the file (a banner, a non-zero exit, termination
-by a signal, or output that is not valid UTF-8) for the life of the server
-process and reuses it while the SHA-256 matches. A new SHA-256 replaces it, and
-a later failure never replaces a successful reading of the same file. A probe
-that timed out is not reused, because its timeout reflects only that call's
-deadline; neither is a cancelled probe or one whose output was not fully
-collected.
+without running the command. REA probes before every command and reuses no
+reading: a launcher, such as a version-manager shim, keeps its path and SHA-256
+while the tool it runs changes, so only the call's own probe describes the tool
+that answers. Each call therefore launches the executable twice, the probe and
+then the command.
 
 Captured stdout and stderr are retained up to a 16 MiB combined limit; `output_truncated` marks output beyond that limit. One-shot commands use the `command_timeout_ms` budget described above. That 16 MiB cap has no runtime override. A typed failure's `captured_output` marks a stream that held invalid UTF-8 with `stdout_invalid_utf8` or `stderr_invalid_utf8`.
 
