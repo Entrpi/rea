@@ -15,9 +15,25 @@ snapshot parser and a separate optional annotation extension. Check the
 [release boundary](installation.md#released-package-and-main) when using npm.
 
 See [import language and analysis seeds](installation.md#ghidra-import-language-and-analysis-seeds)
-to override the header-detected language or seed analysis. An override that conflicts with a fixed raw, DOS, PSP, MIPS, RISC-V or GameCube DOL import
-is a configuration error naming the conflicting settings. An override still
-wins over the [M-profile ARM ELF](ghidra-arm.md) pin. It does not make an
+to override the header-detected language or seed analysis. What an override does
+to a lane's pinned language depends on why the lane pins it:
+
+- A pin that only replaces Ghidra's header-based default yields to an explicit
+  override. [PowerPC ELF](ghidra-ppc.md#bound-language),
+  [legacy MIPS](ghidra-mips.md#admission-boundary) and
+  [M-profile ARM ELF](ghidra-arm.md#language-override) images are imported in
+  the language you set, and the profile records
+  `language_selection: configured-v1` instead of the pin. An override that
+  names the pinned language keeps the lane.
+- A pin that is a lane's admission condition refuses a different override, as
+  for [RISC-V](ghidra-riscv.md#why-the-language-is-pinned), the other MIPS
+  lanes, and the fixed raw, DOS, PSP and GameCube DOL imports. The refusal is a
+  configuration error naming the conflicting settings.
+
+A lane's pin changes a session's identity only where it changes the import. A
+lane added for targets that already loaded therefore leaves the profile of a
+different override as it was before the lane: under one, the M-profile ARM ELF
+profile carries none of the lane's parameters. An override does not make an
 otherwise admitted target unsupported; REA preserves the requested settings.
 An inaccessible language
 catalog remains a read failure; it does not prove that a configured language is
