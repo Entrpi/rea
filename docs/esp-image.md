@@ -48,11 +48,11 @@ show all of these; the file name does not matter:
 Later segments, the checksum and the digest are integrity facts. A truncated
 download is still an ESP image, with its integrity reported as unavailable.
 
-| Input                                               | Outcome                                                          |
-| --------------------------------------------------- | ---------------------------------------------------------------- |
-| ESP8266 image (v1 or v3): same magic, 8-byte header | Refused: "ESP8266 images are not detected automatically…"        |
-| Flash-encrypted image (ciphertext)                  | Not recognized: the bytes carry no magic. Unknown, not malformed |
-| ESP8266 v2 image (magic `0xEA`)                     | Not recognized                                                   |
+| Input                                               | Outcome                                                           |
+| --------------------------------------------------- | ----------------------------------------------------------------- |
+| ESP8266 image (v1 or v3): same magic, 8-byte header | Refused: "REA reads an ESP8266 image only when the caller names…" |
+| Flash-encrypted image (ciphertext)                  | Not recognized: the bytes carry no magic. Unknown, not malformed  |
+| ESP8266 v2 image (magic `0xEA`)                     | Not recognized                                                    |
 
 An ESP8266 image has its first segment header at offset 8, and that segment
 loads into ESP8266 DRAM, IRAM (Arduino's eboot links at `0x4010F000`) or the
@@ -234,7 +234,8 @@ table, apps and data follow as undescribed bytes.
 An ESP8266 image shares the `0xE9` magic, and its 8-byte header does not name
 the chip. esptool reads such a file as an ESP8266 image for `--chip esp8266`.
 Without `--chip`, esptool v5.6.0 `image-info` falls back to ESP8266 when byte
-23 is not 0 or 1 or byte 12 is not a known chip ID, a guess REA does not make.
+23 is not 0 or 1 or byte 12 is not a known chip ID (`_parse_image_info_header`
+in `cmds.py`), a guess REA does not make.
 Name the chip with the explicit format `esp8266-image`:
 
 ```sh
@@ -243,8 +244,8 @@ rea extract-artifact ./0x00000.bin --target-format esp8266-image --json
 ```
 
 For MCP, pass `format: "esp8266-image"` to `open_binary`, then call
-`inspect_artifact` or `extract_artifact`. The format is target identity, so
-snapshots and Evidence record it.
+`inspect_artifact` or `extract_artifact`. Evidence records the format as its
+subject's `format`.
 
 REA then reads the file as esptool v5.6.0's `ESP8266ROMFirmwareImage` does,
 the layout esptool calls version 1: the 8-byte header, the header-declared
@@ -262,8 +263,10 @@ The header bytes have the same offsets as in an ESP32-family image, but
 ESP8266 codes `spi_size` differently (esptool `ESP8266ROM.FLASH_SIZES`):
 `0` is 512 KB, `1` 256 KB, `2` 1 MB, `3` 2 MB, `4` 4 MB, `5` 2 MB-c1,
 `6` 4 MB-c1, `8` 8 MB and `9` 16 MB. `spi_mode` and `spi_speed` use the
-ESP32-family codes. The image has no extended header, appended SHA-256,
-descriptor or signature sector, so these facts are absent, not unknown.
+ESP32-family codes. The version 1 layout has no extended header, appended
+SHA-256, descriptor or signature sector, so the metadata has no fields for
+them. REA does not identify or verify an ESP8266 digest, such as the one
+esptool appends to a version 3 image.
 
 Segments are entries named as for ESP32-family images, with
 `esp-image-segment` metadata, and compare the same way. Their
@@ -286,8 +289,8 @@ is read in this layout, as esptool `--chip esp8266` reads it, and its extended
 header becomes the first segment header; the segment warnings then show the
 mismatch. An image from esptool `elf2image --version 3` for ESP8266 has the
 same 8-byte header with its flash segments first, and esptool v5.6.0 appends
-a SHA-256 to it. REA reports those 32 bytes as undescribed trailing bytes,
-because version 1 has no digest. A whole flash dump opened this way is
+a SHA-256 to it. REA reports those bytes as undescribed trailing bytes, from
+the first byte that is not `0xFF`, because version 1 has no digest. A whole flash dump opened this way is
 read as the image at offset 0, followed by undescribed bytes.
 
 ## Limits
@@ -368,14 +371,13 @@ starts. The lane removes its workspace only after every tree has stopped and
 keeps it when that cleanup cannot be confirmed.
 
 The lane ran on macOS arm64 with Node 24.22.1, Homebrew Clang and LLD 21.1.8,
-and `xtensa-esp32-elf-gcc` 14.2.0 (crosstool-NG esp-14.2.0_20251107). With
-esptool and espsecure 4.12.0, every check passed for all 13 images, including
-the ESP8266 reads. That complete run, including every esptool call, took
-28.9 s elapsed, 21.3 s user CPU and 7.5 s system CPU under `/usr/bin/time -l`
-with the REA build cached. The largest single process peaked at a 258 MiB
-resident set; the combined peak of all processes was not measured. An earlier
-run with v5.6.0, before the ESP8266 reads were added, passed every other check
-in 21.7 s elapsed.
+and `xtensa-esp32-elf-gcc` 14.2.0 (crosstool-NG esp-14.2.0_20251107), once
+with esptool and espsecure v5.6.0 and once with 4.12.0. All checks passed for
+all 13 images in both runs, including the ESP8266 reads. With v5.6.0 the
+complete run, including every esptool call, took 31.4 s elapsed, 23.7 s user
+CPU and 8.7 s system CPU under `/usr/bin/time -l` with the REA build cached.
+The largest single process peaked at a 261 MiB resident set; the combined peak
+of all processes was not measured.
 
 The lane does not establish:
 

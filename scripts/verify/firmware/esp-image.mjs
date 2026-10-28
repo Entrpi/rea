@@ -391,7 +391,7 @@ await withVerifierCleanup(async () => {
     path("esp8266-v3.bin"),
     esp8266App,
   ]);
-  const unnamed = /ESP8266 images are not detected automatically/u;
+  const unnamed = /REA reads an ESP8266 image only when the caller names/u;
   const v3Oracle = await imageInfo(path("esp8266-v3.bin"), "esp8266");
   assert.ok((v3Oracle.segments[0]?.address ?? 0) >= 0x4020_0000);
   assert.match((await inspect(path("esp8266-v3.bin"))).refused ?? "", unnamed);
@@ -414,10 +414,21 @@ await withVerifierCleanup(async () => {
   const v3 = await inspect(path("esp8266-v3.bin"), ESP8266_SELECTION);
   assertEsp8266Agrees("esp8266-v3.bin", v3Oracle, v3);
   const v3Bytes = await readFile(path("esp8266-v3.bin"));
-  assert.deepEqual(v3.root.undescribed_trailing, [
-    { offset: v3.root.image_end, length: 32 },
-  ]);
   assert.equal(v3Bytes.length, v3.root.image_end + 32);
+  // Undescribed bytes start at the digest's first byte that is not erased.
+  const digest = v3Bytes.subarray(v3.root.image_end);
+  const unerased = digest.findIndex((byte) => byte !== 0xff);
+  assert.deepEqual(
+    v3.root.undescribed_trailing,
+    unerased < 0
+      ? []
+      : [
+          {
+            offset: v3.root.image_end + unerased,
+            length: digest.length - unerased,
+          },
+        ],
+  );
   assert.ok(
     createHash("sha256")
       .update(v3Bytes.subarray(0, v3.root.image_end))

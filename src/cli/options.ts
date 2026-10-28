@@ -1,7 +1,9 @@
 import { z } from "incur";
 
 import {
+  CALLER_SELECTED_ROOT_FORMATS,
   executableFormatHintSchema,
+  type CallerSelectedRootFormat,
   type ExecutableFormatHint,
 } from "../domain/dosCom.js";
 import type { BinaryArchitecture } from "../domain/binaryTargetTypes.js";
@@ -38,7 +40,7 @@ export const snapshotSelectionOption = z
  * images are archives, so the artifact commands select them instead.
  */
 export const formatSelectionOption = executableFormatHintSchema
-  .exclude(["esp8266-image"])
+  .exclude([...CALLER_SELECTED_ROOT_FORMATS])
   .optional()
   .describe(
     "Explicit interpretation: dos-com or raw-binary (headerless), or gamecube-dol (GameCube/Wii DOL, never auto-detected); omission preserves header-based detection",
@@ -69,7 +71,7 @@ export interface NativeOpenCliFlags {
   readonly snapshot?: string | undefined;
   readonly provider?: AnalysisProviderSelector | undefined;
   readonly "target-format"?:
-    | Exclude<ExecutableFormatHint, "esp8266-image">
+    | Exclude<ExecutableFormatHint, CallerSelectedRootFormat>
     | undefined;
   readonly architecture?: BinaryArchitecture | undefined;
   readonly "entry-point"?: string | undefined;

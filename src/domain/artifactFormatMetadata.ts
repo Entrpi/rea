@@ -323,8 +323,9 @@ export type EspImageMetadata = z.infer<typeof espImageMetadataSchema>;
 
 /**
  * Facts of an image the caller named an ESP8266 image, read in esptool's v1
- * layout: no extended header, digest, descriptor or signature follows the
- * 8-byte header. `header` is observed; the checksum status and the
+ * layout, which has no extended header, digest, descriptor or signature;
+ * later bytes, such as the SHA-256 esptool appends to a version 3 image, are
+ * undescribed. `header` is observed; the checksum status and the
  * trailing-byte ranges are derived.
  */
 export const esp8266ImageMetadataSchema = z.strictObject({

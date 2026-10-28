@@ -1,4 +1,5 @@
 import type { AnalysisSettingsReader } from "../domain/analysisSettings.js";
+import { callerSelectedRootFormat } from "../domain/dosCom.js";
 import { runtimeAsarHeaderAdmission } from "../config/runtimeAnalysisSettings.js";
 import { artifactTargetRefusal } from "../domain/apple/artifactTargetApplicability.js";
 import { bindArtifactFileCleanup } from "./ArtifactFileOperation.js";
@@ -332,7 +333,6 @@ class ArtifactClient implements AnalysisClient {
                 : undefined,
             selectedPath: this.target.artifactSelectedPath,
             inputFormat: this.target.format,
-            selectedRootFormat: selectedRootFormat(this.target),
             outputRoot: parsed.output_root,
             environment: this.environment,
             asarHeaderAdmission: runtimeAsarHeaderAdmission(
@@ -543,18 +543,12 @@ class ArtifactClient implements AnalysisClient {
         this.environment,
         this.settings,
       ),
-      selectedRootFormat: selectedRootFormat(this.target),
+      selectedRootFormat: callerSelectedRootFormat(this.target.format),
       ...(options?.signal === undefined ? {} : { signal: options.signal }),
       integrity: parsed.integrity_policy,
     });
   }
 }
-
-/** A target format the caller named, which inventory must not reclassify. */
-const selectedRootFormat = (
-  target: BinaryTarget,
-): "esp8266-image" | undefined =>
-  target.format === "esp8266-image" ? target.format : undefined;
 
 const isArtifactOperation = (
   operation: AnalysisOperation,

@@ -336,7 +336,6 @@ it("extracts byte-exact ESP8266 segments", async () => {
     const extracted = await extractArtifact({
       inputPath: path,
       inputFormat: "esp8266-image",
-      selectedRootFormat: "esp8266-image",
       outputRoot: join(directory, "out"),
       environment: process.env,
       integrityPolicy: "fail",

@@ -36,7 +36,6 @@ import type { StableRegularFileDescriptor } from "../filesystem/RegularFile.js";
 type EspImageReaderFormat = "esp-image" | "esp8266-image";
 type EspImageReaderMetadata = EspImageMetadata | Esp8266ImageMetadata;
 
-const LABEL = "ESP image";
 type EspImageEntry = ArtifactEntry & {
   readonly byteOffset: number;
   readonly declaredSize: number;
@@ -53,6 +52,8 @@ type EspImageEntry = ArtifactEntry & {
  */
 export class EspImageArtifactReader implements ArtifactReader {
   readonly format: EspImageReaderFormat;
+  /** How messages name the image the caller selected. */
+  readonly #label: string;
   readonly #scope = new ArtifactResourceScope();
   readonly #entries = new Map<string, EspImageEntry>();
   readonly #streams = new Set<Readable>();
@@ -68,7 +69,8 @@ export class EspImageArtifactReader implements ArtifactReader {
     format: EspImageReaderFormat = "esp-image",
   ) {
     this.format = format;
-    this.#source = new ArtifactFileSource(path, LABEL, admitted);
+    this.#label = format === "esp8266-image" ? "ESP8266 image" : "ESP image";
+    this.#source = new ArtifactFileSource(path, this.#label, admitted);
   }
 
   formatMetadata(): EspImageReaderMetadata | undefined {
@@ -117,7 +119,7 @@ export class EspImageArtifactReader implements ArtifactReader {
       if (stored === undefined || !sameArtifactEntry(entry, stored))
         throw new ArtifactReaderFailure(
           "integrity",
-          `${LABEL} entry does not match its owning inventory`,
+          `${this.#label} entry does not match its owning inventory`,
         );
       const { handle } = await this.#source.read(signal);
       this.#assertOpen(signal);
@@ -131,7 +133,7 @@ export class EspImageArtifactReader implements ArtifactReader {
               cancellationFailure: (reason) =>
                 new ArtifactReaderFailure(
                   "cancelled",
-                  `${LABEL} read cancelled`,
+                  `${this.#label} read cancelled`,
                   { cause: reason },
                 ),
             });
@@ -145,9 +147,13 @@ export class EspImageArtifactReader implements ArtifactReader {
         // still owns buffered bytes and cancellation must retire that result.
         if (!producerComplete || output.destroyed) return;
         output.destroy(
-          new ArtifactReaderFailure("cancelled", `${LABEL} read cancelled`, {
-            cause: signal?.reason,
-          }),
+          new ArtifactReaderFailure(
+            "cancelled",
+            `${this.#label} read cancelled`,
+            {
+              cause: signal?.reason,
+            },
+          ),
         );
       };
       const retired = new Promise<void>((resolve) => {
@@ -176,7 +182,7 @@ export class EspImageArtifactReader implements ArtifactReader {
           output.destroy(
             cause instanceof Error
               ? cause
-              : new Error(`${LABEL} stream ownership failed`, { cause }),
+              : new Error(`${this.#label} stream ownership failed`, { cause }),
           ),
         );
       return output;
@@ -187,7 +193,10 @@ export class EspImageArtifactReader implements ArtifactReader {
     this.#closing = true;
     for (const stream of this.#streams)
       stream.destroy(
-        new ArtifactReaderFailure("unavailable", `${LABEL} reader closed`),
+        new ArtifactReaderFailure(
+          "unavailable",
+          `${this.#label} reader closed`,
+        ),
       );
     await this.#scope.close();
     await this.#source.close();
@@ -203,7 +212,7 @@ export class EspImageArtifactReader implements ArtifactReader {
     if (this.#closing)
       throw new ArtifactReaderFailure(
         "unavailable",
-        `${LABEL} reader is closed`,
+        `${this.#label} reader is closed`,
       );
   }
 
@@ -275,9 +284,13 @@ export class EspImageArtifactReader implements ArtifactReader {
         end: initial.size - 1,
         signal,
         cancellationFailure: (reason) =>
-          new ArtifactReaderFailure("cancelled", `${LABEL} read cancelled`, {
-            cause: reason,
-          }),
+          new ArtifactReaderFailure(
+            "cancelled",
+            `${this.#label} read cancelled`,
+            {
+              cause: reason,
+            },
+          ),
       }) as AsyncIterable<Buffer>) {
         this.#assertOpen(signal);
         decoder.write(chunk);
@@ -286,17 +299,18 @@ export class EspImageArtifactReader implements ArtifactReader {
     // A changed carrier is an identity failure, not a malformed image.
     await this.#source.read(signal);
     const image = decoder.finish();
-    if (!image.ok) throw decodeFailure(image.error);
+    if (!image.ok) throw decodeFailure(image.error, this.#label);
     return image.value;
   }
 
   #entryStream(entry: EspImageEntry, signal?: AbortSignal): Transform {
+    const label = this.#label;
     let bytes = 0;
     const check = async (): Promise<void> => {
       if (bytes !== entry.declaredSize)
         throw new ArtifactReaderFailure(
           "integrity",
-          `${LABEL} entry ended early: ${entry.path}`,
+          `${label} entry ended early: ${entry.path}`,
         );
       await this.#source.read(signal);
     };
@@ -312,7 +326,7 @@ export class EspImageArtifactReader implements ArtifactReader {
             callback(
               cause instanceof Error
                 ? cause
-                : new Error(`${LABEL} read failed`, { cause }),
+                : new Error(`${label} read failed`, { cause }),
             ),
         );
       },
@@ -320,10 +334,13 @@ export class EspImageArtifactReader implements ArtifactReader {
   }
 }
 
-const decodeFailure = (failure: EspImageFailure): ArtifactReaderFailure =>
+const decodeFailure = (
+  failure: EspImageFailure,
+  label: string,
+): ArtifactReaderFailure =>
   failure.kind === "unsupported"
     ? new ArtifactReaderFailure("unavailable", failure.message)
     : new ArtifactReaderFailure(
         "format",
-        `${LABEL} is malformed: ${failure.message}`,
+        `${label} is malformed: ${failure.message}`,
       );

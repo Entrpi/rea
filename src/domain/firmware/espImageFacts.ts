@@ -298,17 +298,10 @@ export const deriveEsp8266Image = (
         first,
       ),
     );
-  const { header } = observed;
   return {
     metadata: {
       kind: "esp8266-image",
-      header: {
-        segment_count: header[1] ?? 0,
-        spi_mode: header[2] ?? 0,
-        spi_speed: (header[3] ?? 0) & 0x0f,
-        spi_size: (header[3] ?? 0) >> 4,
-        entry_addr: u32(header, 4),
-      },
+      header: commonHeaderFacts(observed.header),
       checksum,
       image_end: observed.imageEnd ?? null,
       undescribed_trailing: undescribed,
@@ -327,13 +320,20 @@ export const deriveEsp8266Image = (
 const imageComplete = (observed: EspImageObservations): boolean =>
   observed.imageEnd !== undefined;
 
-/** `esp_image_header_t` fields, observed as written. */
-const headerFacts = (header: Uint8Array): EspImageMetadata["header"] => ({
+/** The 8-byte common header every ESP image begins with, observed as written. */
+const commonHeaderFacts = (
+  header: Uint8Array,
+): Esp8266ImageMetadata["header"] => ({
   segment_count: header[1] ?? 0,
   spi_mode: header[2] ?? 0,
   spi_speed: (header[3] ?? 0) & 0x0f,
   spi_size: (header[3] ?? 0) >> 4,
   entry_addr: u32(header, 4),
+});
+
+/** `esp_image_header_t` fields, observed as written. */
+const headerFacts = (header: Uint8Array): EspImageMetadata["header"] => ({
+  ...commonHeaderFacts(header),
   wp_pin: header[8] ?? 0,
   spi_pin_drv: hex(header.subarray(9, 12)),
   chip_id: u16(header, 12),

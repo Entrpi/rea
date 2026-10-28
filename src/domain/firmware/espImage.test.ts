@@ -1154,3 +1154,27 @@ describe("ESP8266 image integrity and refusals", () => {
     });
   });
 });
+
+describe("ESP8266 segment warnings", () => {
+  // esptool warn_if_unusual_segment: offset > 0x40200000, offset <
+  // 0x3FFE0000, or size > 65536.
+  it.each([
+    [0x3ffe_0000, 0x1_0000, false],
+    [0x4020_0000, 0x1_0000, false],
+    [0x3ffd_fffc, 4, true],
+    [0x4020_0004, 4, true],
+    [0x4010_0000, 0x1_0004, true],
+  ] as const)(
+    "warns for a segment at %i of %i bytes: %s",
+    (address, length, warned) => {
+      const decoded = esp8266(
+        esp8266ImageOf({ segments: [{ address, data: pattern(length, 1) }] }),
+      );
+      expect(decoded.limitations).toEqual(
+        warned
+          ? [ESP_IMAGE_LIMITATIONS.esp8266SuspiciousSegment(0, address, length)]
+          : [],
+      );
+    },
+  );
+});

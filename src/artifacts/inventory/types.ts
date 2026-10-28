@@ -1,3 +1,4 @@
+import type { CallerSelectedRootFormat } from "../../domain/dosCom.js";
 import type { ArtifactIntegrityPolicyName } from "../../domain/artifactIntegrityPolicy.js";
 import type { AsarHeaderAdmission } from "../../config/asarHeaderAdmission.js";
 import type { ArtifactResourceScope } from "../ArtifactResourceScope.js";
@@ -18,5 +19,5 @@ export interface ArtifactInventoryOptions {
    * A root format the caller named because its bytes do not identify it;
    * byte classification applies otherwise.
    */
-  readonly selectedRootFormat?: "esp8266-image" | undefined;
+  readonly selectedRootFormat?: CallerSelectedRootFormat | undefined;
 }

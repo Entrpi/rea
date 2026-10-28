@@ -1,4 +1,7 @@
-import type { ExecutableFormatHint } from "../domain/dosCom.js";
+import type {
+  CallerSelectedRootFormat,
+  ExecutableFormatHint,
+} from "../domain/dosCom.js";
 import { dispatchQueuedInterrupts } from "../process/queuedInterrupts.js";
 import type {
   BinaryArchitecture,
@@ -156,7 +159,7 @@ export const runDirectAnalysis = async (
 
 /** How the caller asks an artifact target to be read. */
 export interface ArtifactTargetSelection {
-  readonly formatHint?: ExecutableFormatHint;
+  readonly formatHint?: CallerSelectedRootFormat;
 }
 
 /** Execute one provider-native semantic operation with atomic provenance. */

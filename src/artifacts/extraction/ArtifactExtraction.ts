@@ -7,6 +7,7 @@ import {
 import { hashStableRootArtifactHandle } from "../inventory/hashStableRootArtifact.js";
 import { absoluteCallerPath } from "../../filesystem/callerPath.js";
 import type { AsarHeaderAdmission } from "../../config/asarHeaderAdmission.js";
+import { callerSelectedRootFormat } from "../../domain/dosCom.js";
 import { createArtifactReader } from "../createArtifactReader.js";
 import { resolveAsarHeaderAdmission } from "../AsarHeader.js";
 import {
@@ -64,8 +65,6 @@ export interface ArtifactExtractionInput {
   /** Selected artifact spelling; packed I/O remains on inputPath. */
   readonly selectedPath?: string | undefined;
   readonly inputFormat: BinaryTarget["format"];
-  /** A root format the caller named because its bytes do not identify it. */
-  readonly selectedRootFormat?: "esp8266-image" | undefined;
   readonly outputRoot: string;
   readonly environment: Readonly<NodeJS.ProcessEnv>;
   readonly integrityPolicy: ArtifactIntegrityPolicyName;
@@ -101,7 +100,7 @@ const extractArtifactInScope = async (
         asarHeaderAdmission:
           input.asarHeaderAdmission ??
           resolveAsarHeaderAdmission(input.environment),
-        selectedRootFormat: input.selectedRootFormat,
+        selectedRootFormat: callerSelectedRootFormat(input.inputFormat),
         integrity: input.integrityPolicy,
       },
       probeFacts,

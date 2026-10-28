@@ -11,6 +11,10 @@ import { keyedArchiveInputSchema } from "../domain/apple/keyedArchive.js";
 import { z } from "incur";
 
 import type { ArtifactTargetSelection } from "../application/DirectAnalysis.js";
+import {
+  CALLER_SELECTED_ROOT_FORMATS,
+  type CallerSelectedRootFormat,
+} from "../domain/dosCom.js";
 import type { DirectAnalysis } from "../composition/directAnalysis.js";
 import { createArtifactExtractionDestination } from "../application/artifacts/ArtifactExtractionDestination.js";
 import { logCliCommand } from "../cliLogging.js";
@@ -200,7 +204,7 @@ const registerInterfaceBuilderCommand = (
 /** Read a target whose bytes do not identify its format. */
 const artifactTargetFormatOption = {
   targetFormat: z
-    .enum(["esp8266-image"])
+    .enum(CALLER_SELECTED_ROOT_FORMATS)
     .optional()
     .describe(
       "Read the target as an ESP8266 firmware image, which is never detected because it shares the ESP32 image magic",
@@ -208,7 +212,7 @@ const artifactTargetFormatOption = {
 };
 
 const artifactTargetSelection = (options: {
-  readonly targetFormat?: "esp8266-image" | undefined;
+  readonly targetFormat?: CallerSelectedRootFormat | undefined;
 }): ArtifactTargetSelection =>
   options.targetFormat === undefined
     ? {}

@@ -52,7 +52,7 @@ const ESP8266_LOAD_REGIONS = [
 ] as const;
 
 export const ESP8266_REFUSAL =
-  "ESP8266 images are not detected automatically: they share the 0xE9 magic with ESP32-family images, and their 8-byte header does not name the chip. To read this file as an ESP8266 image, open it with format esp8266-image (CLI: --target-format esp8266-image).";
+  "REA reads an ESP8266 image only when the caller names the chip: ESP8266 images share the 0xE9 magic with ESP32-family images, and their 8-byte header does not name the chip. To read this file as one, use open_binary with format esp8266-image, or inspect-artifact or extract-artifact with --target-format esp8266-image.";
 
 export type EspImageRecognition = "esp-image" | "esp8266";
 

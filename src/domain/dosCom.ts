@@ -15,6 +15,22 @@ export const executableFormatHintSchema = z.enum([
 /** Explicit interpretation for formats whose bytes do not identify them. */
 export type ExecutableFormatHint = z.infer<typeof executableFormatHintSchema>;
 
+/**
+ * Explicit formats that select an archive reading the bytes cannot
+ * establish, so artifact inventory reads the root as the caller named it.
+ */
+export const CALLER_SELECTED_ROOT_FORMATS = [
+  "esp8266-image",
+] as const satisfies readonly ExecutableFormatHint[];
+export type CallerSelectedRootFormat =
+  (typeof CALLER_SELECTED_ROOT_FORMATS)[number];
+
+/** The caller-selected root format a target format names, if any. */
+export const callerSelectedRootFormat = (
+  format: string,
+): CallerSelectedRootFormat | undefined =>
+  CALLER_SELECTED_ROOT_FORMATS.find((selected) => selected === format);
+
 /** Validate the single 64 KiB COM segment, excluding its 256-byte PSP prefix. */
 export const validateDosComLength = (length: number): Result<null, string> =>
   Number.isSafeInteger(length) && length >= 1 && length <= 0xff00
