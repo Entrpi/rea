@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { crc32 } from "node:zlib";
 
 import { describe, expect, it } from "vitest";
 import { ESP_IMAGE_LIMITATIONS } from "./espImageFacts.js";
@@ -146,6 +147,7 @@ describe("ESP image decoding", () => {
       descriptor: {
         kind: "app",
         offset: 32,
+        observed_length: 256,
         secure_version: 0,
         version: "1.2.3",
         project_name: "rea_esp_fixture",
@@ -385,6 +387,7 @@ describe("ESP image framing and segment limits", () => {
     expect(decoded.metadata.descriptor).toMatchObject({
       kind: "app",
       offset: 32,
+      observed_length: 200,
       version: "1.2.3",
       mmu_page_size: 16,
       spi_flash_mode: 2,
@@ -393,9 +396,38 @@ describe("ESP image framing and segment limits", () => {
     expect(decoded.coverage).toBe("unknown");
   });
 
-  it("does not read an app descriptor whose fields are cut off", () => {
-    expect(image(APP.subarray(0, 32 + 181)).metadata.descriptor).toBeNull();
-  });
+  it.each([
+    [20, { secure_version: 0, version: null, app_elf_sha256: null }],
+    [
+      176,
+      {
+        idf_ver: "v6.1",
+        app_elf_sha256: "ab".repeat(32),
+        min_efuse_blk_rev_full: null,
+        max_efuse_blk_rev_full: null,
+        mmu_page_size: null,
+        spi_flash_mode: null,
+      },
+    ],
+    [
+      181,
+      { max_efuse_blk_rev_full: 199, mmu_page_size: 16, spi_flash_mode: null },
+    ],
+  ] as const)(
+    "keeps the descriptor fields a file cut at byte %i holds in full",
+    (length, fields) => {
+      const decoded = image(APP.subarray(0, 32 + length));
+      expect(decoded.metadata.descriptor).toMatchObject({
+        kind: "app",
+        observed_length: length,
+        ...fields,
+      });
+      // A cut field is unavailable, not malformed text.
+      expect(decoded.limitations).toEqual([
+        ESP_IMAGE_LIMITATIONS.truncatedSegment(0, 288, 32, length),
+      ]);
+    },
+  );
 
   it("keeps a truncated segment as an image with unavailable integrity", () => {
     const decoded = image(APP.subarray(0, 360));
@@ -785,6 +817,25 @@ describe("Secure Boot v2 block layouts and sector bounds", () => {
       image_digest_matches: null,
       public_key_sha256: null,
       signature_status: "unverified",
+    });
+  });
+
+  it("hashes a P-192 key as espsecure does, with its point zero-padded to 64 bytes", () => {
+    // espsecure packs ECDSA blocks as "<BBBx32sB64s64s1031x": a 48-byte P-192
+    // point is zero-padded to 64 bytes, so its signature still starts at 101.
+    const point = Buffer.concat([pattern(48, 7), Buffer.alloc(16)]);
+    const block = signatureBlock("ecdsa-p256", PADDED);
+    block[36] = 1; // CURVE_ID_P192
+    point.copy(block, 37);
+    pattern(64, 8).copy(block, 101); // (r, s), not part of the key
+    block.writeUInt32LE(crc32(block.subarray(0, 1196)), 1196);
+    const metadata = image(Buffer.concat([PADDED, sector([block])]))
+      .signatureBlocks[0]?.metadata;
+    // _digest_sbv2_public_key: SHA-256 of the curve ID and the padded point.
+    expect(metadata).toMatchObject({
+      scheme: "ecdsa",
+      curve_id: 1,
+      public_key_sha256: sha256(Buffer.concat([Buffer.from([1]), point])),
     });
   });
 
