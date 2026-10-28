@@ -19,12 +19,11 @@ export const RIZIN_PROVIDER_IDENTITY = {
  */
 export const identifyRizinTool = (
   banner: string,
-): ProviderToolIdentification => {
+): ProviderToolIdentification | undefined => {
   const match = /^(\S+) (\d\S*)/u.exec(banner);
   const tool = match?.[1];
   const version = match?.[2];
-  if (tool === undefined || version === undefined)
-    return { identity: RIZIN_PROVIDER_IDENTITY, limitations: [] };
+  if (tool === undefined || version === undefined) return undefined;
   if (tool === "rizin")
     return {
       identity: { ...RIZIN_PROVIDER_IDENTITY, version },
@@ -42,6 +41,8 @@ export const identifyRizinTool = (
 export const RIZIN_VERSION_PROBE: ProviderVersionProbe = {
   arguments: ["-v"],
   identify: identifyRizinTool,
+  assumedIdentity:
+    "No -v banner identified the tool that REA_RIZIN_COMMAND selected; the provider name Rizin is assumed from that setting, not observed.",
 };
 
 /** Default one-shot presentation to plain text while retaining plugin availability. */

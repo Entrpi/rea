@@ -878,6 +878,7 @@ export class ReverseEngineeringService {
     timeoutMs: number,
   ): Promise<Result<ProviderIdentification, AnalysisError>> {
     const probe = profile.versionProbe;
+    // Without an identifying banner, a probed provider's name is assumed.
     const unidentified = (
       reason: string,
       executable = profile.executable,
@@ -887,8 +888,12 @@ export class ReverseEngineeringService {
       identity: profile.identity,
       limitations: [
         `The executable version and supported formats are reported as unknown because ${reason}.`,
+        ...(probe === undefined ? [] : [probe.assumedIdentity]),
       ],
-      parameters,
+      parameters:
+        probe === undefined
+          ? parameters
+          : { ...parameters, provider_identity: "assumed" },
     });
     if (probe === undefined)
       return ok(unidentified("no reliable version probe was performed"));
@@ -966,20 +971,27 @@ export class ReverseEngineeringService {
       );
     const { identification } = completed;
     const banner = `its ${probe.arguments.join(" ")} banner`;
+    const bannerParameters = {
+      ...parameters,
+      provider_version_banner: completed.banner,
+      provider_version_banner_truncated: completed.bannerTruncated,
+    };
+    if (identification === undefined)
+      return ok(
+        unidentified(
+          `${banner} did not identify the tool`,
+          lookup.path,
+          bannerParameters,
+        ),
+      );
     return ok({
       executable: lookup.path,
       identity: identification.identity,
       limitations: [
-        identification.identity.version === null
-          ? `The executable version and supported formats are reported as unknown because ${banner} did not identify them.`
-          : `The executable version comes from ${banner}; supported formats remain unknown.`,
+        `The executable version comes from ${banner}; supported formats remain unknown.`,
         ...identification.limitations,
       ],
-      parameters: {
-        ...parameters,
-        provider_version_banner: completed.banner,
-        provider_version_banner_truncated: completed.bannerTruncated,
-      },
+      parameters: { ...bannerParameters, provider_identity: "banner" },
     });
   }
 
@@ -1124,7 +1136,8 @@ type VersionProbeOutcome =
   | {
       readonly scope: "executable";
       readonly status: "read";
-      readonly identification: ProviderToolIdentification;
+      /** Undefined when the banner identified no tool. */
+      readonly identification: ProviderToolIdentification | undefined;
       /** The first stdout line, trimmed and bounded. */
       readonly banner: string;
       readonly bannerTruncated: boolean;

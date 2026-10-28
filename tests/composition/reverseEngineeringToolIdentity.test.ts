@@ -9,6 +9,7 @@ import {
   VERSION_PROBE_FAILURE_REASONS,
 } from "../../src/application/reverse/ReverseEngineeringService.js";
 import { lookupExecutable } from "../../src/process/ExecutableLookup.js";
+import { RIZIN_VERSION_PROBE } from "../../src/rizin/RizinCommand.js";
 import { OwnedCommandFailure } from "../../src/process/OwnedCommand.js";
 import type { ProviderProcessSupervisor } from "../../src/process/ProviderProcess.js";
 import type { execFileOutput } from "../../src/process/ExecFileOutput.js";
@@ -113,6 +114,7 @@ posix(
         provider_executable_sha256: await digest(),
         provider_version_banner: banner,
         provider_version_banner_truncated: false,
+        provider_identity: "banner",
       });
     }
     expect(probes(run)).toBe(1);
@@ -180,19 +182,30 @@ posix(
 posix.each([
   [
     "radare2 6.1.8 +0 abi:110 @ darwin-arm_64",
+    "radare2 6.1.8 +0 abi:110 @ darwin-arm_64",
     { id: "rizin", name: "radare2", version: "6.1.8" },
+    "banner",
     "not Rizin",
   ],
   [
     "Usage: tool [options]",
+    "Usage: tool [options]",
     { id: "rizin", name: "Rizin", version: null },
-    "banner did not identify them",
+    "assumed",
+    RIZIN_VERSION_PROBE.assumedIdentity,
+  ],
+  [
+    "\nrizin 0.9.1 @ linux-x86-64",
+    "",
+    { id: "rizin", name: "Rizin", version: null },
+    "assumed",
+    RIZIN_VERSION_PROBE.assumedIdentity,
   ],
 ])(
-  "runs the command for banner %j and records what it identified",
-  async (banner, provider, limitation) => {
+  "runs the command for -v output %j and records what it identified",
+  async (stdout, banner, provider, identity, limitation) => {
     const { executable, path } = await fixture();
-    const run = runner(() => banner);
+    const run = runner(() => stdout);
     const service = new TestReverseEngineeringService({
       run,
       lookup: lookupExecutable,
@@ -201,7 +214,10 @@ posix.each([
     const result = await service.executeRizinCommand({ path, command: "iI" });
     if (!result.ok) throw result.error;
     expect(result.value.provider).toEqual(provider);
-    expect(result.value.parameters.provider_version_banner).toBe(banner);
+    expect(result.value.parameters).toMatchObject({
+      provider_version_banner: banner,
+      provider_identity: identity,
+    });
     expect(result.value.limitations).toEqual(
       expect.arrayContaining([expect.stringContaining(limitation)]),
     );

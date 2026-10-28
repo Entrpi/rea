@@ -100,7 +100,10 @@ REA checked it; they cannot prove the exact bytes executed if the file changes
 before the launch. A different tool that accepts the same arguments, such as
 radare2, still runs: its Evidence names that tool and adds a limitation. A probe
 that fails, times out, prints output that is not valid UTF-8 or prints an
-unrecognized banner leaves the version unknown, and the command still runs; the
+unrecognized banner leaves the version unknown, and the command still runs.
+Evidence then keeps the provider name Rizin with `provider_identity: "assumed"`
+and a limitation saying the tool itself was not identified; an identified tool
+has `provider_identity: "banner"`. The
 probe's exit status and bounded output are recorded in `provider_version_probe`,
 where `stdout_invalid_utf8` and `stderr_invalid_utf8` mark output that was not
 valid UTF-8 and so holds replacement characters.
