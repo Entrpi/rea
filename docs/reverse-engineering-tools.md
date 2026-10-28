@@ -101,7 +101,9 @@ before the launch. A different tool that accepts the same arguments, such as
 radare2, still runs: its Evidence names that tool and adds a limitation. A probe
 that fails, times out, prints output that is not valid UTF-8 or prints an
 unrecognized banner leaves the version unknown, and the command still runs; the
-probe's exit status and bounded output are recorded in `provider_version_probe`.
+probe's exit status and bounded output are recorded in `provider_version_probe`,
+where `stdout_invalid_utf8` and `stderr_invalid_utf8` mark output that was not
+valid UTF-8 and so holds replacement characters.
 Each call's lookup, hash and probe use that call's `command_timeout_ms` budget
 and cancellation; a lookup or hash that reaches the deadline ends the call
 without running the command. For each resolved path, REA keeps the latest

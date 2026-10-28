@@ -726,8 +726,9 @@ posix(
         args[0] === "-v"
           ? {
               stdout: "rizin 0.9.� @ linux-x86-64",
-              stderr: "",
+              stderr: "warning �",
               stdoutInvalidUtf8: true,
+              stderrInvalidUtf8: true,
             }
           : { stdout: "command output", stderr: "" },
     );
@@ -748,6 +749,8 @@ posix(
     );
     expect(result.value.parameters.provider_version_probe).toMatchObject({
       exit_code: 0,
+      stdout_invalid_utf8: true,
+      stderr_invalid_utf8: true,
     });
     expect(result.value.limitations).toEqual(
       expect.arrayContaining([
@@ -856,5 +859,55 @@ posix(
     if (!long.ok) throw long.error;
     expect(long.value.provider.version).toBe("0.9.1");
     expect(probeDeadlines).toEqual([100, 5_000]);
+  },
+);
+
+posix.each([
+  ["failed", { stdout: true, stderr: false }],
+  ["timed-out", { stdout: false, stderr: true }],
+] as const)(
+  "flags output that is not valid UTF-8 in a %s probe's diagnostics",
+  async (outcome, invalid) => {
+    const { executable, path } = await fixture();
+    const output = {
+      stdout: {
+        text: "rizin \uFFFD",
+        bytes: 7,
+        observedBytes: 7,
+        ...(invalid.stdout ? { invalidUtf8: true as const } : {}),
+      },
+      stderr: {
+        text: "warning \uFFFD",
+        bytes: 9,
+        observedBytes: 9,
+        ...(invalid.stderr ? { invalidUtf8: true as const } : {}),
+      },
+    };
+    const runOwned = vi.fn(
+      async (request: { readonly arguments: readonly string[] }) => {
+        if (request.arguments[0] !== "-v") return providerSnapshot();
+        if (outcome === "timed-out")
+          throw new OwnedCommandFailure(
+            "timeout",
+            "Command deadline elapsed.",
+            providerSnapshot({ ...output, exitCode: null, signal: "SIGTERM" }),
+          );
+        return providerSnapshot({ ...output, exitCode: 2 });
+      },
+    );
+    const service = new TestReverseEngineeringService({
+      runOwned,
+      lookup: lookupExecutable,
+      environment: { REA_RIZIN_COMMAND: executable },
+    });
+    const result = await service.executeRizinCommand({ path, command: "iI" });
+    if (!result.ok) throw result.error;
+    expect(result.value.provider.version).toBeNull();
+    expect(result.value.parameters.provider_version_probe).toMatchObject({
+      exit_code: outcome === "failed" ? 2 : null,
+      error_code: outcome === "timed-out" ? "ETIMEDOUT" : null,
+      stdout_invalid_utf8: invalid.stdout,
+      stderr_invalid_utf8: invalid.stderr,
+    });
   },
 );

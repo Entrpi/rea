@@ -695,10 +695,8 @@ export class ReverseEngineeringService {
           exitCode = null;
           completionStatus = "unknown";
         }
-        if (cause instanceof OwnedOutputFailure) {
-          stdoutInvalidUtf8 = cause.stdoutInvalidUtf8;
-          stderrInvalidUtf8 = cause.stderrInvalidUtf8;
-        }
+        stdoutInvalidUtf8 = capture.stdoutInvalidUtf8 === true;
+        stderrInvalidUtf8 = capture.stderrInvalidUtf8 === true;
       }
     }
     if (earlyFailure !== undefined)
@@ -1171,6 +1169,8 @@ const versionProbeDiagnostics = (
         readonly signal?: string | null;
         readonly outputTruncated?: boolean;
         readonly collectionFailure?: boolean;
+        readonly stdoutInvalidUtf8?: boolean;
+        readonly stderrInvalidUtf8?: boolean;
       }
     | undefined,
 ): Readonly<Record<string, JsonValue>> => {
@@ -1194,6 +1194,9 @@ const versionProbeDiagnostics = (
       output?.outputTruncated === true ||
       stdout.length > VERSION_PROBE_TEXT_CHARS ||
       stderr.length > VERSION_PROBE_TEXT_CHARS,
+    // Invalid UTF-8 is decoded as replacement characters; these mark it.
+    stdout_invalid_utf8: output?.stdoutInvalidUtf8 === true,
+    stderr_invalid_utf8: output?.stderrInvalidUtf8 === true,
   };
 };
 

@@ -85,6 +85,9 @@ export interface ExecFileOutputFailure {
   readonly stdoutBytes?: number;
   readonly stderrBytes?: number;
   readonly collectionFailure?: boolean;
+  /** The decoded stream holds replacement characters for invalid UTF-8. */
+  readonly stdoutInvalidUtf8?: boolean;
+  readonly stderrInvalidUtf8?: boolean;
 }
 
 /** Read captured output metadata from a failed execFileOutput invocation. */
@@ -101,6 +104,8 @@ export const execFileOutputFailure = (
   const stdoutBytes = Reflect.get(cause, "stdoutBytes");
   const stderrBytes = Reflect.get(cause, "stderrBytes");
   const collectionFailure = Reflect.get(cause, "collectionFailure");
+  const stdoutInvalidUtf8 = Reflect.get(cause, "stdoutInvalidUtf8");
+  const stderrInvalidUtf8 = Reflect.get(cause, "stderrInvalidUtf8");
   if (typeof stdout !== "string" || typeof stderr !== "string")
     return undefined;
   return {
@@ -122,6 +127,8 @@ export const execFileOutputFailure = (
     outputTruncated:
       outputTruncated === true || code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
     ...(collectionFailure === true ? { collectionFailure: true } : {}),
+    ...(stdoutInvalidUtf8 === true ? { stdoutInvalidUtf8: true } : {}),
+    ...(stderrInvalidUtf8 === true ? { stderrInvalidUtf8: true } : {}),
   };
 };
 
