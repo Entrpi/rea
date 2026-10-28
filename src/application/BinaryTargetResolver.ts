@@ -80,6 +80,7 @@ import {
 } from "../domain/apple/appleArchiveFormat.js";
 import { hasDiskImageSignature } from "../domain/apple/diskImageFormat.js";
 import { hasGodotPckHeader } from "../domain/godotPckFormat.js";
+import { detectHexRecordEncoding } from "../domain/firmware/hexRecords.js";
 import {
   locateEspFlashLayout,
   type EspFlashSelection,
@@ -759,6 +760,8 @@ const detectArtifactFormat = async (
     );
   if (hasZipSignature(magic)) return zipRootPackageFormat(lower);
   if (hasGodotPckHeader(magic)) return "godot-pck";
+  const hexRecords = detectHexRecordEncoding(magic);
+  if (hexRecords !== undefined) return hexRecords;
   // A C3 or S3 dump begins with its bootloader, so a layout comes first.
   const flash = await locateEspFlashLayout(
     initial.size,
@@ -840,9 +843,16 @@ const isArchiveFormat = (
   >,
 ): format is Extract<BinaryTarget, { kind: "archive" }>["format"] =>
   isZipPackageFormat(format) ||
-  ["asar", "godot-pck", "dmg", "pkg", "esp-image", "esp-flash-image"].includes(
-    format,
-  );
+  [
+    "asar",
+    "godot-pck",
+    "dmg",
+    "pkg",
+    "intel-hex",
+    "srec",
+    "esp-image",
+    "esp-flash-image",
+  ].includes(format);
 
 /** Whether the leading bytes begin any executable header family, valid or not. */
 const claimsLeadingExecutableHeader = async (

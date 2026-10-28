@@ -86,6 +86,8 @@ const artifactFormatSchema = z.enum([
   "file",
   "pyinstaller",
   "node-sea",
+  "intel-hex",
+  "srec",
   "esp-image",
   "esp-flash-image",
   "unknown",
@@ -95,6 +97,8 @@ const artifactFormatSchema = z.enum([
 const artifactContentFormatSchema = artifactFormatSchema.extract([
   "zip",
   "godot-pck",
+  "intel-hex",
+  "srec",
   "esp-image",
   "mach-o-universal",
   "mach-o",

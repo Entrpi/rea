@@ -105,6 +105,8 @@ export const liveBinaryTargetSummaryVariants = [
       "godot-pck",
       "dmg",
       "pkg",
+      "intel-hex",
+      "srec",
       "esp-image",
     ]),
     architecture: z.null(),

@@ -179,6 +179,8 @@ export interface ArtifactReader {
     | "godot-pck"
     | "pyinstaller"
     | "node-sea"
+    | "intel-hex"
+    | "srec"
     | "esp-image"
     | "esp-flash-image"
     | "file";

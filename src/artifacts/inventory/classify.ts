@@ -175,6 +175,8 @@ export const classifyAndHashRootForInventory = async (
       format === "godot-pck" ||
       format === "pyinstaller" ||
       format === "node-sea" ||
+      format === "intel-hex" ||
+      format === "srec" ||
       format === "esp-image" ||
       format === "esp-flash-image";
     outcome = {

@@ -71,6 +71,11 @@ export const inventoryCoverage = (
               "Node SEA inventory establishes the injected blob, flags, fuse sentinel, main script, optional code cache, snapshot, and assets. V8 snapshots and code cache are not deserialized, and the application is not executed.",
             ]
           : []),
+        ...(reader.format === "intel-hex" || reader.format === "srec"
+          ? [
+              "Intel HEX/S-record inventory decodes data records into address-contiguous regions. It does not establish CPU, byte order, memory map, or that a declared start address is executable; gaps are unwritten, not zero.",
+            ]
+          : []),
         ...(reader.format === "esp-flash-image"
           ? [
               "ESP flash layout inventory reads a dump's bootloader region, partition table and partitions and decodes the bootloader and app partitions as ESP images. The OTA selection is derived without app rollback or anti-rollback, and the running partition is unknown. Partitions, nvs_keys included, are extracted as ordinary data; nothing is decrypted.",
@@ -105,6 +110,8 @@ export const inventoryCoverage = (
     format === "asar" ||
     format === "godot-pck" ||
     format === "node-sea" ||
+    format === "intel-hex" ||
+    format === "srec" ||
     format === "esp-image" ||
     format === "esp-flash-image"
   )

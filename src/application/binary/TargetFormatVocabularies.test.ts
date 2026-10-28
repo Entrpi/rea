@@ -120,6 +120,8 @@ const TARGETS: TargetFixtures = {
   "godot-pck": { ...archive, format: "godot-pck" },
   dmg: { ...archive, format: "dmg" },
   pkg: { ...archive, format: "pkg" },
+  "intel-hex": { ...archive, format: "intel-hex" },
+  srec: { ...archive, format: "srec" },
   "esp-image": { ...archive, format: "esp-image" },
   "esp-flash-image": {
     ...archive,
