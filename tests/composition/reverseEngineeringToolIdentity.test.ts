@@ -287,6 +287,77 @@ posix(
   },
 );
 
+posix(
+  "runs each caller's probe under its own deadline and cancellation",
+  async () => {
+    const { executable, path } = await fixture();
+    const firstStarted = gate();
+    const secondStarted = gate();
+    const release = gate();
+    const run = vi.fn(
+      async (
+        _command: string,
+        args: readonly string[],
+        options?: ExecFileOutputOptions,
+      ) => {
+        if (args[0] !== "-v") return { stdout: "command output", stderr: "" };
+        (probes(run) === 1 ? firstStarted : secondStarted).open();
+        const signal = options?.signal;
+        const aborted = new Promise<"aborted">((resolve) => {
+          if (signal?.aborted === true) resolve("aborted");
+          signal?.addEventListener("abort", () => resolve("aborted"), {
+            once: true,
+          });
+        });
+        if ((await Promise.race([release.opened, aborted])) === "aborted")
+          throw Object.assign(new Error("aborted"), { code: "ABORT_ERR" });
+        return { stdout: "rizin 0.9.1 @ linux-x86-64", stderr: "" };
+      },
+    );
+    const service = new TestReverseEngineeringService({
+      run,
+      lookup: lookupExecutable,
+      environment: { REA_RIZIN_COMMAND: executable },
+    });
+    const leaving = new AbortController();
+    const pending: Promise<unknown>[] = [];
+    try {
+      const first = service.executeRizinCommand(
+        { path, command: "iI", command_timeout_ms: 1_234 },
+        { signal: leaving.signal },
+      );
+      pending.push(first);
+      await awaitAcknowledgement(firstStarted.opened, first, "first probe");
+      const second = service.executeRizinCommand({
+        path,
+        command: "iS",
+        command_timeout_ms: 5_678,
+      });
+      pending.push(second);
+      await awaitAcknowledgement(secondStarted.opened, second, "second probe");
+      leaving.abort("first caller left");
+      const left = await within(first, "cancelled first call");
+      if (left.ok) throw new Error("Expected the first caller to be cancelled");
+      expect(left.error._tag).toBe("AnalysisCancelledError");
+      expect(left.error.cause).toBe("first caller left");
+      release.open();
+      const answered = await within(second, "second call");
+      if (!answered.ok) throw answered.error;
+      expect(answered.value.provider.version).toBe("0.9.1");
+      const probeCalls = run.mock.calls.filter(([, args]) => args[0] === "-v");
+      expect(probeCalls.map(([, , options]) => options?.timeout)).toEqual([
+        1_234, 5_678,
+      ]);
+      expect(probeCalls[0]?.[2]?.signal).not.toBe(probeCalls[1]?.[2]?.signal);
+    } finally {
+      release.open();
+      leaving.abort("test cleanup");
+      await Promise.allSettled(pending);
+      await service.close();
+    }
+  },
+);
+
 posix.each(["cancellation", "deadline"] as const)(
   "stops a stalled executable lookup on its %s without running anything",
   async (interruption) => {
