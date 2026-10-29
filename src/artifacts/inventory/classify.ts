@@ -25,9 +25,9 @@ import type { ArtifactOccurrence } from "../../domain/artifactGraph.js";
 import {
   hasZipSignature,
   locateTrailingZipArchive,
-  isZipPackageFormat,
   zipRootPackageFormat,
 } from "../../domain/zipPackageFormat.js";
+import { artifactFormatDescriptor } from "../artifactFormats.js";
 import { ArtifactReaderFailure } from "../ArtifactReader.js";
 import type { HashResult } from "../ArtifactHash.js";
 import {
@@ -158,18 +158,7 @@ export const classifyAndHashRootForInventory = async (
         options.signal,
       ));
     const retainSource =
-      isZipPackageFormat(format) ||
-      format === "mach-o-universal" ||
-      format === "godot-pck" ||
-      format === "unityfs" ||
-      format === "uimage" ||
-      format === "pyinstaller" ||
-      format === "dotnet-bundle" ||
-      format === "node-sea" ||
-      format === "intel-hex" ||
-      format === "srec" ||
-      format === "esp-image" ||
-      format === "fit";
+      artifactFormatDescriptor(format)?.retainClassifiedSource === true;
     outcome = {
       kind: "completed",
       value: {
@@ -298,6 +287,9 @@ const classifyRootFormat = async (
       );
       return { kind: "node-sea", source, location: sea, decoded };
     }
+    const bun = await embeddedProbes.bunStandalone();
+    if (bun.status === "present")
+      return { kind: "bun-standalone", source, probe: bun };
     const packaged = await embeddedProbes.pyInstaller();
     abortIfNeeded(signal);
     if (format !== "mach-o-universal") {
