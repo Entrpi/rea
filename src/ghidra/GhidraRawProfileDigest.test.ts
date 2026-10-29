@@ -18,41 +18,43 @@ import { silentLogger } from "../logger.js";
 import { ghidraProfileInstallationHost as host } from "./GhidraInstallation.fixture.js";
 import { GhidraProvider } from "./GhidraProvider.js";
 
-// Digests were computed by the unmodified upstream resolver (3ae7daa10,
-// raw branch inline) and must not change when the binary-loader policy is shared.
+// Digests commit to the current shared policy, including the instruction status
+// revision that prevents reuse of snapshots with the previous ambiguous result.
 const RAW_DIGESTS = {
-  "6502": "adbec31711f31471f9cdbdbb2fc743a0ce6b46c9be5568bf90a3f51ef46e376d",
+  "6502": "8e33776d1cc5c5d77d32923d5978c05ec2d989d00920dd458cc2dafb4c9c0cad",
   "x86-disabled-analyzer":
-    "493a02888eca575be286b5a96041af8007444586854edb974d6a0c12fd2768c4",
+    "d17bddc8ac110c891d30fb989fc7906df421bd9bea5df4aac05a950f50c7bdaf",
 } as const;
 
-// Computed at d6f88becd. A raw load whose base is its caller-selected entry
-// keeps these profile digests, so its sessions and snapshots stay reusable.
+// Computed by upstream main at 07dfd1261, which has neither a separate base nor
+// a variant. A raw load whose base is its caller-selected entry keeps these
+// profile digests, so it stays reusable wherever main's raw sessions and
+// snapshots are.
 const LEGACY_RAW_DIGESTS = [
   [
     "x86",
     "0x1000",
-    "6e18972704299f8f78c4465502e6c386e52227ef840f11acefbccafde57debca",
+    "1efa8bf6ae3bd0db5789c3bde41150c1765d11a5dd01171dfcc8e13c9e0156c5",
   ],
   [
     "x86_64",
     "0x401000",
-    "6f2e097fcc748e85165d9acc7bb80e879ce6aed3592b06a603ed14957779c102",
+    "b9b8398e6735a2c038d375193bbc546dae535415d8a33a46fd1f093e28534eef",
   ],
   [
     "arm",
     "0x8000000",
-    "c83436441786074ecde2eb776201e6546311affca43bf8905af7b79c8d387733",
+    "454105d882ed5c647e47e1c6f4aa2f30be36a17c7c048b783e10c5498c20fc2a",
   ],
   [
     "arm64",
     "0x80000",
-    "b99f37f9b495c8c4b1479836365cc99868c18959f4d06e3edeb0ba00f95e650d",
+    "fd1482d39496d4bdacdce7f91fc7fb5d1c653e492a771db3ca887e3c1f29f618",
   ],
   [
     "m68k",
     "0x1000",
-    "3383ab9585908ed99835034bf9f6536fd72dfeeba014cdd965203f8173d8a171",
+    "afe1d0b29de91b03169900e59565c4caae78097c02e1768d76c17c6230b0b919",
   ],
 ] as const;
 
@@ -80,7 +82,7 @@ const raw = (
 });
 
 describe("raw-binary analysis profile digest", () => {
-  it("keeps the 6502 raw profile digest from before the shared policy refactor", async () => {
+  it("commits the 6502 raw profile to the current shared policy", async () => {
     const ghidra = new GhidraProvider(configFor({}), silentLogger, {}, host);
     const resolved = await ghidra.resolveAnalysisProfile(raw("6502", "0x8001"));
     if (!resolved.ok) throw resolved.error;
@@ -91,6 +93,7 @@ describe("raw-binary analysis profile digest", () => {
       language_id: "6502:LE:16:default",
       language_selection: "caller-supplied-v1",
       load_image_evidence: "independent-raw-mapping-context-v4",
+      instruction_status: "unlisted-address-without-decode-v1",
       analyzer_preset: "ghidra-default",
     });
   });
@@ -187,10 +190,8 @@ describe("M-profile raw-binary analysis profile", () => {
         language_id: GHIDRA_VARIANT_LANGUAGES[variant],
         compiler_spec_id: "default",
         load_image_evidence: "independent-raw-segments-v1",
-        entry_point: "0x80001c4",
         entry_context: "thumb-tmode-1-before-analysis-v1",
         processor_labels: "not-applied-v1",
-        base_address: "0x8000000",
         raw_load: {
           version: 1,
           base_address: "0x8000000",
@@ -206,6 +207,9 @@ describe("M-profile raw-binary analysis profile", () => {
           ],
         },
       });
+      // raw_load holds the base and entry; flat copies would only repeat it.
+      expect(committed.parameters).not.toHaveProperty("entry_point");
+      expect(committed.parameters).not.toHaveProperty("base_address");
     },
   );
 
@@ -213,7 +217,7 @@ describe("M-profile raw-binary analysis profile", () => {
     const digest = (await profile(reset("armv7-m"))).digest;
     // Pinned so a change to raw_load semantics must bump its version.
     expect(digest).toBe(
-      "80ca0e9f55236a884c17e00dc775a1d81e977605fdd2dda12b88285ceb260eac",
+      "6c9ab13284488b310460e9b0b85cab0c5d4fc0e6d95b0164c411c783c4a763b7",
     );
     expect(
       (await profile(reset("armv7-m", { baseAddress: "0x8000000" }))).digest,
@@ -224,25 +228,28 @@ describe("M-profile raw-binary analysis profile", () => {
     ).toBe(digest);
   });
 
-  it("gives a caller-named entry and Reset at one address one coordinate context", async () => {
+  it("gives every entry of one image one coordinate context", async () => {
     const derived = await profile(reset("armv7-m"));
-    const named = await profile(
-      admittedRawLoad({
-        architecture: "arm",
-        architectureVariant: "armv7-m",
-        baseAddress: "0x8000000",
-        entryPoint: "0x80001c4",
-        fileBytes: 0x200,
-      }),
-    );
-    // Session identity covers the reported basis; coordinates cover resolved values.
-    expect(named.digest).not.toBe(derived.digest);
-    expect(named.parameters.function_coordinate_context).toEqual(
-      derived.parameters.function_coordinate_context,
-    );
+    const named = (entryPoint: string) =>
+      profile(
+        admittedRawLoad({
+          architecture: "arm",
+          architectureVariant: "armv7-m",
+          baseAddress: "0x8000000",
+          entryPoint,
+          fileBytes: 0x200,
+        }),
+      );
+    // Session identity covers the entry and its basis; coordinates do not.
+    for (const other of [await named("0x80001c4"), await named("0x8000100")]) {
+      expect(other.digest).not.toBe(derived.digest);
+      expect(other.parameters.function_coordinate_context).toEqual(
+        derived.parameters.function_coordinate_context,
+      );
+    }
   });
 
-  it("separates base, variant, vector table and entry role", async () => {
+  it("separates base, variant and vector table", async () => {
     const base = await profile(reset("armv7-m"));
     const coordinates = (committed: typeof base) =>
       committed.parameters.function_coordinate_context;
@@ -259,19 +266,10 @@ describe("M-profile raw-binary analysis profile", () => {
       ),
     );
     const v8m = await profile(reset("armv8-m.main"));
-    // Same base, decoder and entry: separate sessions, comparable coordinates.
+    // Same base and decoder: separate sessions, comparable coordinates.
     const sameCoordinates = await Promise.all([
       profile(reset("armv7e-m")),
       profile(reset("armv7-m", { vectorTableAddress: "0x08000100" })),
-      profile(
-        admittedRawLoad({
-          architecture: "arm",
-          architectureVariant: "armv7-m",
-          baseAddress: "0x8000000",
-          entryPoint: "0x80001c4",
-          fileBytes: 0x200,
-        }),
-      ),
     ]);
     for (const other of [movedBase, v8m, ...sameCoordinates])
       expect(other.digest).not.toBe(base.digest);

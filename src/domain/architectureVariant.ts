@@ -6,7 +6,9 @@ import { z } from "zod";
  *
  * Every row is an ARM M profile: code executes only in Thumb state, and the
  * vector table holds the initial stack pointer in word 0 and the Reset handler,
- * with bit 0 set, in word 1. Provider lanes map each row to a decoder; provider
+ * with bit 0 set, in word 1. Admission's base requirement and Reset derivation
+ * and Ghidra's label policy rely on that; a row of another family would make
+ * them per-row properties. Provider lanes map each row to a decoder; provider
  * language ids never enter this table. Tests, schemas and docs derive from it.
  */
 export const ARCHITECTURE_VARIANTS = {

@@ -69,22 +69,22 @@ export const openBinaryInputSchema = z
     entry_point: rawBinaryEntryPointSchema
       .optional()
       .describe(
-        "Caller-supplied code entry address (0xhex). Without base_address, file offset 0 is also mapped here. Required with format=raw-binary unless architecture_variant and base_address are given, when Reset is read from the vector table; rejected with other formats except gamecube-dol, where it is optional and must equal the DOL header entry.",
+        "Caller-supplied code entry address (0xhex). Without base_address, file offset 0 is also mapped here. Required with format=raw-binary unless architecture_variant is given; rejected otherwise. Optional with format=gamecube-dol; must equal the DOL header entry.",
       ),
     base_address: rawBinaryBaseAddressSchema
       .optional()
       .describe(
-        "Address of raw file offset 0 (0xhex) for an architecture_variant image, separate from entry_point. Defaults to entry_point. Only with format=raw-binary.",
+        "Address of raw file offset 0 (0xhex), separate from entry_point. Only with architecture_variant.",
       ),
     architecture_variant: architectureVariantSchema
       .optional()
       .describe(
-        "ARM M-profile variant of a raw image (raw dumps do not record it). Requires format=raw-binary and architecture=arm. Code is decoded in Thumb state; an odd entry_point is refused.",
+        "ARM M-profile variant of a raw image (raw dumps do not record it), decoded in Thumb state. Requires format=raw-binary, architecture=arm and base_address; an odd entry_point is refused.",
       ),
     vector_table_address: rawBinaryVectorTableAddressSchema
       .optional()
       .describe(
-        "Address of the M-profile vector table (0xhex) when it is not at base_address, for example after a bootloader header. Only when entry_point is omitted.",
+        "Address of the M-profile vector table (0xhex) when it is not at base_address, such as after a bootloader header. Only when entry_point is omitted.",
       ),
     provider_id: analysisProviderSelectorSchema.optional(),
     snapshot_path: snapshotPathSchema.optional(),

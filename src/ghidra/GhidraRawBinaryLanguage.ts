@@ -74,6 +74,9 @@ export const GHIDRA_RAW_ENTRY_CONTEXT = {
   }
 >;
 
+/** Profile `processor_labels` value: the import does not apply the language's labels. */
+export const GHIDRA_PROCESSOR_LABELS_NOT_APPLIED = "not-applied-v1";
+
 /**
  * Profile commitment that a variant load is imported without the language's
  * default labels. `ARMCortex.pspec` names the vector table at `ram:0x0`-`0x40`
@@ -83,8 +86,8 @@ export const GHIDRA_RAW_ENTRY_CONTEXT = {
  */
 export const ghidraVariantProcessorLabels = (
   variant: ArchitectureVariant | undefined,
-): "not-applied-v1" | undefined =>
-  variant === undefined ? undefined : "not-applied-v1";
+): typeof GHIDRA_PROCESSOR_LABELS_NOT_APPLIED | undefined =>
+  variant === undefined ? undefined : GHIDRA_PROCESSOR_LABELS_NOT_APPLIED;
 
 /**
  * Map caller-visible CPU families to generic Ghidra languages with a
@@ -147,7 +150,7 @@ export const ghidraRawBinaryLanguage = (
 };
 
 const GENERIC_RAW_LANGUAGES =
-  "Little-endian generic Ghidra languages are used for x86, x86_64, arm, arm64, and NMOS 6502; m68k uses the big-endian 68000 default language, which decodes the 68040 superset. Big-endian ARM, 65C02, 65816, separate 68020/68030/CPU32/ColdFire variants, and other processor variants are unsupported; ARM M-profile code needs architecture_variant.";
+  "Little-endian generic Ghidra languages are used for x86, x86_64, arm, arm64, and NMOS 6502; m68k uses the big-endian 68000 default language, which decodes the 68040 superset. Big-endian ARM, the 65C02 and 65816, and separate 68020, 68030, CPU32 or ColdFire languages are not offered. ARM M-profile code needs architecture_variant, which names only ARM M profiles.";
 
 /** Limitations that every result from a raw-binary session carries. */
 export const ghidraRawBinaryLimitations = (

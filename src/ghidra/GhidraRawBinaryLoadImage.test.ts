@@ -396,9 +396,9 @@ const resetLoad = admittedRawLoad(
     architectureVariant: "armv8-m.main",
     entryPoint: undefined,
     baseAddress: "0x08000000",
-    fileBytes: 8,
+    fileBytes: 0x10,
   },
-  vectorTableWords(0x20005000, 0x08000003),
+  vectorTableWords(0x20005000, 0x08000009),
 );
 
 describe("raw-binary segments load image", () => {
@@ -413,7 +413,7 @@ describe("raw-binary segments load image", () => {
       ok: true,
       value: {
         status: "verified",
-        variant: "segments",
+        layout: "segments",
         version: 1,
         format: "raw-binary",
         architecture: "arm",
@@ -430,7 +430,7 @@ describe("raw-binary segments load image", () => {
         ],
         entries: [
           {
-            address: "0x8000002",
+            address: "0x8000008",
             isa_mode: "thumb",
             role: "reset",
             basis: "vector-table",
@@ -439,7 +439,7 @@ describe("raw-binary segments load image", () => {
         vector_table: {
           address: "0x8000000",
           initial_stack_pointer: "0x20005000",
-          reset_vector: "0x08000003",
+          reset_vector: "0x08000009",
         },
         checks: expect.arrayContaining([
           expect.objectContaining({
@@ -515,7 +515,7 @@ describe("raw-binary segments load image", () => {
       ok: true,
       value: {
         status: "verified",
-        variant: "segments",
+        layout: "segments",
         architecture_variant: "armv7-m",
         language_id: "ARM:LE:32:Cortex",
         entries: [
@@ -544,9 +544,9 @@ describe("raw-binary segments load image", () => {
             entryPoint: undefined,
             baseAddress,
             ...(vectorTableAddress === undefined ? {} : { vectorTableAddress }),
-            fileBytes: 8,
+            fileBytes: 0x10,
           },
-          vectorTableWords(0x20005000, 0x08000003),
+          vectorTableWords(0x20005000, 0x08000009),
         ),
       );
       return attestGhidraRawBinaryLoadImage(

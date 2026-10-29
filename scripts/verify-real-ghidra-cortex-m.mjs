@@ -263,7 +263,7 @@ async function verifyCase(fixture) {
   const image = await call("inspect_native_load_image", {}, digest);
   const loaded = image.normalized_result;
   assert.equal(loaded.status, "verified", JSON.stringify(image));
-  assert.equal(loaded.variant, "segments");
+  assert.equal(loaded.layout, "segments");
   assert.equal(loaded.version, 1);
   assert.equal(loaded.language_id, GHIDRA_VARIANT_LANGUAGES[fixture.variant]);
   assert.deepEqual(loaded.segments, [
@@ -341,7 +341,8 @@ async function verifyCase(fixture) {
 async function verifyDecoding(fixture, address, digest) {
   const prefix = fixture.prefix ?? 0;
   const entry = address(0x40);
-  // Offsets the case expects Ghidra's analysis not to reach.
+  // Offsets the case expects Ghidra's analysis not to reach: in memory, with
+  // no listed instruction or data, which Ghidra reports as not-in-listing.
   const unreached = new Set(fixture.notDisassembled ?? []);
   // Collect every disagreement so one run reports them all.
   const disagreements = [];
@@ -354,7 +355,7 @@ async function verifyDecoding(fixture, address, digest) {
       )
     ).normalized_result;
     if (unreached.has(offset)) {
-      if (decoded.status !== "undecodable")
+      if (decoded.status !== "not-in-listing")
         disagreements.push({
           address: address(offset),
           llvm: mnemonic,
@@ -518,7 +519,7 @@ async function verifyIdentityAndSnapshots() {
   };
   await call("open_binary", legacy);
   const legacyImage = await call("inspect_native_load_image", {}, digest);
-  assert.equal(legacyImage.normalized_result.variant, undefined);
+  assert.equal(legacyImage.normalized_result.layout, undefined);
   assert.equal(legacyImage.normalized_result.base_address, "0x8000000");
   assert.equal(
     legacyImage.analysis_profile.parameters.language_id,

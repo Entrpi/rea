@@ -18,6 +18,7 @@ import {
   createTestBinarySession,
 } from "../../fixtures/binarySession.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 import { silentLogger } from "../../../src/logger.js";
 import { GHIDRA_PROVIDER_IDENTITY } from "../../../src/ghidra/GhidraProviderCapabilities.js";
 import { RAW_ONLY_ARCHITECTURES } from "../../../src/domain/binaryTargetTypes.js";
@@ -177,7 +178,16 @@ it.each([
       },
     });
     expect(opened.isError).toBe(true);
-    expect(JSON.stringify(opened.content)).toContain(reason);
+    expect(parseMcpToolError(opened)).toMatchObject({
+      error: {
+        code: "invalid_request",
+        details: {
+          reason: expect.stringContaining(reason),
+          constraint: "load_selection_rejected",
+          field: "entry_point",
+        },
+      },
+    });
     expect(session.activeTarget()).toBeUndefined();
   },
 );

@@ -3,7 +3,6 @@ import { matchNativeFunctionsInputSchema } from "./native/functionMatchingContra
 import { z } from "zod";
 
 import { absoluteLocalPathStringSchema } from "../domain/localPath.js";
-import { artifactComparisonInputSchema } from "../domain/artifactComparison.js";
 import { callPathInputSchema } from "../domain/callPathSchemas.js";
 import { changedBehaviorInputSchema } from "../domain/changedBehavior.js";
 import { functionComparisonInputSchema } from "../domain/functionComparisonSchemas.js";
@@ -23,6 +22,7 @@ import {
 import { binarySessionInputSchema } from "./sessionStatusContract.js";
 import {
   addressContextInputSchema,
+  artifactComparisonInputSchema,
   bundleComparisonMcpInputSchema,
   importEvidenceBundleInputSchema,
   listUnknownsInputSchema,
@@ -65,7 +65,7 @@ export const exportEvidenceBundleInputSchema = z.strictObject({
 export const SESSION_TOOL_CONTRACTS = [
   session(
     "open_binary",
-    "Open a local executable, application bundle, archive, JavaScript, source map, plist, or analysis database after validation. format=dos-com explicitly interprets 1..65280 headerless bytes as a DOS COM analysis image. format=raw-binary interprets headerless bytes with a required architecture and entry_point; file offset 0 maps at the entry. architecture_variant names an ARM M profile decoded in Thumb state; with it, base_address maps file offset 0 separately and entry_point may be omitted to read Reset from the vector table. Omission preserves header-based detection. provider_id selects one deep provider or deterministic auto selection; the binding remains stable until close or an explicit switch, with no failure fallback. Reopening the same target and profile retains its active database and metadata edits. An optional analysis snapshot is imported atomically and must match the binary identity, concrete provider, and canonical analysis profile exactly; importing into a session with metadata mutations requires closing and reopening it first. Call close_binary when the investigation is finished.",
+    "Open a local executable, application bundle, archive, JavaScript, source map, plist, or analysis database after validation. format=dos-com explicitly interprets 1..65280 headerless bytes as a DOS COM analysis image. format=raw-binary interprets headerless bytes with a required architecture and entry_point; file offset 0 maps at that address. An ARM M-profile image may instead give architecture_variant and base_address and read Reset from its vector table. Omission preserves header-based detection. provider_id selects one deep provider or deterministic auto selection; the binding remains stable until close or an explicit switch, with no failure fallback. Reopening the same target and profile retains its active database and metadata edits. An optional analysis snapshot is imported atomically and must match the binary identity, concrete provider, and canonical analysis profile exactly; importing into a session with metadata mutations requires closing and reopening it first. Call close_binary when the investigation is finished.",
     openBinaryInputSchema,
   ),
   session(
@@ -105,7 +105,7 @@ export const SESSION_TOOL_CONTRACTS = [
   ),
   session(
     "compare_artifacts",
-    "Compare complete artifact inventories by logical occurrence path, content identity, metadata, and graph relations. Pass the inventory Evidence nested in each inspect_artifact result as left and right, or pass its inspect_analysis_view summary while the complete parent Evidence remains retained in this session. Summary facts are not treated as a complete inventory; comparison resolves the exact retained parent. Every delta cites both complete inputs, and gaps yield truncated or unknown, never equivalence. Returns every change inline.",
+    'Compare complete artifact inventories by logical occurrence path, content identity, metadata, and graph relations. Name each side once without resending Evidence: {kind: "retained-evidence", evidence_id} selects an inspect_artifact result, its nested inventory, or its inspect_analysis_view summary retained in this session; {kind: "evidence-file", path, evidence_id?} reads one record from a local Evidence file or bundle at an absolute path. Complete inline Evidence is also accepted. Summary facts are not treated as a complete inventory; comparison resolves the exact complete parent from the same source bundle or the retained session. Every delta cites both complete inputs, and gaps yield truncated or unknown, never equivalence. Returns every change inline.',
     artifactComparisonInputSchema,
   ),
   session(
