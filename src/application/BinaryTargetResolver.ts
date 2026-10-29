@@ -77,6 +77,7 @@ import { hasGodotPckHeader } from "../domain/godotPckFormat.js";
 import { hasUImageMagic } from "../domain/uimageFormat.js";
 import { hasUnityFsHeader } from "../domain/unityfsFormat.js";
 import { detectHexRecordEncoding } from "../domain/firmware/hexRecords.js";
+import { hasFitImagesNode } from "../domain/firmware/fitImage.js";
 import {
   ESP8266_REFUSAL,
   recognizeEspImage,
@@ -698,6 +699,7 @@ const detectArtifactFormat = async (
       constraint: "file_format_rejected",
     });
   if (esp === "esp-image") return "esp-image";
+  if (hasFitImagesNode(magic)) return "fit";
   // Binary plists, including keyed archives, often use other extensions.
   if (hasBinaryPlistSignature(magic)) return "plist";
   const named = namedArtifactFormat(lower);
@@ -775,6 +777,7 @@ const isArchiveFormat = (
     "intel-hex",
     "srec",
     "esp-image",
+    "fit",
   ].includes(format);
 
 /** Whether the leading bytes begin any executable header family, valid or not. */
