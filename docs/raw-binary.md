@@ -291,9 +291,13 @@ This is decision D1 of the embedded-target work, raised in
 - **Known gap.** Results report the canonical `entry_point`, `base_address` and
   `vector_table_address`; none retains the spelling the caller passed, as
   legacy `entry_point` did not before these inputs. Direct CLI requests keep
-  the caller's path as Evidence `caller_input_path`, outside semantic identity;
-  recording a load selection's spellings the same way is a later, additive
-  change.
+  the caller's path as Evidence `caller_input_path`, outside semantic identity.
+  Recording a load selection's spellings the same way would be a later change,
+  but not one older readers accept: the Evidence envelope is strict, so REA
+  versions without the new field refuse records that carry it. A caller that
+  needs its spelling keeps its own request: an MCP client already holds its
+  arguments, and a CLI caller can save its command beside the Evidence it
+  writes, together with its `evidence_id`.
 
 ## Provider languages
 
