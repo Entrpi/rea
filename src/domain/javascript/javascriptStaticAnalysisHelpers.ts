@@ -17,7 +17,7 @@ import {
   semanticStaticPropertyName,
   unwrapJavaScriptExpression,
 } from "./javascriptAstValues.js";
-import type { JavaScriptOpenReceiverFact } from "./javascriptSemanticAnalysis.js";
+import type { JavaScriptOpenReceiverFact } from "./javascriptSemanticReceiverFacts.js";
 import {
   compareUnicodeCodePoints,
   compositeKey,
@@ -310,12 +310,6 @@ export interface JavaScriptStaticSourceUrlPath {
   readonly path: string;
   readonly directory: boolean;
 }
-
-/** Convert an exact static file URL expression to a POSIX path. */
-export const staticFileUrlPath = (
-  node: t.CallExpression | t.NewExpression,
-  pathIntrinsics?: JavaScriptStaticPathIntrinsicQuery,
-): string | undefined => staticFileUrlPathFact(node, pathIntrinsics)?.path;
 
 const staticFileUrlPathFact = (
   node: t.CallExpression | t.NewExpression,
