@@ -2,10 +2,12 @@ import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
+import { cortexM0Fixture } from "../../tests/conformance/ghidra/cortexM.fixture.mjs";
 import { attestGhidraRawBinaryLoadImage } from "./GhidraLoadImageValues.js";
 import {
   familyRawTarget,
   fixtureRawBinaryLoadImage,
+  m6809Image,
 } from "./GhidraRawBinaryLoadImage.fixture.js";
 import {
   GHIDRA_RAW_ENTRY_CONTEXT,
@@ -23,7 +25,6 @@ import type { RawBinaryLoad } from "../domain/binaryTargetTypes.js";
 import {
   admittedRawLoad,
   providerLanguageRawTarget,
-  vectorTableWords,
   rawLoadAtEntry,
 } from "../domain/rawBinary.fixture.js";
 
@@ -373,28 +374,18 @@ describe("raw-binary independent load-image checks", () => {
   });
 });
 
+// One Cortex-M0 image holds the vector table and the Thumb code its Reset
+// word names; every load below is admitted from these bytes.
+const m0Image = cortexM0Fixture(0x08000000);
 const thumbImage = (rawLoad: RawBinaryLoad, tmode: string | null = "0x1") => {
-  const f = fixtureRawBinaryLoadImage();
-  const target = {
-    ...f.target,
-    architecture: "arm" as const,
-    availableArchitectures: ["arm" as const],
-    rawLoad,
-  };
-  const mapping = f.observation.mappings[0];
-  if (mapping === undefined) throw new Error("Missing source mapping fixture");
-  mapping.start = rawLoad.baseAddress;
-  mapping.end = `0x${(BigInt(rawLoad.baseAddress) + 3n).toString(16)}`;
-  f.observation.language_id = ghidraRawBinaryLanguage(target).languageId;
-  // Processor-defined labels are not applied, so the seeded entry is the only one.
-  f.observation.entry_points = [rawLoad.entryPoint];
+  const f = fixtureRawBinaryLoadImage(m0Image, rawLoad);
   f.observation.entry_context = [
     {
       address: rawLoad.entryPoint,
       registers: [{ name: "TMode", value_hex: tmode }],
     },
   ];
-  return { ...f, target };
+  return f;
 };
 const resetLoad = admittedRawLoad(
   {
@@ -402,9 +393,9 @@ const resetLoad = admittedRawLoad(
     architectureVariant: "armv8-m.main",
     entryPoint: undefined,
     baseAddress: "0x08000000",
-    fileBytes: 0x10,
+    fileBytes: m0Image.length,
   },
-  vectorTableWords(0x20005000, 0x08000009),
+  m0Image.subarray(0, 8),
 );
 
 describe("raw-binary segments load image", () => {
@@ -425,18 +416,18 @@ describe("raw-binary segments load image", () => {
         architecture: "arm",
         architecture_variant: "armv8-m.main",
         language_id: "ARM:LE:32:v8-m",
-        file_bytes: 4,
+        file_bytes: m0Image.length,
         segments: [
           {
             name: "image",
             address: "0x8000000",
-            size: 4,
+            size: m0Image.length,
             backing: { kind: "source-range", source: 0, offset: 0 },
           },
         ],
         entries: [
           {
-            address: "0x8000008",
+            address: "0x8000040",
             isa_mode: "thumb",
             role: "reset",
             basis: "vector-table",
@@ -444,8 +435,8 @@ describe("raw-binary segments load image", () => {
         ],
         vector_table: {
           address: "0x8000000",
-          initial_stack_pointer: "0x20005000",
-          reset_vector: "0x08000009",
+          initial_stack_pointer: "0x20001000",
+          reset_vector: "0x08000041",
         },
         checks: expect.arrayContaining([
           expect.objectContaining({
@@ -508,8 +499,8 @@ describe("raw-binary segments load image", () => {
         architecture: "arm",
         architectureVariant: "armv7-m",
         baseAddress: "0x8000000",
-        entryPoint: "0x8000002",
-        fileBytes: 4,
+        entryPoint: "0x8000056",
+        fileBytes: m0Image.length,
       }),
     );
     const result = attestGhidraRawBinaryLoadImage(
@@ -526,7 +517,7 @@ describe("raw-binary segments load image", () => {
         language_id: "ARM:LE:32:Cortex",
         entries: [
           {
-            address: "0x8000002",
+            address: "0x8000056",
             isa_mode: "thumb",
             role: "entry",
             basis: "caller",
@@ -550,9 +541,9 @@ describe("raw-binary segments load image", () => {
             entryPoint: undefined,
             baseAddress,
             ...(vectorTableAddress === undefined ? {} : { vectorTableAddress }),
-            fileBytes: 0x10,
+            fileBytes: m0Image.length,
           },
-          vectorTableWords(0x20005000, 0x08000009),
+          m0Image.subarray(0, 8),
         ),
       );
       return attestGhidraRawBinaryLoadImage(
@@ -567,33 +558,25 @@ describe("raw-binary segments load image", () => {
 });
 
 describe("raw-binary provider-language load image", () => {
-  // The fixture's four bytes mapped at a separate base, with the entry inside.
-  const languageImage = (space = "RAM") => {
-    const f = fixtureRawBinaryLoadImage();
-    const target = providerLanguageRawTarget(
-      {
-        provider: "ghidra",
-        languageId: "6809:BE:16:default",
-        compilerSpecId: "default",
-      },
-      {
-        baseAddress: "0xe000",
-        entryPoint: "0xe002",
-        fileBytes: 4,
-        sha256: f.target.sha256,
-      },
+  // One 6809 image mapped at a separate base with the entry at its branch; the
+  // load is admitted for these bytes.
+  const languageBytes = m6809Image();
+  const languageImage = () =>
+    fixtureRawBinaryLoadImage(
+      languageBytes,
+      providerLanguageRawTarget(
+        {
+          provider: "ghidra",
+          languageId: "6809:BE:16:default",
+          compilerSpecId: "default",
+        },
+        {
+          baseAddress: "0xe000",
+          entryPoint: "0xe002",
+          fileBytes: languageBytes.length,
+        },
+      ).rawLoad,
     );
-    const mapping = f.observation.mappings[0];
-    if (mapping === undefined)
-      throw new Error("Missing source mapping fixture");
-    mapping.start = "0xe000";
-    mapping.end = "0xe003";
-    mapping.address_space = space;
-    f.observation.default_address_space = space;
-    f.observation.language_id = "6809:BE:16:default";
-    f.observation.entry_points = ["0xe002"];
-    return { ...f, target };
-  };
 
   it("verifies the caller-selected language in its own default space", () => {
     const f = languageImage();
@@ -628,7 +611,7 @@ describe("raw-binary provider-language load image", () => {
       { entry_points: ["0xe002", "0xfffe"] },
     ],
     ["another language", { language_id: "6800:BE:16:default" }],
-    ["a mapping outside the default space", { default_address_space: "ram" }],
+    ["a mapping outside the default space", { default_address_space: "io" }],
   ])("reports a mismatch for %s", (_name, change) => {
     const f = languageImage();
     const result = attestGhidraRawBinaryLoadImage(f.snapshot, f.target, {
