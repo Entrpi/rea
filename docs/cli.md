@@ -339,6 +339,16 @@ rea extract-artifact ./firmware.dfu --json
 See [UF2 and DfuSe images](uf2-dfuse.md) for recognition, families, numbering,
 the DfuSe suffix CRC and limits.
 
+Inventory and extract U-Boot FIT images:
+
+```sh
+rea inspect-artifact ./boot.itb --json
+rea extract-artifact ./boot.itb --json
+```
+
+See [U-Boot FIT images](fit-images.md) for recognition, data sources, hashes
+and limits.
+
 Inspect local model declarations without loading weights:
 
 ```bash

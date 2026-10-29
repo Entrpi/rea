@@ -1,7 +1,6 @@
-import type { GodotPckAdmission } from "./GodotPckLocation.js";
-import type { PyInstallerAdmission } from "./pyinstaller/PyInstallerAdmission.js";
-import type { NodeSeaAdmission } from "./nodeSea/NodeSeaAdmission.js";
+import type { ArtifactReaderAdmission } from "./ArtifactReaderAdmission.js";
 import type { AsarHeaderAdmission } from "../config/asarHeaderAdmission.js";
+import { DotnetBundleArtifactReader } from "./DotnetBundleArtifactReader.js";
 import { AsarArtifactReader } from "./AsarArtifactReader.js";
 import type { ArtifactReader } from "./ArtifactReader.js";
 import { HexRecordArtifactReader } from "./HexRecordArtifactReader.js";
@@ -9,11 +8,9 @@ import { Uf2ArtifactReader } from "./Uf2ArtifactReader.js";
 import { DfuSeArtifactReader } from "./DfuSeArtifactReader.js";
 import { DirectoryArtifactReader } from "./DirectoryArtifactReader.js";
 import { EspImageArtifactReader } from "./EspImageArtifactReader.js";
-import {
-  EspFlashImageArtifactReader,
-  type EspFlashAdmission,
-} from "./EspFlashImageArtifactReader.js";
+import { EspFlashImageArtifactReader } from "./EspFlashImageArtifactReader.js";
 import type { EspFlashSelection } from "../domain/firmware/espFlashLocation.js";
+import { FitArtifactReader } from "./FitArtifactReader.js";
 import { GodotPckArtifactReader } from "./GodotPckArtifactReader.js";
 import { MachOSliceArtifactReader } from "./MachOSliceArtifactReader.js";
 import { NativeDmgArtifactReader } from "./NativeDmgArtifactReader.js";
@@ -27,7 +24,6 @@ import {
   isZipPackageFormat,
   type ZipPackageFormat,
 } from "../domain/zipPackageFormat.js";
-import type { StableRegularFileDescriptor } from "../filesystem/RegularFile.js";
 
 /** Formats with an artifact entry reader; availability policy belongs to the caller. */
 export type ArtifactReaderFormat =
@@ -35,6 +31,7 @@ export type ArtifactReaderFormat =
   | "asar"
   | "pyinstaller"
   | "node-sea"
+  | "dotnet-bundle"
   | "godot-pck"
   | "unityfs"
   | "uimage"
@@ -42,6 +39,7 @@ export type ArtifactReaderFormat =
   | "srec"
   | "uf2"
   | "dfuse"
+  | "fit"
   | "mach-o-universal"
   | "dmg"
   | "esp-image"
@@ -51,13 +49,7 @@ export type ArtifactReaderFormat =
 interface ArtifactReaderConstruction {
   readonly environment: Readonly<NodeJS.ProcessEnv>;
   readonly unreadableDirectories: "fail" | "omit";
-  readonly admission?:
-    | StableRegularFileDescriptor
-    | NodeSeaAdmission
-    | PyInstallerAdmission
-    | GodotPckAdmission
-    | EspFlashAdmission
-    | undefined;
+  readonly admission?: ArtifactReaderAdmission | undefined;
   readonly asarHeaderAdmission?: AsarHeaderAdmission | undefined;
   /** Caller inputs for an explicitly selected ESP flash image. */
   readonly espFlashSelection?: EspFlashSelection | undefined;
@@ -109,6 +101,15 @@ export function createArtifactReader(
           ? admission
           : rootSource,
       );
+    case "dotnet-bundle":
+      return new DotnetBundleArtifactReader(
+        path,
+        admission !== undefined &&
+          "kind" in admission &&
+          admission.kind === "dotnet-bundle"
+          ? admission
+          : rootSource,
+      );
     case "node-sea":
       return new NodeSeaArtifactReader(
         path,
@@ -138,6 +139,8 @@ export function createArtifactReader(
       return new Uf2ArtifactReader(path, rootSource);
     case "dfuse":
       return new DfuSeArtifactReader(path, rootSource);
+    case "fit":
+      return new FitArtifactReader(path, rootSource);
     case "mach-o-universal":
       return new MachOSliceArtifactReader(
         path,

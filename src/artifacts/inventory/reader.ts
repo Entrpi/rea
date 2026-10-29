@@ -1,7 +1,4 @@
-import type { GodotPckAdmission } from "../GodotPckLocation.js";
-import type { EspFlashAdmission } from "../EspFlashImageArtifactReader.js";
-import type { PyInstallerAdmission } from "../pyinstaller/PyInstallerAdmission.js";
-import type { NodeSeaAdmission } from "../nodeSea/NodeSeaAdmission.js";
+import type { ArtifactReaderAdmission } from "../ArtifactReaderAdmission.js";
 import type { AsarHeaderAdmission } from "../../config/asarHeaderAdmission.js";
 import type {
   ArtifactReader,
@@ -16,19 +13,13 @@ import {
   isZipPackageFormat,
   ZIP_NON_ENTRY_LIMITATION,
 } from "../../domain/zipPackageFormat.js";
-import type { StableRegularFileDescriptor } from "../../filesystem/RegularFile.js";
 import { ESP_IMAGE_LIMITATIONS } from "../../domain/firmware/espImageFacts.js";
 
 export const createReader = (
   path: string,
   format: ArtifactOccurrence["artifact_format"],
   environment: Readonly<NodeJS.ProcessEnv>,
-  readerAdmission?:
-    | StableRegularFileDescriptor
-    | NodeSeaAdmission
-    | PyInstallerAdmission
-    | GodotPckAdmission
-    | EspFlashAdmission,
+  readerAdmission?: ArtifactReaderAdmission,
   asarHeaderAdmission?: AsarHeaderAdmission,
   selectedPath?: string,
 ): ArtifactReader | undefined => {
@@ -105,6 +96,11 @@ export const inventoryCoverage = (
               "DfuSe inventory lists each target element as one region at its declared address. It does not establish CPU, byte order, memory map, or an entry point; an alternate setting selects a device memory, not an address space REA can interpret.",
             ]
           : []),
+        ...(reader.format === "fit"
+          ? [
+              "FIT inventory reports each /images node's stored bytes and its declared type, architecture, OS, compression, load and entry. Image data is not decompressed or decrypted, signatures are not verified, nothing is executed, and load and entry addresses are declarations.",
+            ]
+          : []),
         ...traversal.limitations,
       ],
     };
@@ -136,7 +132,8 @@ export const inventoryCoverage = (
     format === "esp-image" ||
     format === "esp-flash-image" ||
     format === "uf2" ||
-    format === "dfuse"
+    format === "dfuse" ||
+    format === "fit"
   )
     return {
       coverage: { scope: "container-entries", status: "unknown" },

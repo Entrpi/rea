@@ -451,7 +451,8 @@ export type BinaryTarget =
           | "srec"
           | "esp-image"
           | "uf2"
-          | "dfuse";
+          | "dfuse"
+          | "fit";
       })
   | (BinaryTargetIdentity &
       NonExecutableMetadata & {

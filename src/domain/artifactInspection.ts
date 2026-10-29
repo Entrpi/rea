@@ -19,6 +19,7 @@ import {
 } from "./artifactGraph.js";
 import { digestCanonicalValue } from "./canonicalDigest.js";
 import { isJavaScriptSourcePath } from "./javascript/javascriptArtifactFiles.js";
+import { admitRawBinary } from "./rawBinary.js";
 import { uniqueSorted } from "./canonicalOrdering.js";
 import { evidenceSchema, parseEvidence, type Evidence } from "./evidence.js";
 import { offsetText } from "./firmware/espImageStructures.js";
@@ -345,6 +346,7 @@ const probesFor = (
         ]
       : [];
   if (format === "esp-image") return espFlashDumpProbes(inventory);
+  if (format === "fit") return fitProbes(inventory);
   return format === "directory"
     ? directoryProbes(inventory)
     : probesForFormat(format);
@@ -366,6 +368,52 @@ const espFlashDumpProbes = (
       rationale: `Reopen the file with format esp-flash-image and flash_offset ${offset}, then inspect_artifact: it is a flash dump read from flash ${offset}, with a partition table at file offset ${offsetText(root.flash_dump.table_file_offset)}.`,
       authority: "artifact-bytes",
     },
+  ];
+};
+
+const fitProbes = (
+  inventory: ArtifactInventoryResult,
+): ArtifactInspectionResult["next_probes"] => {
+  // Extraction keeps stored bytes, so only plain images are directly analyzable.
+  const images = inventory.occurrences.flatMap((row) =>
+    row.format_metadata?.kind === "fit-image" &&
+    row.format_metadata.compression === "none" &&
+    row.format_metadata.cipher_present === false
+      ? [{ row, image: row.format_metadata }]
+      : [],
+  );
+  let rawProbe: ArtifactInspectionResult["next_probes"][number] | undefined;
+  for (const { row, image } of images) {
+    if (row.declared_size === null) continue;
+    if (image.entry !== null && image.entry !== image.load) continue;
+    // An unavailable entry is not proof that the declaration was absent.
+    if (image.unreadable_fields.includes("entry")) continue;
+    const admitted = admitRawBinary({
+      architecture: image.arch,
+      entryPoint: image.load,
+      fileBytes: row.declared_size,
+    });
+    // A selected entry never leaves admission waiting on a vector-table read.
+    if (!admitted.ok || "admit" in admitted.value) continue;
+    rawProbe = {
+      operation: "open_binary",
+      rationale: `Extract ${JSON.stringify(row.logical_path)} with extract_artifact, then open those uncompressed, unciphered bytes with format raw-binary, architecture ${admitted.value.architecture} and entry_point ${admitted.value.load.entryPoint}. This maps offset 0 and seeds analysis at that address; the declared entry is absent or equal to load.`,
+      authority: "native-analysis-provider",
+    };
+    break;
+  }
+  return [
+    ...(images.some(({ image }) => image.type === "flat_dt")
+      ? [
+          {
+            operation: "inspect_devicetree",
+            rationale:
+              "Extract images with extract_artifact, then inspect uncompressed, unciphered flat_dt images with inspect_devicetree.",
+            authority: "artifact-bytes" as const,
+          },
+        ]
+      : []),
+    ...(rawProbe === undefined ? [] : [rawProbe]),
   ];
 };
 
@@ -410,6 +458,15 @@ const directoryProbes = (
 const probesForFormat = (
   format: ArtifactInventoryResult["manifest"]["root_format"],
 ): ArtifactInspectionResult["next_probes"] => {
+  if (format === "dotnet-bundle")
+    return [
+      {
+        operation: "extract_artifact",
+        rationale:
+          "Extract members into a fresh owned directory, then inspect candidate files separately; bundle declarations do not establish their format.",
+        authority: "artifact-bytes",
+      },
+    ];
   if (["asar", "javascript-bundle"].includes(format))
     return [
       {

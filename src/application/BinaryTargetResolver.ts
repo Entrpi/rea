@@ -94,6 +94,7 @@ import {
   type EspFlashSelection,
 } from "../domain/firmware/espFlashLocation.js";
 import { espFlashSelectionError } from "../domain/firmware/espFlashSelection.js";
+import { hasFitImagesNode } from "../domain/firmware/fitImage.js";
 import {
   ESP8266_REFUSAL,
   recognizeEspImage,
@@ -811,6 +812,7 @@ const detectArtifactFormat = async (
       constraint: "file_format_rejected",
     });
   if (esp === "esp-image") return "esp-image";
+  if (hasFitImagesNode(magic)) return "fit";
   // Binary plists, including keyed archives, often use other extensions.
   if (hasBinaryPlistSignature(magic)) return "plist";
   const named = namedArtifactFormat(lower);
@@ -891,6 +893,7 @@ const isArchiveFormat = (
     "esp-flash-image",
     "uf2",
     "dfuse",
+    "fit",
   ].includes(format);
 
 /** Whether the leading bytes begin any executable header family, valid or not. */

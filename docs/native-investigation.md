@@ -568,6 +568,40 @@ segments do not produce file ranges. When the selected slice's container offset
 is unknown, those mapped locations are omitted with an explicit limitation;
 architecture inventory locations remain available.
 
+`inspect_macho.encryption` reports the `LC_ENCRYPTION_INFO(_64)` state of every
+slice, not only the selected one. It decodes only the FAT table, slice headers
+and load commands. Like every Mach-O container read, a `0xcafebabe` input of at
+most 16 MiB is first read whole to rule out a JVM class file, so that read
+includes code bytes; larger inputs and thin images read only the structures
+above. A slice is `encrypted` when its single encryption command has a nonzero
+`cryptid`, `not-encrypted` when `cryptid` is zero, and `absent` only when every
+load command was read and none was an encryption command. A command whose width
+or `cmdsize` contradicts the image, more than one such command, or a range past
+the slice is `malformed`; a slice whose commands could not be fully read is
+`malformed` or `unknown` with a reason, keeping any commands seen before the
+failure. A slice with more than two encryption commands keeps the first two
+and states the count in its reason. Range mapping in all slices shares one
+budget of segment and section records (16,384, a sixteenth of the native
+output budget); a slice past it keeps its status and reports its mapping as
+`unknown` with that reason. Framing caps retained segment commands before decoding.
+Only a successful mapping consumes the shared allowance; failed mappings leave
+it available to later slices. Each slice's `range` is end-exclusive in slice and input-file
+coordinates and maps to file-backed segment fragments, VM addresses and the
+overlapping nonempty sections; bytes outside every segment remain unmapped
+fragments. A segment with no VM size keeps its file bytes as fragments with
+null VM addresses, and a segment whose file size exceeds its VM size or whose
+VM range leaves the address space makes the mapping `unknown` with a reason
+while the slice keeps its encryption status. `architecture` is the lipo name of the record at the same offset,
+size and CPU identity, and is null when no single record matches. A ciphertext
+range adds a limitation naming its input-file bytes, because disassembly,
+decompilation, strings and references derived from them do not describe
+program code. Encryption is read through the same regular-file descriptor
+that `inspect_macho` binds for its load-command reads, whose SHA-256 must match
+the session target before and after the native tools run, or the call reports
+`artifact_changed`. A target that cannot be opened, or a symlinked, non-regular
+or changing target, fails the call instead of reporting tool facts without an
+encryption status.
+
 Hopper's `address_to_file_offset` combines the native image-relative mapping with
 original-file coordinates only after checking the source against the session's
 SHA-256. FAT tables and embedded Mach-O headers come from that same hashing pass.
@@ -604,6 +638,9 @@ complete observation.
   undecodable filenames and skipped symlinks, as partial coverage. Known
   executable roots remain available; unexamined names and symlink targets
   cannot establish an empty root set or the absence of other roots.
+  A dependency symlink whose target is not valid UTF-8 is undetermined, with
+  its stored target bytes in the limitation and partial coverage; a selected
+  root crossing such a symlink is refused with the same bytes in its diagnostic.
 - `inspect_asset_catalog` / `rea inspect-asset-catalog <app>` reads compiled
   `Assets.car` metadata through macOS `assetutil --info`. Catalog digests, raw
   rendition fields, pagination and exact UI resource-name matches are returned.
@@ -757,6 +794,11 @@ complete observation.
   files and universal slices before metadata decoding. CPU subtypes and
   capability bits remain source facts; an `arm64` request may select an
   `arm64e` image under the existing slice preference policy.
+  Objective-C class, protocol and category lists require eight-byte entries;
+  Swift type and conformance sections require four-byte entries. Misaligned
+  section lengths and unsupported non-PowerPC big-endian CPU declarations return
+  `unsupported_target` with the selected path and precise reason. Recovery
+  selects a well-formed or supported artifact and reopens that target.
   The byte reader holds the whole selected file in memory, so it admits files up
   to 64 MiB / 67108864 bytes by default. Select a larger budget with
   `max_input_bytes` (CLI `--max-input-bytes`), at most 1 GiB / 1073741824
@@ -851,7 +893,11 @@ complete observation.
   and `__objc_catlist` categories are also decoded. Categories record the
   extended class, local or external, plus
   their methods, protocols and properties; category methods appear as
-  implementations with a `category`. Swift field-offset globals that are only
+  implementations with a `category`. A category whose class reference is null,
+  or is bound to a symbol other than `_OBJC_CLASS_$_`, such as the `_$s…CN`
+  metadata symbol of another module's Swift class, keeps a null class, and
+  `objc_properties_categories` coverage names that reference. Swift
+  field-offset globals that are only
   initialized at runtime stay unresolved. Generic, resilient, async and
   coroutine tables, and inherited overrides, have explicit unsupported or
   partial coverage. Other providers retain the

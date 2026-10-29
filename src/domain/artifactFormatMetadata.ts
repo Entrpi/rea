@@ -122,6 +122,14 @@ export type PyInstallerEntryMetadata = z.infer<
   typeof pyInstallerEntryMetadataSchema
 >;
 
+/** Ordinary .NET bundle manifest facts, not proof of managed assembly validity. */
+export const dotnetBundleEntryMetadataSchema = z.strictObject({
+  kind: z.literal("dotnet-bundle-entry"),
+  major_version: uint32,
+  minor_version: uint32,
+  file_type: z.number().int().min(0).max(255),
+});
+
 /**
  * Node.js single-executable blob facts. Lengths follow the Node 24 64-bit
  * little-endian `size_t` reader. The fuse sentinel is a separate carrier scan.
@@ -269,10 +277,80 @@ export const hexRecordRegionMetadataSchema = z.strictObject({
   first_line: offset,
   last_line: offset,
 });
-export type HexRecordRegionMetadata = z.infer<
-  typeof hexRecordRegionMetadataSchema
->;
 
+/**
+ * U-Boot FIT root facts. Configuration references are declared names; a
+ * reference that names no image is reported as a limitation, not removed.
+ */
+export const fitMetadataSchema = z.strictObject({
+  kind: z.literal("fit"),
+  fdt_version: uint32,
+  fdt_totalsize: offset,
+  external_data_base: offset,
+  description: z.string().nullable(),
+  timestamp: uint32.nullable(),
+  address_cells: uint32.nullable(),
+  default_configuration: z.string().nullable(),
+  configurations: z.array(
+    z.strictObject({
+      name: z.string(),
+      description: z.string().nullable(),
+      kernel: z.array(z.string()),
+      firmware: z.array(z.string()),
+      fdt: z.array(z.string()),
+      ramdisk: z.array(z.string()),
+      loadables: z.array(z.string()),
+      signature_count: uint32,
+      signatures_unreadable: uint32,
+      unresolved_reference_count: uint32,
+      signature_algorithms: z.array(z.string()),
+    }),
+  ),
+});
+export type FitMetadata = z.infer<typeof fitMetadataSchema>;
+
+/**
+ * One /images node's facts. Null fields are absent unless unreadable_fields
+ * identifies an interpretation failure. Load and entry are declarations;
+ * stored bytes may be compressed or ciphered.
+ */
+export const fitImageMetadataSchema = z.strictObject({
+  kind: z.literal("fit-image"),
+  index: uint32,
+  name: z.string(),
+  description: z.string().nullable(),
+  type: z.string().nullable(),
+  arch: z.string().nullable(),
+  os: z.string().nullable(),
+  compression: z.string().nullable(),
+  load: z.string().nullable(),
+  entry: z.string().nullable(),
+  data_source: z.enum(["embedded", "data-offset", "data-position"]),
+  declared_offset: uint32.nullable(),
+  image_data: z.string().nullable(),
+  /** Presence is independent of whether the declared algorithm is readable. */
+  cipher_present: z.boolean(),
+  cipher_algo: z.string().nullable(),
+  unreadable_fields: z.array(
+    z.enum([
+      "description",
+      "type",
+      "arch",
+      "os",
+      "compression",
+      "load",
+      "entry",
+      "cipher_algo",
+    ]),
+  ),
+  hash_algorithms: z.array(z.string()),
+  hashes_verified: uint32,
+  hashes_unverified: uint32,
+  signature_count: uint32,
+  signatures_unreadable: uint32,
+  signature_algorithms: z.array(z.string()),
+});
+export type FitImageMetadata = z.infer<typeof fitImageMetadataSchema>;
 export const uint8 = z.number().int().min(0).max(0xff);
 const uint16 = z.number().int().min(0).max(0xffff);
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/u);
@@ -630,6 +708,7 @@ export const artifactFormatMetadataSchema = z.discriminatedUnion("kind", [
   unityFsEntryMetadataSchema,
   pyInstallerMetadataSchema,
   pyInstallerEntryMetadataSchema,
+  dotnetBundleEntryMetadataSchema,
   nodeSeaMetadataSchema,
   nodeSeaEntryMetadataSchema,
   hexRecordsMetadataSchema,
@@ -645,6 +724,8 @@ export const artifactFormatMetadataSchema = z.discriminatedUnion("kind", [
   uf2RegionMetadataSchema,
   dfuSeMetadataSchema,
   dfuSeElementMetadataSchema,
+  fitMetadataSchema,
+  fitImageMetadataSchema,
 ]);
 export type ArtifactFormatMetadata = z.infer<
   typeof artifactFormatMetadataSchema
@@ -669,6 +750,10 @@ const declarationsByKind: {
         readonly declaration: (
           metadata: FormatMetadataByKind[Kind],
         ) => FormatMetadataDeclaration["facts"];
+        /** Projected fields the producer could not interpret. */
+        readonly unreadable?: (
+          metadata: FormatMetadataByKind[Kind],
+        ) => FormatMetadataDeclaration["unreadable"];
       }
     | { readonly notCompared: string };
 } = {
@@ -704,6 +789,13 @@ const declarationsByKind: {
       type_code: metadata.type_code,
     }),
   },
+  /**
+   * How the manifest tells the host to treat a member. The header versions
+   * repeat the host's own bytes, which content comparison covers.
+   */
+  "dotnet-bundle-entry": {
+    declaration: (metadata) => ({ file_type: metadata.file_type }),
+  },
   "node-sea": {
     notCompared:
       "Its fields come from the carrier's own bytes, which content comparison covers.",
@@ -714,24 +806,6 @@ const declarationsByKind: {
       role: metadata.role,
       source_path: metadata.source_path,
     }),
-  },
-  "esp-image": {
-    notCompared:
-      "Its fields come from the image's own bytes, which content comparison covers.",
-  },
-  /**
-   * What a segment header declares: where its bytes load and how many there
-   * are. Header offsets are layout, and the classification is derived.
-   */
-  "esp-image-segment": {
-    declaration: (metadata) => ({
-      load_addr: metadata.load_addr,
-      data_len: metadata.data_len,
-    }),
-  },
-  "esp-image-signature-block": {
-    notCompared:
-      "Its fields come from the block's own bytes, which content comparison covers, and image_digest_matches follows the image's content.",
   },
   "hex-records": {
     notCompared:
@@ -754,6 +828,24 @@ const declarationsByKind: {
   "uimage-entry": {
     notCompared:
       "role and index restate the entry's path; its stored bytes are compared by content.",
+  },
+  "esp-image": {
+    notCompared:
+      "Its fields come from the image's own bytes, which content comparison covers.",
+  },
+  /**
+   * What a segment header declares: where its bytes load and how many there
+   * are. Header offsets are layout, and the classification is derived.
+   */
+  "esp-image-segment": {
+    declaration: (metadata) => ({
+      load_addr: metadata.load_addr,
+      data_len: metadata.data_len,
+    }),
+  },
+  "esp-image-signature-block": {
+    notCompared:
+      "Its fields come from the block's own bytes, which content comparison covers, and image_digest_matches follows the image's content.",
   },
   "esp-flash-image": {
     notCompared:
@@ -795,6 +887,28 @@ const declarationsByKind: {
       target_name: metadata.target_name,
     }),
   },
+  fit: {
+    notCompared:
+      "Its fields come from the FIT's own bytes, which content comparison covers.",
+  },
+  /**
+   * Payload interpretation and sharing declarations, independent of FIT
+   * placement: the image's name, index and data position are layout.
+   */
+  "fit-image": {
+    declaration: (metadata) => ({
+      type: metadata.type,
+      arch: metadata.arch,
+      os: metadata.os,
+      compression: metadata.compression,
+      load: metadata.load,
+      entry: metadata.entry,
+      image_data: metadata.image_data,
+      cipher_present: metadata.cipher_present,
+      cipher_algo: metadata.cipher_algo,
+    }),
+    unreadable: (metadata) => metadata.unreadable_fields,
+  },
 };
 
 /** Kinds whose declarations artifact comparison compares, in table order. */
@@ -806,6 +920,8 @@ export const COMPARED_FORMAT_METADATA_KINDS = Object.entries(
 export interface FormatMetadataDeclaration {
   readonly kind: FormatMetadataKind;
   readonly facts: Readonly<Record<string, unknown>>;
+  /** Facts whose value is unknown, which compare as neither equal nor changed. */
+  readonly unreadable: readonly string[];
 }
 
 // Generic in the kind, so each projection receives its own metadata type.
@@ -815,7 +931,11 @@ const declarationOf = <Kind extends FormatMetadataKind>(
 ): FormatMetadataDeclaration | undefined => {
   const entry = declarationsByKind[kind];
   return "declaration" in entry
-    ? { kind, facts: entry.declaration(metadata) }
+    ? {
+        kind,
+        facts: entry.declaration(metadata),
+        unreadable: entry.unreadable?.(metadata) ?? [],
+      }
     : undefined;
 };
 

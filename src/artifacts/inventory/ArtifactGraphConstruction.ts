@@ -5,6 +5,7 @@ import { detectHexRecordEncoding } from "../../domain/firmware/hexRecords.js";
 import { recognizeEspImage } from "../../domain/firmware/espImage.js";
 import { hasUf2Block } from "../../domain/firmware/uf2.js";
 import { isDfuSeFile } from "../../domain/firmware/dfuse.js";
+import { hasFitImagesNode } from "../../domain/firmware/fitImage.js";
 import type { ArtifactClassificationEvidence } from "../ArtifactClassificationProbe.js";
 import { asarHeaderAdmissionFailure } from "../AsarHeader.js";
 import { hasDestinationPath } from "../ArtifactPaths.js";
@@ -137,7 +138,10 @@ export const createOccurrence = (
       entry.byteOffset === null ||
       entry.declaredSize === null
         ? null
-        : { offset: entry.byteOffset, length: entry.declaredSize },
+        : {
+            offset: entry.byteOffset,
+            length: entry.byteLength ?? entry.declaredSize,
+          },
     limitations: [...entry.limitations],
     ...(entry.declaredIntegrity === null
       ? {}
@@ -289,6 +293,7 @@ export const rootOccurrenceFor = (
       "dmg",
       "pkg",
       "pyinstaller",
+      "dotnet-bundle",
       "node-sea",
       "intel-hex",
       "srec",
@@ -296,6 +301,7 @@ export const rootOccurrenceFor = (
       "esp-flash-image",
       "uf2",
       "dfuse",
+      "fit",
     ].includes(metadata.format)
       ? "container"
       : artifactRoleForFormat(metadata.path, metadata.format).kind,
@@ -596,7 +602,8 @@ const artifactRoleForFormat = (
     format === "esp-image" ||
     format === "esp-flash-image" ||
     format === "uf2" ||
-    format === "dfuse"
+    format === "dfuse" ||
+    format === "fit"
   )
     return { kind: "container", format };
   return {
@@ -623,6 +630,7 @@ export const classifyArtifactBytes = (
   if (suffix !== undefined && isDfuSeFile(prefix, suffix, fileSize))
     return "dfuse";
   if (recognizeEspImage(prefix, fileSize) === "esp-image") return "esp-image";
+  if (hasFitImagesNode(prefix)) return "fit";
   if (hasBinaryPlistSignature(prefix)) return "plist";
   if (hasXmlPlistSignature(prefix)) return "plist";
   const fatFormat = classifyFatArtifact(evidence, fileSize);
