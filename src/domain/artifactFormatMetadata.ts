@@ -847,12 +847,17 @@ const declarationsByKind: {
       type_code: metadata.type_code,
     }),
   },
-  /**
-   * How the manifest tells the host to treat a member. The header versions
-   * repeat the host's own bytes, which content comparison covers.
-   */
   "dotnet-bundle-entry": {
-    declaration: (metadata) => ({ file_type: metadata.file_type }),
+    notCompared:
+      "Its fields come from the host's bundle manifest, whose bytes the host's content comparison covers.",
+  },
+  "bun-standalone": {
+    notCompared:
+      "Its fields come from the carrier's own bytes, which content comparison covers.",
+  },
+  "bun-standalone-entry": {
+    notCompared:
+      "Its fields come from the carrier's module graph, whose bytes the carrier's content comparison covers.",
   },
   "node-sea": {
     notCompared:
