@@ -2,7 +2,7 @@
 name: reverse-engineer-anything
 description: Reverse engineer native, managed, Electron/JavaScript, packaged, firmware, and browser targets with REA, and build agent environments (AgentEnv bundles) of web applications from a live instance or a capture. Use shipped-artifact or requested runtime evidence to explain features, compare versions, decompile code, or guide a reconstruction. Skip REA for ordinary source-repository architecture analysis.
 metadata:
-  version: "53"
+  version: "55"
 ---
 
 # REA
@@ -147,7 +147,9 @@ explicit path or endpoint and do not need it.
   and field names/types before choosing fields for `inspect_packet_capture`.
   Query/page the relevant records; registrations do not establish observed traffic.
 - Recorded packet captures: `inspect_packet_capture` with selected TShark fields,
-  display filters and decode-as rules. Requires Linux, util-linux prlimit and `REA_TSHARK_COMMAND`; see
+  display filters and decode-as rules. Requires Linux, util-linux prlimit and
+  TShark 4.x on an absolute `PATH` entry or via the optional absolute
+  `REA_TSHARK_COMMAND` override; see
   [capture guide](https://github.com/morluto/rea/blob/main/docs/packet-captures.md).
   Packet limits count input packets before filtering. Output defaults to 50 matching
   frames; use `match_offset` / `match_limit` for later pages, or explicit null
