@@ -73,13 +73,14 @@ it("reports a Godot PCK member that becomes encrypted", async () => {
     hash_status: "unavailable",
   });
 
+  // The encryption change is known; whether the script changed is not.
   const result = await compare(plain, encrypted);
   expect(
     result.changes.filter(({ logical_path }) => logical_path !== "."),
   ).toMatchObject([
     {
       logical_path: "scenes/main.gd",
-      classification: "changed",
+      classification: "unknown",
       dimensions: ["metadata", "availability"],
       left_occurrence_id: member(plain).occurrence_id,
       right_occurrence_id: member(encrypted).occurrence_id,
