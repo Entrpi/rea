@@ -12,7 +12,7 @@ import type { CliInstance } from "./types.js";
 import { withCommandCancellation } from "./commandCancellation.js";
 import { registerEvidenceSourceCommand } from "./evidenceSourceCommand.js";
 import { absoluteCallerPath } from "../filesystem/callerPath.js";
-import { finishAnalysisCommand } from "./finishAnalysisCommand.js";
+import { finishCliEvidenceCommand } from "./cliEvidenceCallerPath.js";
 import {
   inspectWasmArtifactInputSchema,
   wasmArtifactPathsSchema,
@@ -53,7 +53,8 @@ export const registerWasmCommands = (
     run: ({ args, options }) =>
       withCommandCancellation((signal) =>
         logCliCommand(logger, wasmArtifactModule.cliCommand, () =>
-          finishAnalysisCommand(
+          finishCliEvidenceCommand(
+            args.path,
             () =>
               service.inspect(
                 {

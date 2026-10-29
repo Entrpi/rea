@@ -70,6 +70,7 @@ import { deliverAnalysisEvidence } from "./EvidenceBundleCommands.js";
 import type { BinaryTargetError } from "../domain/configurationErrors.js";
 import {
   directAnalysisCleanupFailure,
+  projectDirectAnalysisFailure,
   managedAnalysisCleanupFailure,
   withSessionCleanup,
 } from "./DirectAnalysisCleanup.js";
@@ -243,7 +244,7 @@ export const runProviderAnalysis = async (
         operationSignal,
       );
       await dispatchQueuedInterrupts();
-      if (!original.ok) return err(cliError(original.error));
+      if (!original.ok) return err(cliError(original.error, path));
       const evidence = withEvidenceCallerInputPath(original.value, path);
       if (operationSignal.aborted)
         return err(
@@ -263,7 +264,7 @@ export const runProviderAnalysis = async (
               delivery.detail,
               operationSignal,
             );
-      return result.ok ? ok(result.value) : err(cliError(result.error));
+      return result.ok ? ok(result.value) : err(cliError(result.error, path));
     }
     return runAnalysis(dependencies, path, tool, arguments_, {
       logger,
@@ -555,9 +556,11 @@ const runAnalysis = async (
       outcome.cleanupError.retainDiagnostics({
         analysis_snapshot: { ...publishedSnapshot },
       });
-    return err(directAnalysisCleanupFailure(result, outcome.cleanupError));
+    return err(
+      directAnalysisCleanupFailure(result, outcome.cleanupError, path),
+    );
   }
-  return result.ok ? ok(result.value) : err(cliError(result.error));
+  return result.ok ? ok(result.value) : err(cliError(result.error, path));
 };
 
 const executeAnalysisTool = async (input: {
@@ -823,7 +826,12 @@ const fileExists = async (path: string): Promise<boolean> => {
   }
 };
 
-const cliError = (error: AnalysisError): JsonValue => ({
+const cliError = (
+  error: AnalysisError,
+  callerInputPath?: string,
+): JsonValue => ({
   error: "Analysis failed",
-  ...projectAnalysisError(error),
+  ...(callerInputPath === undefined
+    ? projectAnalysisError(error)
+    : projectDirectAnalysisFailure(error, callerInputPath)),
 });
