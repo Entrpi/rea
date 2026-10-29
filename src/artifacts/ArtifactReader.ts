@@ -199,6 +199,7 @@ export interface ArtifactReader {
     | "uimage"
     | "pyinstaller"
     | "dotnet-bundle"
+    | "bun-standalone"
     | "node-sea"
     | "intel-hex"
     | "srec"

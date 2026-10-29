@@ -1,3 +1,4 @@
+import { artifactFormatDescriptor } from "../artifactFormats.js";
 import { hasGodotPckHeader } from "../../domain/godotPckFormat.js";
 import { hasUImageMagic } from "../../domain/uimageFormat.js";
 import { hasUnityFsHeader } from "../../domain/unityfsFormat.js";
@@ -31,7 +32,6 @@ import type {
 } from "../../domain/artifactGraph.js";
 import {
   hasZipSignature,
-  isZipPackageFormat,
   zipPackageFormatForPath,
   type ZipPackageFormat,
 } from "../../domain/zipPackageFormat.js";
@@ -283,26 +283,7 @@ export const rootOccurrenceFor = (
   logical_path: ".",
   entry_kind: metadata.format === "directory" ? "directory" : "file",
   artifact_kind:
-    metadata.format === "directory" ||
-    isZipPackageFormat(metadata.format) ||
-    [
-      "asar",
-      "godot-pck",
-      "unityfs",
-      "uimage",
-      "dmg",
-      "pkg",
-      "pyinstaller",
-      "dotnet-bundle",
-      "node-sea",
-      "intel-hex",
-      "srec",
-      "esp-image",
-      "esp-flash-image",
-      "uf2",
-      "dfuse",
-      "fit",
-    ].includes(metadata.format)
+    artifactFormatDescriptor(metadata.format)?.occurrenceContainer === true
       ? "container"
       : artifactRoleForFormat(metadata.path, metadata.format).kind,
   artifact_format: metadata.format,
@@ -593,18 +574,7 @@ const artifactRoleForFormat = (
       format: zipPackageFormatForPath(path) ?? format,
     };
   if (format === "plist") return { kind: "plist", format };
-  if (
-    format === "godot-pck" ||
-    format === "unityfs" ||
-    format === "uimage" ||
-    format === "intel-hex" ||
-    format === "srec" ||
-    format === "esp-image" ||
-    format === "esp-flash-image" ||
-    format === "uf2" ||
-    format === "dfuse" ||
-    format === "fit"
-  )
+  if (artifactFormatDescriptor(format)?.roleContainer === true)
     return { kind: "container", format };
   return {
     kind: ["native-addon", "dynamic-library"].includes(byPath.kind)
