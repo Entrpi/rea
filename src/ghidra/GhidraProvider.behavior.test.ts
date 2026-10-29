@@ -24,7 +24,10 @@ import {
   fixtureDosLoadImage,
   compareDosClientFixture,
 } from "./GhidraLoadImage.fixture.js";
-import { fixtureRawBinaryLoadImage } from "./GhidraRawBinaryLoadImage.fixture.js";
+import {
+  armBxLrImage,
+  fixtureRawBinaryLoadImage,
+} from "./GhidraRawBinaryLoadImage.fixture.js";
 import {
   nativeAotPeDigest,
   nativeAotPeFixture,
@@ -4609,10 +4612,11 @@ it("commits native coordinates independently of analyzer choices and preserves r
   expect(functionCoordinateContextsEqual(baseline, changedOptions)).toBe(true);
   const raw = fixtureRawBinaryLoadImage().target;
   const rawProfile = await resolve(defaultProvider, raw);
-  const shifted = await resolve(defaultProvider, {
-    ...raw,
-    rawLoad: rawLoadAtEntry("0x8001000"),
-  });
+  const shifted = await resolve(
+    defaultProvider,
+    fixtureRawBinaryLoadImage(armBxLrImage(), rawLoadAtEntry("0x8001000"))
+      .target,
+  );
   expect(rawProfile.parameters.function_coordinate_context).toMatchObject({
     kind: "native-function-coordinate-context-v1",
     selected_image: null,
