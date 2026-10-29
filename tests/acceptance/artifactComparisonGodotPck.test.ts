@@ -73,13 +73,14 @@ it("reports a Godot PCK member that becomes encrypted", async () => {
     hash_status: "unavailable",
   });
 
+  // The encryption change is known; whether the script changed is not.
   const result = await compare(plain, encrypted);
   expect(
     result.changes.filter(({ logical_path }) => logical_path !== "."),
   ).toMatchObject([
     {
       logical_path: "scenes/main.gd",
-      classification: "changed",
+      classification: "unknown",
       dimensions: ["metadata", "availability"],
       left_occurrence_id: member(plain).occurrence_id,
       right_occurrence_id: member(encrypted).occurrence_id,
@@ -118,7 +119,8 @@ it("compares encrypted Godot PCK members by their declared MD5", async () => {
       dimensions: ["availability"],
     },
   ]);
-  // An all-zero MD5 is no claim, and one claim alone proves no change.
+  // An all-zero MD5 is no claim, and one claim alone proves no change. The
+  // reader notes the all-zero MD5, and that note is the metadata difference.
   const unclaimed = await inspect("unclaimed.pck", {
     path: "res://scenes/main.gd",
     data: "ciphertext D",
@@ -130,14 +132,15 @@ it("compares encrypted Godot PCK members by their declared MD5", async () => {
     {
       logical_path: "scenes/main.gd",
       classification: "unknown",
-      dimensions: ["availability"],
+      dimensions: ["metadata", "availability"],
     },
   ]);
-  // Claims that differ declare different content.
+  // Claims that differ declare different content, but REA cannot verify
+  // them, so the difference is known and the content change is not.
   expect(await memberChanges(first, edited)).toMatchObject([
     {
       logical_path: "scenes/main.gd",
-      classification: "changed",
+      classification: "unknown",
       dimensions: ["metadata", "availability"],
     },
   ]);

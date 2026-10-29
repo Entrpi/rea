@@ -511,7 +511,7 @@ cliTest.skipIf(process.platform === "win32")(
       changes: expect.arrayContaining([
         expect.objectContaining({
           logical_path: "current",
-          classification: "changed",
+          classification: "unknown",
           dimensions: ["metadata", "availability"],
         }),
       ]),

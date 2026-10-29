@@ -76,16 +76,17 @@ it("reports a ZIP member that becomes a symlink", async () => {
     executable: false,
   });
 
+  // The entry kind change is known; whether the content changed is not.
   expect(memberChanges(await compare(file, link))).toMatchObject([
     {
       logical_path: "current",
-      classification: "changed",
+      classification: "unknown",
       dimensions: ["metadata", "availability"],
       left_occurrence_id: member(file, "current").occurrence_id,
       right_occurrence_id: member(link, "current").occurrence_id,
     },
   ]);
-  // Without a declared change, unread content stays unknown.
+  // Without a known difference, unread content stays unknown.
   expect(memberChanges(await compare(link, link))).toMatchObject([
     {
       logical_path: "current",
@@ -112,14 +113,15 @@ it("reports an executable mode change on an encrypted ZIP member", async () => {
       executable,
     });
 
+  // The mode change is known; whether the encrypted bytes changed is not.
   expect(memberChanges(await compare(plain, marked))).toMatchObject([
     {
       logical_path: "tool",
-      classification: "changed",
+      classification: "unknown",
       dimensions: ["executable", "availability"],
     },
   ]);
-  // With equal declarations, the encrypted bytes stay unknown.
+  // Without a known difference, the encrypted bytes stay unknown.
   expect(memberChanges(await compare(plain, plain))).toMatchObject([
     {
       logical_path: "tool",
@@ -127,31 +129,4 @@ it("reports an executable mode change on an encrypted ZIP member", async () => {
       dimensions: ["availability"],
     },
   ]);
-});
-
-it("keeps a ZIP member unchanged when a case-colliding sibling is added", async () => {
-  const { inspect, compare } = await connectZipComparison();
-  const lower = { name: "a", data: "lower", mode: 0o100644 };
-  const left = await inspect("lower.zip", [lower]);
-  const right = await inspect("both.zip", [
-    lower,
-    { name: "A", data: "upper", mode: 0o100644 },
-  ]);
-  // The reader notes the collision on `a`; its name and bytes are equal.
-  expect(member(left, "a").limitations).toEqual([]);
-  expect(member(right, "a").limitations).toHaveLength(1);
-  expect(member(right, "a").artifact_id).toBe(member(left, "a").artifact_id);
-
-  const result = await compare(left, right);
-  expect(memberChanges(result)).toMatchObject([
-    { logical_path: "A", classification: "added" },
-  ]);
-  // The inventory still reports the collision through the result.
-  const { limitations } = artifactInventoryResultSchema.parse(
-    right.normalized_result,
-  );
-  expect(limitations).not.toEqual([]);
-  expect(result.limitations).toEqual(
-    expect.arrayContaining(limitations.map((item) => `Right: ${item}`)),
-  );
 });

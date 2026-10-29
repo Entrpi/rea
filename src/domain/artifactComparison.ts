@@ -7,7 +7,6 @@ import type {
   ArtifactOccurrence,
 } from "./artifactGraph.js";
 import { AnalysisInputError } from "./analysisErrorCore.js";
-import { evidenceSchema } from "./evidence.js";
 import {
   ArtifactInventoryCarrierError,
   hasCompleteInventoryCoverage,
@@ -49,12 +48,6 @@ const comparisonDimensionSchema = z.enum([
   "availability",
   "integrity",
 ]);
-/** Strict Evidence-backed input for deterministic artifact comparison. */
-export const artifactComparisonInputSchema = z.strictObject({
-  left: evidenceSchema,
-  right: evidenceSchema,
-});
-
 /** One path-classified artifact change with citations to both observations. */
 const artifactChangeSchema = z.object({
   classification: changeKindSchema,
@@ -392,6 +385,20 @@ const classifyIntegrity = (
   return null;
 };
 
+const classifyAvailability = (
+  input: ClassifyPathInput,
+  base: ReturnType<typeof buildArtifactChangeBase>,
+): ArtifactChange | null => {
+  if (
+    input.leftOccurrence?.hash_status !== "verified" ||
+    input.rightOccurrence?.hash_status !== "verified" ||
+    input.leftNode === undefined ||
+    input.rightNode === undefined
+  )
+    return { ...base, classification: "unknown", dimensions: ["availability"] };
+  return null;
+};
+
 const classifyPath = (input: ClassifyPathInput): ArtifactChange | null => {
   const base = buildArtifactChangeBase(input);
   // A declared/observed mismatch is known even without an opposite occurrence.
@@ -399,55 +406,54 @@ const classifyPath = (input: ClassifyPathInput): ArtifactChange | null => {
   if (integrity !== null) return integrity;
   const presence = classifyPresence(input, base);
   if (presence !== null) return presence;
-  const declared = declaredChecks(input);
-  const unknown = declarationUnknown(input.metadata);
-  if (isDeclarationRecord(input))
-    return classifyChecks(base, declared, unknown);
-  const left = input.leftNode;
-  const right = input.rightNode;
-  // Unless both sides have content, only the declared facts are known.
+  const declaration = classifyDeclarationRecord(input, base);
+  if (declaration.handled) return declaration.change;
+  const availability = classifyAvailability(input, base);
+  if (availability !== null) {
+    const known = occurrenceDifferences(input);
+    const dimensions: ArtifactChange["dimensions"] = [];
+    if (known.kind) dimensions.push("kind");
+    if (known.format) dimensions.push("format");
+    if (known.executable) dimensions.push("executable");
+    if (known.relations) dimensions.push("relations");
+    if (known.metadata || declaredDigestsDiffer(input))
+      dimensions.push("metadata");
+    dimensions.push("availability");
+    return {
+      ...base,
+      classification: declarationChanged(input.metadata)
+        ? "changed"
+        : "unknown",
+      dimensions,
+    };
+  }
+  const dimensions = changedDimensions(input);
+  const occurrence = occurrenceDifferences(input);
   if (
-    input.leftOccurrence?.hash_status !== "verified" ||
-    input.rightOccurrence?.hash_status !== "verified" ||
-    left === undefined ||
-    right === undefined
-  )
-    return classifyChecks(
-      base,
-      [...declared, ["metadata", declaredDigestsDiffer(input)]],
-      true,
-    );
-  return classifyChecks(
-    base,
-    [...declared, ...nodeChecks(input, left, right)],
-    unknown,
-  );
-};
-
-type ComparisonDimension = z.infer<typeof comparisonDimensionSchema>;
-type DimensionCheck = readonly [ComparisonDimension, boolean];
-
-/**
- * A known difference is a change, and an unknown fact adds availability.
- * Without a known difference, an unknown fact leaves the path unknown.
- */
-const classifyChecks = (
-  base: ReturnType<typeof buildArtifactChangeBase>,
-  checks: readonly DimensionCheck[],
-  unknown: boolean,
-): ArtifactChange | null => {
-  const dimensions = comparisonDimensionSchema.options.filter((dimension) =>
-    checks.some(([checked, changed]) => changed && checked === dimension),
-  );
-  if (dimensions.length === 0)
-    return unknown
-      ? { ...base, classification: "unknown", dimensions: ["availability"] }
-      : null;
-  return {
-    ...base,
-    classification: "changed",
-    dimensions: unknown ? [...dimensions, "availability"] : dimensions,
-  };
+    declarationUnknown(input.metadata) ||
+    occurrence.kindUnknown ||
+    occurrence.formatUnknown ||
+    differsWithUnknown(input.leftNode?.format, input.rightNode?.format) ||
+    differsWithMissing(
+      input.leftNode?.media_type,
+      input.rightNode?.media_type,
+    ) ||
+    differsWithMissing(
+      input.leftNode?.architecture,
+      input.rightNode?.architecture,
+    )
+  ) {
+    if (dimensions.length === 0)
+      return {
+        ...base,
+        classification: "unknown",
+        dimensions: ["availability"],
+      };
+    dimensions.push("availability");
+  }
+  return dimensions.length === 0
+    ? null
+    : { ...base, classification: "changed", dimensions };
 };
 
 type OccurrencePair = Pick<
@@ -456,28 +462,92 @@ type OccurrencePair = Pick<
 >;
 
 type MetadataComparison = "unchanged" | "changed" | "unknown";
-/** A field that every occurrence records, so a pair's comparison is known. */
-type RequiredFieldComparison = Exclude<MetadataComparison, "unknown">;
 
 interface OccurrenceMetadata {
   /** ASAR storage is an occurrence field, not format metadata. */
   readonly asarPacking: MetadataComparison;
-  readonly encryption: RequiredFieldComparison;
-  readonly entryKind: RequiredFieldComparison;
+  /** Every occurrence records `encrypted`, so a pair's comparison is known. */
+  readonly encryption: Exclude<MetadataComparison, "unknown">;
   /** Absent when neither occurrence records a compared declaration. */
   readonly formatDeclaration: MetadataComparison | "absent";
+  /** Unknown when either side could not read a compared field. */
+  readonly formatDeclarationAvailability: Exclude<
+    MetadataComparison,
+    "changed"
+  >;
 }
 
-/** A declared fact that differs, known even when content is unavailable. */
+/** A declaration that differs even when content is unavailable. */
 const declarationChanged = (metadata: OccurrenceMetadata): boolean =>
   metadata.asarPacking === "changed" ||
-  metadata.encryption === "changed" ||
-  metadata.entryKind === "changed" ||
   metadata.formatDeclaration === "changed";
 
-/** A declared fact that one side omits or records as another kind. */
+/** A declared fact that differs: a declaration or the encryption. */
+const declaredFactChanged = (metadata: OccurrenceMetadata): boolean =>
+  Object.values(metadata).includes("changed");
+
+/** A declared fact that one side omits, records as another kind or cannot read. */
 const declarationUnknown = (metadata: OccurrenceMetadata): boolean =>
   Object.values(metadata).includes("unknown");
+
+/** Unknown classifications and absent node metadata cannot establish a difference. */
+const differsWithUnknown = (
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean =>
+  left !== right &&
+  (left == null || right == null || left === "unknown" || right === "unknown");
+
+const differsWithMissing = (
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean => left !== right && (left == null || right == null);
+
+/** Occurrence facts remain independently comparable when content is unavailable. */
+const occurrenceDifferences = (input: {
+  readonly metadata: OccurrenceMetadata;
+  readonly leftOccurrence: ArtifactOccurrence | undefined;
+  readonly rightOccurrence: ArtifactOccurrence | undefined;
+  readonly leftRelations: readonly RelationProjection[];
+  readonly rightRelations: readonly RelationProjection[];
+}) => ({
+  kind:
+    input.leftOccurrence?.artifact_kind !==
+      input.rightOccurrence?.artifact_kind &&
+    !differsWithUnknown(
+      input.leftOccurrence?.artifact_kind,
+      input.rightOccurrence?.artifact_kind,
+    ),
+  kindUnknown: differsWithUnknown(
+    input.leftOccurrence?.artifact_kind,
+    input.rightOccurrence?.artifact_kind,
+  ),
+  format:
+    input.leftOccurrence?.artifact_format !==
+      input.rightOccurrence?.artifact_format &&
+    !differsWithUnknown(
+      input.leftOccurrence?.artifact_format,
+      input.rightOccurrence?.artifact_format,
+    ),
+  formatUnknown: differsWithUnknown(
+    input.leftOccurrence?.artifact_format,
+    input.rightOccurrence?.artifact_format,
+  ),
+  executable:
+    input.leftOccurrence?.executable !== input.rightOccurrence?.executable,
+  // A missing content identity prevents inventory from emitting its edges.
+  // An empty projection in that case is unknown, not evidence of no relation.
+  relations:
+    input.leftOccurrence?.artifact_id != null &&
+    input.rightOccurrence?.artifact_id != null &&
+    JSON.stringify(input.leftRelations) !==
+      JSON.stringify(input.rightRelations),
+  metadata:
+    declaredFactChanged(input.metadata) ||
+    input.leftOccurrence?.entry_kind !== input.rightOccurrence?.entry_kind ||
+    JSON.stringify(input.leftOccurrence?.limitations) !==
+      JSON.stringify(input.rightOccurrence?.limitations),
+});
 
 const compareAsarPacking = (
   left: boolean | undefined,
@@ -492,17 +562,43 @@ const compareAsarPacking = (
 /**
  * Declarations compare within one kind. A declaration that only one side
  * records, including one whose other side records another kind, is unknown.
+ * A field that either side could not read is unknown, and the other fields
+ * still compare.
  */
 const compareFormatDeclarations = (
   left: FormatMetadataDeclaration | undefined,
   right: FormatMetadataDeclaration | undefined,
-): OccurrenceMetadata["formatDeclaration"] => {
-  if (left === undefined && right === undefined) return "absent";
+): Pick<
+  OccurrenceMetadata,
+  "formatDeclaration" | "formatDeclarationAvailability"
+> => {
+  if (left === undefined && right === undefined)
+    return {
+      formatDeclaration: "absent",
+      formatDeclarationAvailability: "unchanged",
+    };
   if (left === undefined || right === undefined || left.kind !== right.kind)
-    return "unknown";
-  return canonicalJson(left.facts) === canonicalJson(right.facts)
-    ? "unchanged"
-    : "changed";
+    return {
+      formatDeclaration: "unknown",
+      formatDeclarationAvailability: "unchanged",
+    };
+  const unreadable = new Set([...left.unreadable, ...right.unreadable]);
+  const readable = (facts: FormatMetadataDeclaration["facts"]) =>
+    Object.fromEntries(
+      Object.entries(facts).filter(([field]) => !unreadable.has(field)),
+    );
+  return {
+    formatDeclaration:
+      canonicalJson(readable(left.facts)) ===
+      canonicalJson(readable(right.facts))
+        ? "unchanged"
+        : "changed",
+    formatDeclarationAvailability: Object.keys(left.facts).some((field) =>
+      unreadable.has(field),
+    )
+      ? "unknown"
+      : "unchanged",
+  };
 };
 
 /** Interpret each pair's declarations once, preserving historical omission. */
@@ -512,8 +608,7 @@ const occurrenceMetadata = (input: OccurrencePair): OccurrenceMetadata => {
   return {
     asarPacking: compareAsarPacking(left?.unpacked, right?.unpacked),
     encryption: left?.encrypted === right?.encrypted ? "unchanged" : "changed",
-    entryKind: left?.entry_kind === right?.entry_kind ? "unchanged" : "changed",
-    formatDeclaration: compareFormatDeclarations(
+    ...compareFormatDeclarations(
       formatMetadataDeclaration(left?.format_metadata),
       formatMetadataDeclaration(right?.format_metadata),
     ),
@@ -522,23 +617,48 @@ const occurrenceMetadata = (input: OccurrencePair): OccurrenceMetadata => {
 
 /**
  * A node-less metadata record has no content node, so its declared facts are
- * all that comparison checks; an unread payload is not compared.
+ * all that comparison checks; an unread payload is not compared. Neither are
+ * its limitations, which readers derive from those facts.
  */
-const isDeclarationRecord = (input: ClassifyPathInput): boolean =>
+const classifyDeclarationRecord = (
+  input: ClassifyPathInput,
+  base: ReturnType<typeof buildArtifactChangeBase>,
+): { readonly handled: boolean; readonly change: ArtifactChange | null } => {
   // Metadata is not inherently a declaration. Only apply this comparison
   // when a producer explicitly recorded a compared one. A record that names
   // content keeps the content comparison.
-  input.leftOccurrence?.entry_kind === "metadata" &&
-  input.rightOccurrence?.entry_kind === "metadata" &&
-  input.leftOccurrence.artifact_id === null &&
-  input.rightOccurrence.artifact_id === null &&
-  input.metadata.formatDeclaration !== "absent";
+  if (
+    input.leftOccurrence?.entry_kind !== "metadata" ||
+    input.rightOccurrence?.entry_kind !== "metadata" ||
+    input.leftOccurrence.artifact_id !== null ||
+    input.rightOccurrence.artifact_id !== null ||
+    input.metadata.formatDeclaration === "absent"
+  )
+    return { handled: false, change: null };
+  const dimensions: ArtifactChange["dimensions"] = [];
+  if (input.leftOccurrence.executable !== input.rightOccurrence.executable)
+    dimensions.push("executable");
+  if (declaredFactChanged(input.metadata)) dimensions.push("metadata");
+  const unknown = declarationUnknown(input.metadata);
+  if (dimensions.length === 0)
+    return {
+      handled: true,
+      change: unknown
+        ? { ...base, classification: "unknown", dimensions: ["availability"] }
+        : null,
+    };
+  if (unknown) dimensions.push("availability");
+  return {
+    handled: true,
+    change: { ...base, classification: "changed", dimensions },
+  };
+};
 
 /**
- * Without observed content on both sides, the container's declared digests
- * are the remaining content evidence: claims of one algorithm that differ
- * declare different content. Equal claims are unverified, so they do not
- * establish equality, and observed bytes replace both claims when present.
+ * Without observed content on both sides, the containers' declared digests
+ * are the remaining content evidence. Claims of one algorithm that differ
+ * are a metadata difference, but they are unverified, so they do not make
+ * the path changed; equal claims add nothing. Observed bytes replace both.
  */
 const declaredDigestsDiffer = (input: OccurrencePair): boolean => {
   const left = input.leftOccurrence?.declared_integrity;
@@ -551,52 +671,48 @@ const declaredDigestsDiffer = (input: OccurrencePair): boolean => {
   );
 };
 
-/** Facts that both occurrences declare, which need no content. */
-const declaredChecks = (input: ClassifyPathInput): DimensionCheck[] => [
-  [
-    "executable",
-    input.leftOccurrence?.executable !== input.rightOccurrence?.executable,
-  ],
-  ["metadata", declarationChanged(input.metadata)],
-];
+const changedDimensions = (input: {
+  readonly metadata: OccurrenceMetadata;
+  readonly leftNode: ArtifactNode | undefined;
+  readonly rightNode: ArtifactNode | undefined;
+  readonly leftOccurrence: ArtifactOccurrence | undefined;
+  readonly rightOccurrence: ArtifactOccurrence | undefined;
+  readonly leftRelations: readonly RelationProjection[];
+  readonly rightRelations: readonly RelationProjection[];
+}): z.infer<typeof comparisonDimensionSchema>[] => {
+  const left = input.leftNode;
+  const right = input.rightNode;
+  if (left === undefined || right === undefined) return ["availability"];
+  const occurrence = occurrenceDifferences(input);
+  const checks: readonly [
+    z.infer<typeof comparisonDimensionSchema>,
+    boolean,
+  ][] = [
+    ["content", left.sha256 !== right.sha256],
+    ["kind", occurrence.kind],
+    [
+      "format",
+      (left.format !== right.format &&
+        !differsWithUnknown(left.format, right.format)) ||
+        occurrence.format,
+    ],
+    ["size", left.size !== right.size],
+    ["executable", occurrence.executable],
+    ["relations", occurrence.relations],
+    ["metadata", occurrence.metadata || metadataChanged(left, right)],
+  ];
+  return checks
+    .filter(([, changed]) => changed)
+    .map(([dimension]) => dimension);
+};
 
-/**
- * Facts that need both content nodes. Without content, an occurrence's kind
- * and format are guessed from its path, so comparison reads them only when
- * both sides have content. No check reads limitations: they explain what an
- * observation could establish, often from compared fields or from other
- * occurrences, and their wording changes between REA versions.
- */
-const nodeChecks = (
-  input: ClassifyPathInput,
-  left: ArtifactNode,
-  right: ArtifactNode,
-): DimensionCheck[] => [
-  ["content", left.sha256 !== right.sha256],
-  [
-    "kind",
-    input.leftOccurrence?.artifact_kind !==
-      input.rightOccurrence?.artifact_kind,
-  ],
-  [
-    "format",
-    left.format !== right.format ||
-      input.leftOccurrence?.artifact_format !==
-        input.rightOccurrence?.artifact_format,
-  ],
-  ["size", left.size !== right.size],
-  [
-    "relations",
-    JSON.stringify(input.leftRelations) !==
-      JSON.stringify(input.rightRelations),
-  ],
-  [
-    "metadata",
-    left.media_type !== right.media_type ||
-      left.architecture !== right.architecture ||
-      left.content_state !== right.content_state,
-  ],
-];
+const metadataChanged = (left: ArtifactNode, right: ArtifactNode): boolean =>
+  (left.media_type !== right.media_type &&
+    !differsWithMissing(left.media_type, right.media_type)) ||
+  (left.architecture !== right.architecture &&
+    !differsWithMissing(left.architecture, right.architecture)) ||
+  left.content_state !== right.content_state ||
+  JSON.stringify(left.limitations) !== JSON.stringify(right.limitations);
 
 const nodeFor = (
   occurrence: ArtifactOccurrence | undefined,
