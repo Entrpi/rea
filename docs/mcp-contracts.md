@@ -800,6 +800,22 @@ inspection fails or is cancelled before a provider client exists. If no client
 remains, no provider run or health observation is available; follow the cleanup
 error's reported resources.
 
+## Initial target at startup
+
+MCP normally starts without a target; use `open_binary` to select one during the
+session. To open a target before serving MCP, set `HOPPER_TARGET_PATH` to the
+selected path in REA's launch environment. `HOPPER_TARGET_KIND` accepts
+`executable` (the default) or `database`. Despite the names, these are initial
+session settings; the configured provider still determines how the target is
+opened. If the initial open fails, REA reports the failure and exits with code 1
+without serving MCP. Shutdown during startup cancels and cleans up the open as
+described below.
+
+The source-checkout helper `node scripts/print-mcp-config.mjs /path/to/target`
+prints a registration containing these settings; `--kind database` selects the
+database kind. The helper is not part of the installed npm package. `rea setup`
+does not copy these one-shot target settings into generated registrations.
+
 ## Transports
 
 The eager stdio runtime owns SIGINT, SIGTERM and stdin EOF before opening an
@@ -1290,16 +1306,16 @@ when both are omitted, storage is not compared.
 
 `compare_artifacts` also compares the declarations in the `format_metadata`
 of UnityFS members (`unityfs-entry`), PyInstaller entries
-(`pyinstaller-entry`), .NET bundle members (`dotnet-bundle-entry`), Node SEA
-members (`node-sea-entry`), Intel HEX/S-record regions (`hex-record-region`),
+(`pyinstaller-entry`), Node SEA members (`node-sea-entry`), Intel HEX/S-record
+regions (`hex-record-region`),
 ESP image segments (`esp-image-segment`) and FIT images (`fit-image`); each
 format's guide names the compared fields. A changed declaration is a metadata
 change, including when content is unavailable. A declaration that only one
 side records, or that the other side records as another kind, is unknown and
 adds a limitation. A field that either side could not read is unknown, and
 the other fields still compare. Other kinds are not compared: their fields
-record layout, come from the artifact's own bytes, or repeat occurrence
-fields, except Godot PCK source paths, which
+record layout, come from the bytes of the artifact or its container, or
+repeat occurrence fields, except Godot PCK source paths, which
 [Godot PCK archives](godot-pck.md) explains.
 
 Every occurrence records `entry_kind`, `executable` and `encrypted`. A
