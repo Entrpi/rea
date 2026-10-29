@@ -1,7 +1,6 @@
 // Real-Ghidra lane for ARM M-profile raw images (architecture_variant,
 // base_address, vector_table_address). Adapted from #4927 by Jean Granié.
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   mkdir,
@@ -14,7 +13,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
@@ -42,6 +40,7 @@ import {
   requireMcpToolError,
 } from "./lib/mcp-verifier-results.mjs";
 import { createVerifierRun, completeVerifierRun } from "./lib/verifier-run.mjs";
+import { createVerifierCommands } from "./lib/verify-commands.mjs";
 
 if (process.argv.length !== 2)
   throw new Error("Usage: node scripts/verify-real-ghidra-cortex-m.mjs");
@@ -61,23 +60,18 @@ const installation = await inspectVerifierGhidraInstallation({
     : { javaHome: process.env.JAVA_HOME }),
 });
 assert.equal(installation.status, "available", JSON.stringify(installation));
+const run = createVerifierRun();
+// Every LLVM and CLI command runs as an owned process tree with a deadline.
+const commands = await createVerifierCommands();
+const workspace = await mkdtemp(join(tmpdir(), "rea-cortex-m-proof-"));
 // LLVM is the independent decoding oracle for every fixture.
 const llvm = {
   clang: process.env.REA_CLANG ?? "clang",
   objdump: process.env.REA_LLVM_OBJDUMP ?? "llvm-objdump",
+  commands,
+  workspace,
 };
 const oracle = new Map();
-for (const source of [
-  CORTEX_M0_SOURCE,
-  THUMB2_SOURCE,
-  V8M_BASELINE_SOURCE,
-  V8M_MSPLIM_SOURCE,
-  CORTEX_M55_SOURCE,
-])
-  oracle.set(source, await llvmThumbMnemonics(source, llvm));
-
-const run = createVerifierRun();
-const workspace = await mkdtemp(join(tmpdir(), "rea-cortex-m-proof-"));
 const runtime = join(workspace, "runtime");
 await mkdir(runtime);
 const entrypoint = fileURLToPath(new URL("./rea.mjs", import.meta.url));
@@ -112,6 +106,14 @@ const hex = (value) => `0x${value.toString(16)}`;
 const word = (value) => `0x${value.toString(16).padStart(8, "0")}`;
 let report;
 try {
+  for (const source of [
+    CORTEX_M0_SOURCE,
+    THUMB2_SOURCE,
+    V8M_BASELINE_SOURCE,
+    V8M_MSPLIM_SOURCE,
+    CORTEX_M55_SOURCE,
+  ])
+    oracle.set(source, await llvmThumbMnemonics(source, llvm));
   await client.connect(transport);
   const cases = [];
   for (const base of [0, 0x08000000])
@@ -214,6 +216,9 @@ try {
 } finally {
   await client.close();
   await transport.close();
+  // Remove the workspace only after every owned command tree has stopped; a
+  // failed close keeps it for inspection.
+  await commands.close();
   await rm(workspace, { recursive: true, force: true });
 }
 const verifierRun = await completeVerifierRun(run);
@@ -496,7 +501,7 @@ async function verifyOddEntryAndCli(fixture, selection, image, path) {
   const cli = parseEvidence(
     JSON.parse(
       (
-        await promisify(execFile)(
+        await commands.exec(
           process.execPath,
           [
             entrypoint,
@@ -515,7 +520,7 @@ async function verifyOddEntryAndCli(fixture, selection, image, path) {
             "ghidra",
             "--json",
           ],
-          { env, timeout: 240000, maxBuffer: 16 * 1024 * 1024 },
+          { env, timeout: 240_000, maxBuffer: 16 * 1024 * 1024 },
         )
       ).stdout,
     ),
