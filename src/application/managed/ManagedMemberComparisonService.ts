@@ -3,7 +3,7 @@ import {
   resolveEvidenceSources,
   type EvidenceLookup,
 } from "../EvidenceInputResolver.js";
-import type { EvidenceFileReadOptions } from "../EvidenceFileSource.js";
+import type { EvidenceFileReadOptions } from "../analysisView/evidenceFileSource.js";
 import { z } from "zod";
 
 import {
