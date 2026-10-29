@@ -30,6 +30,39 @@ export const godotPckEntryMetadataSchema = z.strictObject({
   md5_status: z.enum(["declared", "all-zero"]),
 });
 
+/** Parsed source fields owned by the UnityFS adapter, independent of member bytes. */
+export const unityFsMetadataSchema = z.strictObject({
+  kind: z.literal("unityfs"),
+  signature: z.string(),
+  format_version: uint32,
+  player_version: z.string(),
+  engine_version: z.string(),
+  declared_size: offset,
+  flags: uint32,
+  blocks_info_compressed_size: uint32,
+  blocks_info_uncompressed_size: uint32,
+  blocks_info_at_end: z.boolean(),
+  data_start: offset.nullable(),
+  block_count: uint32.nullable(),
+  /** The 16-byte producer hash of the uncompressed block stream, as declared. */
+  data_hash: z.string().nullable(),
+  directory_status: z.enum([
+    "available",
+    "encrypted",
+    "unsupported-compression",
+    "unsupported-layout",
+  ]),
+});
+export type UnityFsMetadata = z.infer<typeof unityFsMetadataSchema>;
+
+export const unityFsEntryMetadataSchema = z.strictObject({
+  kind: z.literal("unityfs-entry"),
+  index: uint32,
+  source_path: z.string(),
+  declared_offset: offset,
+  flags: uint32,
+});
+
 /** Source cookie fields and derived directory counts without Python execution. */
 export const pyInstallerMetadataSchema = z.strictObject({
   kind: z.literal("pyinstaller"),
@@ -89,6 +122,14 @@ export type PyInstallerEntryMetadata = z.infer<
   typeof pyInstallerEntryMetadataSchema
 >;
 
+/** Ordinary .NET bundle manifest facts, not proof of managed assembly validity. */
+export const dotnetBundleEntryMetadataSchema = z.strictObject({
+  kind: z.literal("dotnet-bundle-entry"),
+  major_version: uint32,
+  minor_version: uint32,
+  file_type: z.number().int().min(0).max(255),
+});
+
 /**
  * Node.js single-executable blob facts. Lengths follow the Node 24 64-bit
  * little-endian `size_t` reader. The fuse sentinel is a separate carrier scan.
@@ -122,26 +163,156 @@ export const nodeSeaEntryMetadataSchema = z.strictObject({
   index: uint32,
 });
 
+/**
+ * Intel HEX or Motorola S-record facts derived from every record. Start
+ * addresses are declared values, not proven entry points.
+ */
+export const hexRecordsMetadataSchema = z.strictObject({
+  kind: z.literal("hex-records"),
+  encoding: z.enum(["intel-hex", "srec"]),
+  variant: z
+    .enum(["I8HEX", "I16HEX", "I32HEX", "S19", "S28", "S37", "mixed"])
+    .nullable(),
+  line_count: offset,
+  record_count: offset,
+  data_record_count: offset,
+  data_bytes: offset,
+  duplicate_bytes: offset,
+  region_count: offset,
+  lowest_address: uint32.nullable(),
+  highest_address: uint32.nullable(),
+  termination: z.enum(["present", "absent"]),
+  start_address: uint32.nullable(),
+  start_address_record: z.enum(["05", "S7", "S8", "S9"]).nullable(),
+  start_segment_cs: uint32.nullable(),
+  start_segment_ip: uint32.nullable(),
+  header_hex: z
+    .string()
+    .regex(/^(?:[0-9a-f]{2}){0,252}$/u)
+    .nullable(),
+  header_text: z.string().nullable(),
+  declared_data_record_count: uint32.nullable(),
+});
+export type HexRecordsMetadata = z.infer<typeof hexRecordsMetadataSchema>;
+
+/** One address-contiguous region; lines span its contributing data records. */
+export const hexRecordRegionMetadataSchema = z.strictObject({
+  kind: z.literal("hex-record-region"),
+  start_address: uint32,
+  end_address: uint32,
+  length: offset,
+  record_count: offset,
+  first_line: offset,
+  last_line: offset,
+});
+
+/**
+ * U-Boot FIT root facts. Configuration references are declared names; a
+ * reference that names no image is reported as a limitation, not removed.
+ */
+export const fitMetadataSchema = z.strictObject({
+  kind: z.literal("fit"),
+  fdt_version: uint32,
+  fdt_totalsize: offset,
+  external_data_base: offset,
+  description: z.string().nullable(),
+  timestamp: uint32.nullable(),
+  address_cells: uint32.nullable(),
+  default_configuration: z.string().nullable(),
+  configurations: z.array(
+    z.strictObject({
+      name: z.string(),
+      description: z.string().nullable(),
+      kernel: z.array(z.string()),
+      firmware: z.array(z.string()),
+      fdt: z.array(z.string()),
+      ramdisk: z.array(z.string()),
+      loadables: z.array(z.string()),
+      signature_count: uint32,
+      signatures_unreadable: uint32,
+      unresolved_reference_count: uint32,
+      signature_algorithms: z.array(z.string()),
+    }),
+  ),
+});
+export type FitMetadata = z.infer<typeof fitMetadataSchema>;
+
+/**
+ * One /images node's facts. Null fields are absent unless unreadable_fields
+ * identifies an interpretation failure. Load and entry are declarations;
+ * stored bytes may be compressed or ciphered.
+ */
+export const fitImageMetadataSchema = z.strictObject({
+  kind: z.literal("fit-image"),
+  index: uint32,
+  name: z.string(),
+  description: z.string().nullable(),
+  type: z.string().nullable(),
+  arch: z.string().nullable(),
+  os: z.string().nullable(),
+  compression: z.string().nullable(),
+  load: z.string().nullable(),
+  entry: z.string().nullable(),
+  data_source: z.enum(["embedded", "data-offset", "data-position"]),
+  declared_offset: uint32.nullable(),
+  image_data: z.string().nullable(),
+  /** Presence is independent of whether the declared algorithm is readable. */
+  cipher_present: z.boolean(),
+  cipher_algo: z.string().nullable(),
+  unreadable_fields: z.array(
+    z.enum([
+      "description",
+      "type",
+      "arch",
+      "os",
+      "compression",
+      "load",
+      "entry",
+      "cipher_algo",
+    ]),
+  ),
+  hash_algorithms: z.array(z.string()),
+  hashes_verified: uint32,
+  hashes_unverified: uint32,
+  signature_count: uint32,
+  signatures_unreadable: uint32,
+  signature_algorithms: z.array(z.string()),
+});
+export type FitImageMetadata = z.infer<typeof fitImageMetadataSchema>;
+
 const uint8 = z.number().int().min(0).max(0xff);
 const uint16 = z.number().int().min(0).max(0xffff);
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/u);
 const byteRange = z.strictObject({ offset, length: offset });
 
-/** `esp_app_desc_t` fields, as ESP-IDF names them; strings stop at NUL. */
+/**
+ * `esp_app_desc_t` fields, as ESP-IDF names them; strings stop at NUL. A field
+ * the file cuts off is null; `observed_length` says where the descriptor ends.
+ */
 const espAppDescriptorSchema = z.strictObject({
   kind: z.literal("app"),
   offset,
-  secure_version: uint32,
+  /** Descriptor bytes the file holds, at most the 256 of `esp_app_desc_t`. */
+  observed_length: z.int().min(4).max(256),
+  secure_version: uint32.nullable(),
   version: z.string().nullable(),
   project_name: z.string().nullable(),
   time: z.string().nullable(),
   date: z.string().nullable(),
   idf_ver: z.string().nullable(),
-  app_elf_sha256: sha256Hex,
-  min_efuse_blk_rev_full: uint16,
-  max_efuse_blk_rev_full: uint16,
-  /** Stored as log2; 0 in images built before ESP-IDF v5.4. */
-  mmu_page_size: uint8,
+  app_elf_sha256: sha256Hex.nullable(),
+  min_efuse_blk_rev_full: uint16.nullable(),
+  max_efuse_blk_rev_full: uint16.nullable(),
+  /**
+   * ESP-IDF's value: the MMU page size as a base-2 logarithm (16 is 64 KiB);
+   * 0 in images built before ESP-IDF v5.4.
+   */
+  mmu_page_size: uint8.nullable(),
+  /**
+   * The byte ESP-IDF v6.1 names `spi_flash_mode`, as stored; REA does not
+   * interpret it. Releases that reserve this byte leave it zero.
+   */
+  spi_flash_mode: uint8.nullable(),
 });
 
 /** `esp_bootloader_desc_t` fields, as ESP-IDF names them. */
@@ -253,16 +424,62 @@ export type EspImageSignatureBlockMetadata = z.infer<
   typeof espImageSignatureBlockMetadataSchema
 >;
 
+/**
+ * U-Boot legacy uImage header facts. Declared addresses are facts from the
+ * header, not proven entry points; CRCs are verified before inventory.
+ */
+export const uImageMetadataSchema = z.strictObject({
+  kind: z.literal("uimage"),
+  magic: z.literal(0x27051956),
+  timestamp: uint32,
+  timestamp_iso: z.string(),
+  payload_size: uint32,
+  load_address: uint32,
+  entry_point: uint32,
+  header_crc32: uint32,
+  data_crc32: uint32,
+  crc_verified: z.literal(true),
+  os: z.number().int().min(0).max(255),
+  os_name: z.string(),
+  arch: z.number().int().min(0).max(255),
+  arch_name: z.string(),
+  type: z.number().int().min(0).max(255),
+  type_name: z.string(),
+  compression: z.number().int().min(0).max(255),
+  compression_name: z.string(),
+  name: z.string().nullable(),
+  name_bytes_hex: z.string().regex(/^[0-9a-f]{64}$/u),
+  sub_image_count: uint32,
+});
+export type UImageMetadata = z.infer<typeof uImageMetadataSchema>;
+
+/** One stored payload, or one multi-image sub-image, as stored bytes. */
+export const uImageEntryMetadataSchema = z.strictObject({
+  kind: z.literal("uimage-entry"),
+  role: z.enum(["payload", "sub-image"]),
+  index: uint32,
+});
+export type UImageEntryMetadata = z.infer<typeof uImageEntryMetadataSchema>;
+
 export const artifactFormatMetadataSchema = z.discriminatedUnion("kind", [
   godotPckMetadataSchema,
   godotPckEntryMetadataSchema,
+  unityFsMetadataSchema,
+  unityFsEntryMetadataSchema,
   pyInstallerMetadataSchema,
   pyInstallerEntryMetadataSchema,
+  dotnetBundleEntryMetadataSchema,
   nodeSeaMetadataSchema,
   nodeSeaEntryMetadataSchema,
+  hexRecordsMetadataSchema,
+  hexRecordRegionMetadataSchema,
+  uImageMetadataSchema,
+  uImageEntryMetadataSchema,
   espImageMetadataSchema,
   espImageSegmentMetadataSchema,
   espImageSignatureBlockMetadataSchema,
+  fitMetadataSchema,
+  fitImageMetadataSchema,
 ]);
 export type ArtifactFormatMetadata = z.infer<
   typeof artifactFormatMetadataSchema
@@ -286,6 +503,10 @@ const declarationsByKind: {
         readonly declaration: (
           metadata: FormatMetadataByKind[Kind],
         ) => FormatMetadataDeclaration["facts"];
+        /** Projected fields the producer could not interpret. */
+        readonly unreadable?: (
+          metadata: FormatMetadataByKind[Kind],
+        ) => FormatMetadataDeclaration["unreadable"];
       }
     | { readonly notCompared: string };
 } = {
@@ -296,6 +517,17 @@ const declarationsByKind: {
   "godot-pck-entry": {
     notCompared:
       "index and declared_offset are layout; flags and md5_status repeat occurrence facts; source_path spells Godot's lookup path in a version-dependent way. docs/godot-pck.md gives the evidence.",
+  },
+  unityfs: {
+    notCompared:
+      "Its fields come from the bundle's own bytes, which content comparison covers.",
+  },
+  /** What the directory declares for a member: its source path and raw node flags. Index and offset are layout. */
+  "unityfs-entry": {
+    declaration: (metadata) => ({
+      source_path: metadata.source_path,
+      flags: metadata.flags,
+    }),
   },
   pyinstaller: {
     notCompared:
@@ -310,6 +542,13 @@ const declarationsByKind: {
       type_code: metadata.type_code,
     }),
   },
+  /**
+   * How the manifest tells the host to treat a member. The header versions
+   * repeat the host's own bytes, which content comparison covers.
+   */
+  "dotnet-bundle-entry": {
+    declaration: (metadata) => ({ file_type: metadata.file_type }),
+  },
   "node-sea": {
     notCompared:
       "Its fields come from the carrier's own bytes, which content comparison covers.",
@@ -320,6 +559,28 @@ const declarationsByKind: {
       role: metadata.role,
       source_path: metadata.source_path,
     }),
+  },
+  "hex-records": {
+    notCompared:
+      "Its fields come from the file's own records, which content comparison covers.",
+  },
+  /**
+   * Where a region's bytes load: its start address and length. The end
+   * address follows from them, and record and line counts are layout.
+   */
+  "hex-record-region": {
+    declaration: (metadata) => ({
+      start_address: metadata.start_address,
+      length: metadata.length,
+    }),
+  },
+  uimage: {
+    notCompared:
+      "Its header facts come from the image's own bytes, which content comparison covers.",
+  },
+  "uimage-entry": {
+    notCompared:
+      "role and index restate the entry's path; its stored bytes are compared by content.",
   },
   "esp-image": {
     notCompared:
@@ -339,12 +600,36 @@ const declarationsByKind: {
     notCompared:
       "Its fields come from the block's own bytes, which content comparison covers, and image_digest_matches follows the image's content.",
   },
+  fit: {
+    notCompared:
+      "Its fields come from the FIT's own bytes, which content comparison covers.",
+  },
+  /**
+   * Payload interpretation and sharing declarations, independent of FIT
+   * placement: the image's name, index and data position are layout.
+   */
+  "fit-image": {
+    declaration: (metadata) => ({
+      type: metadata.type,
+      arch: metadata.arch,
+      os: metadata.os,
+      compression: metadata.compression,
+      load: metadata.load,
+      entry: metadata.entry,
+      image_data: metadata.image_data,
+      cipher_present: metadata.cipher_present,
+      cipher_algo: metadata.cipher_algo,
+    }),
+    unreadable: (metadata) => metadata.unreadable_fields,
+  },
 };
 
 /** A declaration that artifact comparison compares within its kind. */
 export interface FormatMetadataDeclaration {
   readonly kind: FormatMetadataKind;
   readonly facts: Readonly<Record<string, unknown>>;
+  /** Facts whose value is unknown, which compare as neither equal nor changed. */
+  readonly unreadable: readonly string[];
 }
 
 // Generic in the kind, so each projection receives its own metadata type.
@@ -354,7 +639,11 @@ const declarationOf = <Kind extends FormatMetadataKind>(
 ): FormatMetadataDeclaration | undefined => {
   const entry = declarationsByKind[kind];
   return "declaration" in entry
-    ? { kind, facts: entry.declaration(metadata) }
+    ? {
+        kind,
+        facts: entry.declaration(metadata),
+        unreadable: entry.unreadable?.(metadata) ?? [],
+      }
     : undefined;
 };
 
