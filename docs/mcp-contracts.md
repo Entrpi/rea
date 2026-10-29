@@ -1326,14 +1326,14 @@ of UnityFS members (`unityfs-entry`), PyInstaller entries
 members (`node-sea-entry`), Intel HEX/S-record regions (`hex-record-region`),
 ESP image segments (`esp-image-segment`), ESP flash partitions
 (`esp-flash-partition`), DfuSe elements (`dfuse-element`) and FIT images
-(`fit-image`); each format's guide names the compared fields. A changed declaration is a metadata change,
-including when content is unavailable. A declaration that only one side
-records, or that the other side records as another kind, is unknown and adds a
-limitation. A field that either side could not read is unknown, and the other
-fields still compare. Other kinds are not compared: their fields record
-layout, come from the artifact's own bytes, or repeat occurrence fields,
-except Godot PCK source paths, which [Godot PCK archives](godot-pck.md)
-explains.
+(`fit-image`); each format's guide names the compared fields. A changed
+declaration is a metadata change, including when content is unavailable. A
+declaration that only one side records, or that the other side records as
+another kind, is unknown and adds a limitation. A field that either side could
+not read is unknown, and the other fields still compare. Other kinds are not
+compared: their fields record layout, come from the artifact's own bytes, or
+repeat occurrence fields, except Godot PCK source paths, which
+[Godot PCK archives](godot-pck.md) explains.
 
 Every occurrence records `entry_kind`, `executable` and `encrypted`. A
 different entry kind, `encrypted` value or occurrence limitation text is a

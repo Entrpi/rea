@@ -119,7 +119,8 @@ it("compares encrypted Godot PCK members by their declared MD5", async () => {
       dimensions: ["availability"],
     },
   ]);
-  // An all-zero MD5 is no claim, and one claim alone proves no change.
+  // An all-zero MD5 is no claim, and one claim alone proves no change. The
+  // reader notes the all-zero MD5, and that note is the metadata difference.
   const unclaimed = await inspect("unclaimed.pck", {
     path: "res://scenes/main.gd",
     data: "ciphertext D",
@@ -131,14 +132,15 @@ it("compares encrypted Godot PCK members by their declared MD5", async () => {
     {
       logical_path: "scenes/main.gd",
       classification: "unknown",
-      dimensions: ["availability"],
+      dimensions: ["metadata", "availability"],
     },
   ]);
-  // Claims that differ declare different content.
+  // Claims that differ declare different content, but REA cannot verify
+  // them, so the difference is known and the content change is not.
   expect(await memberChanges(first, edited)).toMatchObject([
     {
       logical_path: "scenes/main.gd",
-      classification: "changed",
+      classification: "unknown",
       dimensions: ["metadata", "availability"],
     },
   ]);
