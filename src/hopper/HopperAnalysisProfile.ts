@@ -202,25 +202,6 @@ const resolveHopperAnalysisProfileInScope = async (
   });
 };
 
-/**
- * Ghidra owns these lanes; Hopper names the declined family by its id and says
- * whether REA has verified the Ghidra lane, rather than guessing.
- */
-const HOPPER_DECLINED_GHIDRA_LANES: Record<
-  ElfMetadataArchitecture | "hexagon",
-  "verified" | "unverified"
-> = {
-  mips: "verified",
-  riscv: "verified",
-  powerpc: "verified",
-  hexagon: "unverified",
-};
-
-/** Whether REA has verified the Ghidra lane that a declined family is pointed to. */
-export const hopperDeclinedGhidraLane = (
-  architecture: ElfMetadataArchitecture | "hexagon",
-): "verified" | "unverified" => HOPPER_DECLINED_GHIDRA_LANES[architecture];
-
 /** Families with no verified Hopper lane, declined before any loader selection. */
 export type HopperDeclinedArchitecture =
   | ElfMetadataArchitecture
@@ -234,17 +215,16 @@ export const isHopperDeclinedArchitecture = (
   architecture === "hexagon" ||
   architecture === "arm64_32";
 
+/**
+ * Hopper states only what it owns: it does not admit the family. Whether REA
+ * has verified a Ghidra lane for it is the Ghidra provider's to report.
+ */
 export const hopperDeclinedArchitectureReason = (
   architecture: HopperDeclinedArchitecture,
-): string => {
-  if (architecture === "arm64_32")
-    return "REA's Hopper adapter has no verified arm64_32 lane.";
-  return `REA's Hopper adapter does not admit ${architecture} targets. ${
-    hopperDeclinedGhidraLane(architecture) === "verified"
-      ? `Select a verified Ghidra ${architecture} profile instead.`
-      : "Ghidra admits them through a lane REA has not verified."
-  }`;
-};
+): string =>
+  architecture === "arm64_32"
+    ? "REA's Hopper adapter has no verified arm64_32 lane."
+    : `REA's Hopper adapter does not admit ${architecture} targets. Select the Ghidra provider instead; its ${architecture} lane reports whether REA has verified it.`;
 
 /** Derive Hopper's complete non-interactive CLI loader selection. */
 export const hopperLoaderArgsForTarget = (
