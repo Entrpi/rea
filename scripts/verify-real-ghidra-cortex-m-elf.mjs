@@ -391,7 +391,8 @@ async function verifyDecoding(fixture, path, expected, stripped) {
     const returns = symbol === LOOP_FUNCTION ? "pop" : "bx";
     const last = listed.findLastIndex(({ mnemonic }) => mnemonic === returns);
     assert.ok(last >= 0, `${fixture.name} ${symbol}: no ${returns}`);
-    // Ghidra may leave the code after a low-overhead loop undisassembled.
+    // Ghidra may leave the code after a low-overhead loop undisassembled, in
+    // memory with no listed instruction, which it reports as not-in-listing.
     const loopEnd =
       symbol === LOOP_FUNCTION
         ? listed.findIndex(({ mnemonic }) => mnemonic === "le")
@@ -403,7 +404,7 @@ async function verifyDecoding(fixture, path, expected, stripped) {
       const decoded = (
         await call("inspect_native_instruction", { address }, expected)
       ).normalized_result;
-      if (index > loopEnd && decoded.status === "undecodable") {
+      if (index > loopEnd && decoded.status === "not-in-listing") {
         unreached.push(address);
         continue;
       }
