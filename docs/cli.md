@@ -678,6 +678,9 @@ rea compare-artifacts '{"left":{"kind":"evidence-file","path":"old.json"},"right
 A one-shot command keeps no session Evidence, so it refuses a
 `retained-evidence` source with `details.reason: "missing"`. Select the record
 from a saved bundle instead.
+For an artifact summary selected from a bundle, include its complete parent
+inventory in the same bundle. The command resolves that parent from the
+authenticated file records; a summary-only file cannot supply missing facts.
 
 The other commands that take Evidence for a comparison or an application
 workflow accept the same sources in their `left`, `right` or `application`

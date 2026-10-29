@@ -59,7 +59,9 @@ holds no valid Evidence, is refused with its file path rather than the field.
 references.
 
 `compare_artifacts` can also resolve an artifact summary to its exact retained
-parent in the session. Supported historical summaries keep their original
+parent in the session, or from the authenticated bundle containing a file-selected
+summary. File-local records take precedence over the session lookup. Unrelated
+records are not retained by the file resolver. Supported historical summaries keep their original
 Evidence identity and omissions; a missing or mismatched parent is rejected.
 
 `analyze_function` does not deliver its complete record by default. Without
@@ -361,8 +363,11 @@ When `record_unknown` or `update_unknown` commits but its complete reply exceeds
 the response budget, `details.reported_limits.committed_unknown` identifies the
 exact unknown ID, committed revision and mutation Evidence IDs. Its retained
 Evidence reference remains available on the same connection. Export the bundle
-or page `list_unknowns` to recover the result; do not repeat the committed
-mutation. A delivery failure does not undo that revision.
+to recover the result; do not repeat the committed mutation. A single unknown
+may be too large for a `list_unknowns` page. A delivery failure does not undo
+that revision. If a list response overflows, retry on the same connection with
+the same filters and offset and a smaller limit; export if one head still cannot
+fit.
 
 For a portable exported bundle, the CLI shares this projection:
 `rea inspect-evidence-bundle '{"path":"/tmp/evidence.json","detail":"summary","filters":{"operation":"analyze_function"}}' --format json`.

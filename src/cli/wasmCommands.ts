@@ -27,6 +27,7 @@ export const registerWasmCommands = (
   registerEvidenceSourceCommand(cli, logger, {
     name: CLI_COMMANDS.compareWasmInterfaces,
     operation: "compare_wasm_interfaces",
+    inputOperation: "compare_wasm_interfaces",
     providerId: ARTIFACT_COMPARISON_PROVIDER.id,
     description:
       'Compare core WASM interfaces from two exact inspection Evidence records under a required scope; each side inline or {kind:"evidence-file",path,evidence_id?}',

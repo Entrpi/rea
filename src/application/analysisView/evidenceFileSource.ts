@@ -1,18 +1,18 @@
-import { requireAuthenticationHeadroom } from "./JsonAuthenticationHeadroom.js";
-import { authenticateEvidenceBundleValue } from "./EvidenceBundleFiles.js";
-import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
-import type { AnalysisError } from "../domain/analysisErrorBase.js";
+import { requireAuthenticationHeadroom } from "../JsonAuthenticationHeadroom.js";
+import { authenticateEvidenceBundleValue } from "../EvidenceBundleFiles.js";
+import type { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
+import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import {
   AnalysisCancelledError,
   AnalysisInputError,
-} from "../domain/analysisErrorCore.js";
-import { err, ok, type Result } from "../domain/result.js";
-import type { Evidence } from "../domain/evidence.js";
-import type { EvidenceFileReference } from "../domain/evidenceReference.js";
-import { safeParseEvidence } from "../domain/evidenceValidation.js";
-import { EvidenceFileError } from "../domain/evidenceErrors.js";
-import { projectInputIssues } from "../domain/inputIssueProjection.js";
-import { readJsonFile } from "./JsonFiles.js";
+} from "../../domain/analysisErrorCore.js";
+import { INSPECT_ANALYSIS_VIEW_OPERATION } from "../../domain/analysisView/analysisViewErrors.js";
+import { err, ok, type Result } from "../../domain/result.js";
+import type { Evidence } from "../../domain/evidence.js";
+import { safeParseImmutableEvidence } from "../../domain/evidenceValidation.js";
+import { EvidenceFileError } from "../../domain/evidenceErrors.js";
+import { projectInputIssues } from "../../domain/inputIssueProjection.js";
+import { readJsonFile } from "../JsonFiles.js";
 
 /** The request cancellation and the scope retaining descriptors whose close failed. */
 export interface EvidenceFileReadOptions {
@@ -20,14 +20,26 @@ export interface EvidenceFileReadOptions {
   readonly resources?: ArtifactResourceScope;
 }
 
-/** The operation reading the file and the caller's path to its evidence-file source. */
-export interface EvidenceFileSourceSite {
+/** Caller context and related-record resolution for this admitted file. */
+export interface EvidenceFileSourceContext {
   readonly operation: string;
   readonly path: readonly (string | number)[];
+  readonly resolveSelected?: EvidenceFileRecordResolver;
 }
 
+/** Resolve related facts while the authenticated file records are in scope. */
+export type EvidenceFileRecordResolver = (
+  selected: Evidence,
+  lookup: (evidenceId: string) => Evidence | undefined,
+) => Result<Evidence, AnalysisError>;
+
+const ANALYSIS_VIEW_SOURCE: EvidenceFileSourceContext = {
+  operation: INSPECT_ANALYSIS_VIEW_OPERATION,
+  path: ["source"],
+};
+
 const selectionError = (
-  site: EvidenceFileSourceSite,
+  site: EvidenceFileSourceContext,
   message: string,
 ): AnalysisInputError =>
   new AnalysisInputError(site.operation, { userMessage: message }, [
@@ -46,7 +58,7 @@ const selectBundleRecord = (
   records: readonly Evidence[],
   path: string,
   evidenceId: string | undefined,
-  site: EvidenceFileSourceSite,
+  site: EvidenceFileSourceContext,
 ): Result<Evidence, AnalysisError> => {
   if (evidenceId !== undefined) {
     const selected = records.find(
@@ -108,13 +120,15 @@ const listRecordIds = (records: readonly Evidence[]): string => {
 
 /** Read one Evidence record or select from an authenticated bundle without rereading the file. */
 export const readEvidenceFileSource = async (
-  source: Pick<EvidenceFileReference, "path" | "evidence_id">,
-  site: EvidenceFileSourceSite,
+  path: string,
   options: EvidenceFileReadOptions = {},
+  evidenceId?: string,
+  site: EvidenceFileSourceContext = ANALYSIS_VIEW_SOURCE,
 ): Promise<Result<Evidence, AnalysisError>> => {
-  const { path, evidence_id: evidenceId } = source;
   const { signal, resources } = options;
   const { operation } = site;
+  const resolveSelected =
+    site.resolveSelected ?? ((selected: Evidence) => ok(selected));
   if (signal?.aborted)
     return err(new AnalysisCancelledError(operation, { cause: signal.reason }));
   const loaded = await readJsonFile(path, signal, resources, operation);
@@ -128,10 +142,22 @@ export const readEvidenceFileSource = async (
     !Array.isArray(value) &&
     Object.hasOwn(value, "records")
   ) {
-    const bundle = authenticateEvidenceBundleValue(value, path, { operation });
-    return bundle.ok
-      ? selectBundleRecord(bundle.value.records, path, evidenceId, site)
-      : bundle;
+    const bundle = authenticateEvidenceBundleValue(value, path, {
+      operation,
+      immutable: true,
+    });
+    if (!bundle.ok) return bundle;
+    const selected = selectBundleRecord(
+      bundle.value.records,
+      path,
+      evidenceId,
+      site,
+    );
+    return selected.ok
+      ? resolveSelected(selected.value, (id) =>
+          bundle.value.records.find((record) => record.evidence_id === id),
+        )
+      : selected;
   }
   const headroom = requireAuthenticationHeadroom(value, {
     operation,
@@ -139,7 +165,7 @@ export const readEvidenceFileSource = async (
     description: "Insufficient heap headroom to authenticate the Evidence file",
   });
   if (!headroom.ok) return headroom;
-  const parsed = safeParseEvidence(value);
+  const parsed = safeParseImmutableEvidence(value);
   if (!parsed.ok)
     return err(
       new EvidenceFileError("read", "wrong-kind", {
@@ -157,5 +183,7 @@ export const readEvidenceFileSource = async (
         `Evidence file ${path} holds ${parsed.value.evidence_id}, not selected record ${evidenceId}.`,
       ),
     );
-  return parsed;
+  return resolveSelected(parsed.value, (id) =>
+    parsed.value.evidence_id === id ? parsed.value : undefined,
+  );
 };
