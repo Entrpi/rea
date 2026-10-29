@@ -87,8 +87,7 @@ materialized PyInstaller members, the same fields participate in the metadata
 delta independently of content identity, including when the member's bytes
 are unavailable; archive offsets and table positions remain location facts,
 not declaration identity. Missing declaration facts remain unknown, as does
-unavailable non-metadata content whose declaration and encryption are
-unchanged.
+unavailable non-metadata content whose declaration is unchanged.
 
 Request `detail: "summary"` for a compact inspection, then query retained
 Evidence with `inspect_analysis_view`. An inventory view can select
