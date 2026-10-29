@@ -216,15 +216,16 @@ export const isHopperDeclinedArchitecture = (
   architecture === "arm64_32";
 
 /**
- * Hopper states only what it owns: it does not admit the family. Whether REA
- * has verified a Ghidra lane for it is the Ghidra provider's to report.
+ * Hopper states only what it owns: it does not admit the family. It routes the
+ * caller to the Ghidra provider without restating or promising Ghidra's lane
+ * facts.
  */
 export const hopperDeclinedArchitectureReason = (
   architecture: HopperDeclinedArchitecture,
 ): string =>
   architecture === "arm64_32"
     ? "REA's Hopper adapter has no verified arm64_32 lane."
-    : `REA's Hopper adapter does not admit ${architecture} targets. Select the Ghidra provider instead; its ${architecture} lane reports whether REA has verified it.`;
+    : `REA's Hopper adapter does not admit ${architecture} targets. Select the Ghidra provider instead.`;
 
 /** Derive Hopper's complete non-interactive CLI loader selection. */
 export const hopperLoaderArgsForTarget = (
