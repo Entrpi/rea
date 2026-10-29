@@ -27,33 +27,35 @@ const RAW_DIGESTS = {
     "d17bddc8ac110c891d30fb989fc7906df421bd9bea5df4aac05a950f50c7bdaf",
 } as const;
 
-// Computed at d6f88becd. A raw load whose base is its caller-selected entry
-// keeps these profile digests, so its sessions and snapshots stay reusable.
+// Computed by upstream main at 07dfd1261, which has neither a separate base nor
+// a variant. A raw load whose base is its caller-selected entry keeps these
+// profile digests, so it stays reusable wherever main's raw sessions and
+// snapshots are.
 const LEGACY_RAW_DIGESTS = [
   [
     "x86",
     "0x1000",
-    "6e18972704299f8f78c4465502e6c386e52227ef840f11acefbccafde57debca",
+    "1efa8bf6ae3bd0db5789c3bde41150c1765d11a5dd01171dfcc8e13c9e0156c5",
   ],
   [
     "x86_64",
     "0x401000",
-    "6f2e097fcc748e85165d9acc7bb80e879ce6aed3592b06a603ed14957779c102",
+    "b9b8398e6735a2c038d375193bbc546dae535415d8a33a46fd1f093e28534eef",
   ],
   [
     "arm",
     "0x8000000",
-    "c83436441786074ecde2eb776201e6546311affca43bf8905af7b79c8d387733",
+    "454105d882ed5c647e47e1c6f4aa2f30be36a17c7c048b783e10c5498c20fc2a",
   ],
   [
     "arm64",
     "0x80000",
-    "b99f37f9b495c8c4b1479836365cc99868c18959f4d06e3edeb0ba00f95e650d",
+    "fd1482d39496d4bdacdce7f91fc7fb5d1c653e492a771db3ca887e3c1f29f618",
   ],
   [
     "m68k",
     "0x1000",
-    "3383ab9585908ed99835034bf9f6536fd72dfeeba014cdd965203f8173d8a171",
+    "afe1d0b29de91b03169900e59565c4caae78097c02e1768d76c17c6230b0b919",
   ],
 ] as const;
 
@@ -216,7 +218,7 @@ describe("M-profile raw-binary analysis profile", () => {
     const digest = (await profile(reset("armv7-m"))).digest;
     // Pinned so a change to raw_load semantics must bump its version.
     expect(digest).toBe(
-      "be56bb653cfb7a14540f64bbef694dfb1b8f1fb26ceabc19a3eafc4f4629b802",
+      "6c9ab13284488b310460e9b0b85cab0c5d4fc0e6d95b0164c411c783c4a763b7",
     );
     expect(
       (await profile(reset("armv7-m", { baseAddress: "0x8000000" }))).digest,
