@@ -1322,16 +1322,18 @@ when both are omitted, storage is not compared.
 
 `compare_artifacts` also compares the declarations in the `format_metadata`
 of UnityFS members (`unityfs-entry`), PyInstaller entries
-(`pyinstaller-entry`), Node SEA members
-(`node-sea-entry`), ESP image segments (`esp-image-segment`), ESP flash
-partitions (`esp-flash-partition`), DfuSe elements (`dfuse-element`) and Intel
-HEX/S-record regions (`hex-record-region`); each format's
-guide names the compared fields. A changed declaration is a metadata change,
+(`pyinstaller-entry`), .NET bundle members (`dotnet-bundle-entry`), Node SEA
+members (`node-sea-entry`), Intel HEX/S-record regions (`hex-record-region`),
+ESP image segments (`esp-image-segment`), ESP flash partitions
+(`esp-flash-partition`), DfuSe elements (`dfuse-element`) and FIT images
+(`fit-image`); each format's guide names the compared fields. A changed declaration is a metadata change,
 including when content is unavailable. A declaration that only one side
 records, or that the other side records as another kind, is unknown and adds a
-limitation. Other kinds are not compared: their fields record layout, come
-from the artifact's own bytes, or repeat occurrence fields, except Godot PCK
-source paths, which [Godot PCK archives](godot-pck.md) explains.
+limitation. A field that either side could not read is unknown, and the other
+fields still compare. Other kinds are not compared: their fields record
+layout, come from the artifact's own bytes, or repeat occurrence fields,
+except Godot PCK source paths, which [Godot PCK archives](godot-pck.md)
+explains.
 
 Every occurrence records `entry_kind`, `executable` and `encrypted`, and
 `compare_artifacts` compares them even when content is unavailable. A
