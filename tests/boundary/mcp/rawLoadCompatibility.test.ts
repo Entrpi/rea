@@ -23,16 +23,14 @@ import {
   nativeLoadImageSchema,
   nativeRawLoadImageSchema,
 } from "../../../src/domain/native/nativeLoadImage.js";
-import {
-  admittedRawLoad,
-  vectorTableWords,
-} from "../../../src/domain/rawBinary.fixture.js";
+import { admittedRawLoad } from "../../../src/domain/rawBinary.fixture.js";
 import { ghidraProfileInstallationHost as host } from "../../../src/ghidra/GhidraInstallation.fixture.js";
 import { attestGhidraRawBinaryLoadImage } from "../../../src/ghidra/GhidraLoadImageValues.js";
 import { GhidraProvider } from "../../../src/ghidra/GhidraProvider.js";
 import { fixtureRawBinaryLoadImage } from "../../../src/ghidra/GhidraRawBinaryLoadImage.fixture.js";
 import { silentLogger } from "../../../src/logger.js";
 import { toolRegistrationOptions } from "../../../src/server/toolRegistrationOptions.js";
+import { cortexM0Fixture } from "../../conformance/ghidra/cortexM.fixture.mjs";
 import { mcpTest } from "../../support/mcp/mcpFixture.js";
 
 // Written by REA at d6f88becd, before base_address existed, from the raw ARM
@@ -60,21 +58,21 @@ const ghidraProfile = async (target: BinaryTarget) => {
   return resolved.value.profile;
 };
 
+// One image holds the vector table and the Thumb code its Reset word names;
+// the load is admitted from these bytes.
 const segmentsImage = () => {
-  const f = fixtureRawBinaryLoadImage();
+  const bytes = cortexM0Fixture(0x08000000);
   const rawLoad = admittedRawLoad(
     {
       architecture: "arm",
       architectureVariant: "armv7-m",
       entryPoint: undefined,
       baseAddress: "0x8000000",
-      fileBytes: 0x10,
+      fileBytes: bytes.length,
     },
-    vectorTableWords(0x20005000, 0x08000009),
+    bytes.subarray(0, 8),
   );
-  const target = { ...f.target, rawLoad };
-  f.observation.language_id = "ARM:LE:32:Cortex";
-  f.observation.entry_points = [rawLoad.entryPoint];
+  const f = fixtureRawBinaryLoadImage(bytes, rawLoad);
   f.observation.entry_context = [
     {
       address: rawLoad.entryPoint,
@@ -83,11 +81,13 @@ const segmentsImage = () => {
   ];
   const image = attestGhidraRawBinaryLoadImage(
     f.snapshot,
-    target,
+    f.target,
     f.observation,
   );
   if (!image.ok) throw new Error(image.error);
-  return { target, image: image.value };
+  if (image.value.status !== "verified")
+    throw new Error("the segments image fixture does not verify");
+  return { target: f.target, image: image.value };
 };
 
 describe("raw-binary snapshots saved before base_address", () => {
