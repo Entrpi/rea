@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { parseConfig } from "../config/parseConfig.js";
-import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
+import {
+  ELF_METADATA_ARCHITECTURES,
+  type BinaryTarget,
+} from "../domain/binaryTargetTypes.js";
 import { silentLogger } from "../logger.js";
 import { ok } from "../domain/result.js";
-import {
-  hopperDeclinedArchitectureReason,
-  hopperDeclinedGhidraLane,
-} from "./HopperAnalysisProfile.js";
+import { hopperDeclinedArchitectureReason } from "./HopperAnalysisProfile.js";
 import { HopperClient } from "./HopperClient.js";
 import { HopperProvider } from "./HopperProvider.js";
 import { rawLoadAtEntry } from "../domain/rawBinary.fixture.js";
@@ -82,22 +82,23 @@ describe("Hopper provider capabilities", () => {
       reason: expect.stringContaining("Ghidra"),
     });
   });
-  it("records which declined families have a verified Ghidra lane", () => {
-    expect({
-      mips: hopperDeclinedGhidraLane("mips"),
-      riscv: hopperDeclinedGhidraLane("riscv"),
-      powerpc: hopperDeclinedGhidraLane("powerpc"),
-      hexagon: hopperDeclinedGhidraLane("hexagon"),
-    }).toEqual({
-      mips: "verified",
-      riscv: "verified",
-      powerpc: "verified",
-      hexagon: "unverified",
-    });
-    // The advice follows the lane's status, not only the family name.
-    expect(hopperDeclinedArchitectureReason("mips")).not.toBe(
-      hopperDeclinedArchitectureReason("hexagon").replaceAll("hexagon", "mips"),
+  it("declines each family Ghidra may admit without stating a Ghidra lane status", () => {
+    const families = [...ELF_METADATA_ARCHITECTURES, "hexagon"] as const;
+    const reasons = families.map((family) =>
+      hopperDeclinedArchitectureReason(family),
     );
+    for (const [index, family] of families.entries()) {
+      expect(reasons[index]).toContain(family);
+      expect(reasons[index]).toContain("Ghidra");
+    }
+    // Apart from the family's name, every reason is the same text.
+    expect(
+      new Set(
+        reasons.map((reason, index) =>
+          reason.replaceAll(families[index] ?? "", "<family>"),
+        ),
+      ).size,
+    ).toBe(1);
   });
   it.each([
     {
