@@ -5,7 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { EspFlashImageArtifactReader } from "./EspFlashImageArtifactReader.js";
 import { ArtifactResourceScope } from "./ArtifactResourceScope.js";
-import type { ArtifactEntry } from "./ArtifactReader.js";
+import type {
+  ArtifactEntry,
+  ArtifactReaderTraversal,
+} from "./ArtifactReader.js";
+import { openRegularFile } from "../filesystem/RegularFile.js";
 import { extractArtifact } from "./extraction/ArtifactExtraction.js";
 import * as regionReads from "./EspFlashRegionReads.js";
 import * as espImageDecoding from "../domain/firmware/espImage.js";
@@ -567,14 +571,14 @@ describe("ESP flash layout written-bytes scan lifecycle", () => {
       const scanning = new Promise<void>((resolve) => {
         acknowledge = resolve;
       });
-      const scan = regionReads.writtenExtent;
+      const scan = regionReads.writtenExtents;
       // Count the chunks the scan examines once the reader admits them.
       const observer = vi
-        .spyOn(regionReads, "writtenExtent")
-        .mockImplementation((context, region, assertOpen) =>
-          scan(context, region, () => {
+        .spyOn(regionReads, "writtenExtents")
+        .mockImplementation((context, regions, assertOpen) =>
+          scan(context, regions, () => {
             assertOpen();
-            if (region.length < 0x10_0000) return;
+            if (!regions.some(({ length }) => length >= 0x10_0000)) return;
             scanned += 1;
             if (scanned === 1) acknowledge();
           }),
@@ -678,4 +682,83 @@ describe("ESP flash layout erased-gap scan lifecycle", () => {
       }
     },
   );
+});
+
+describe("ESP flash layout written bytes of overlapping partitions", () => {
+  it("reads the bytes they cover once and keeps each partition's own facts", async () => {
+    // 60 data partitions over one MiB: 40 cover all of it, 20 its first half.
+    const parts = Array.from({ length: 60 }, (_, index) => ({
+      label: `p${String(index)}`,
+      type: 1,
+      subtype: 0x81,
+      offset: 0x1_0000,
+      size: index < 40 ? 0x10_0000 : 0x8_0000,
+    }));
+    const bytes = espFlashDump({
+      size: 0x11_0000,
+      bootloader: { at: 0, bytes: BOOTLOADER },
+      table: partitionTable(parts),
+      parts: [
+        { at: 0x1_0100, bytes: Buffer.alloc(0x100, 0x5a) },
+        { at: 0x9_0000, bytes: Buffer.alloc(0x100, 0x5a) },
+      ],
+    });
+    const path = await writeDump(bytes);
+    const admitted = await openRegularFile(path, { symlinks: "reject" });
+    const nativeRead = admitted.handle.read.bind(admitted.handle);
+    let read = 0;
+    const reads = vi.spyOn(admitted.handle, "read").mockImplementation((async (
+      ...args: unknown[]
+    ) => {
+      const result = (await Reflect.apply(
+        nativeRead,
+        admitted.handle,
+        args,
+      )) as {
+        bytesRead: number;
+      };
+      read += result.bytesRead;
+      return result;
+    }) as typeof admitted.handle.read);
+    const reader = new EspFlashImageArtifactReader(path, admitted);
+    try {
+      let coverage: ArtifactReaderTraversal | undefined;
+      const entries: ArtifactEntry[] = [];
+      for await (const entry of reader.entries(undefined, {
+        onCoverage: (value) => {
+          coverage = value;
+        },
+      }))
+        entries.push(entry);
+      // Each covered byte is read once, not once per partition over it.
+      expect(read).toBeLessThan(2 * bytes.length);
+      expect(
+        entries.flatMap(({ path: entryPath, formatMetadata }) =>
+          formatMetadata?.kind === "esp-flash-partition"
+            ? [[entryPath, formatMetadata]]
+            : [],
+        ),
+      ).toEqual(
+        parts.map((part, index) => [
+          `partitions/${part.label}.bin`,
+          expect.objectContaining({
+            index,
+            label: part.label,
+            flash_address: 0x1_0000,
+            size: part.size,
+            written_offset: 0x100,
+            written_end: index < 40 ? 0x8_0100 : 0x200,
+            written_bytes: index < 40 ? 0x200 : 0x100,
+          }),
+        ]),
+      );
+      expect(
+        coverage?.limitations.filter((text) => text.includes(" overlaps ")),
+      ).toHaveLength(59);
+    } finally {
+      await reader.close();
+      reads.mockRestore();
+      await admitted.handle.close();
+    }
+  });
 });

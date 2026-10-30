@@ -37,7 +37,7 @@ import {
   decodeEspFlashImage,
   firstUnerasedInRange,
   readEspFlashRange,
-  writtenExtent,
+  writtenExtents,
   type EspFlashReadContext,
 } from "./EspFlashRegionReads.js";
 import { readFileHandleChunks } from "../filesystem/readFileHandleChunks.js";
@@ -320,26 +320,28 @@ export class EspFlashImageArtifactReader implements ArtifactReader {
     return finishEspFlashLayout(plan, { otadataRecords, gapFirstUnerased });
   }
 
-  /** Where each partition the dump holds is not erased flash. */
+  /**
+   * Where each partition the dump holds is not erased flash, from one read
+   * of the bytes the partitions cover, however many overlap.
+   */
   async #readWritten(
     context: EspFlashReadContext,
     plan: EspFlashPlan,
   ): Promise<ReadonlyMap<EspFlashRegion, EspFlashWrittenExtent>> {
-    const written = new Map<EspFlashRegion, EspFlashWrittenExtent>();
-    for (const region of plan.regions) {
-      // A partition the dump holds none of has nothing to observe.
-      if (region.partition === undefined || region.available === 0) continue;
-      this.#assertOpen(context.signal);
-      written.set(
-        region,
-        await writtenExtent(
-          context,
-          { start: region.fileOffset, length: region.available },
-          () => this.#assertOpen(context.signal),
-        ),
-      );
-    }
-    return written;
+    // A partition the dump holds none of has nothing to observe.
+    const held = plan.regions.filter(
+      ({ partition, available }) => partition !== undefined && available > 0,
+    );
+    this.#assertOpen(context.signal);
+    const extents = await writtenExtents(
+      context,
+      held.map(({ fileOffset, available }) => ({
+        start: fileOffset,
+        length: available,
+      })),
+      () => this.#assertOpen(context.signal),
+    );
+    return new Map(held.map((region, index) => [region, extents[index]!]));
   }
 
   /** ESP image facts for the bootloader region and each app partition. */

@@ -127,7 +127,8 @@ such byte, and `written_bytes`, how many bytes are not `0xFF`. A partition
 erased throughout has null offsets and `written_bytes` `0`; a partition the
 file holds none of has all three null. The range bounds the written
 bytes and does not say whether erased flash lies between them; extract the
-partition to read them.
+partition to read them. REA reads the bytes the partitions cover once, so
+overlapping partitions share that read however many the table declares.
 
 ESP-IDF 5.3 and later may declare primary `bootloader` and `partition_table`
 entries over the bootloader region and the table sector. They are
