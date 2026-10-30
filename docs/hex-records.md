@@ -37,7 +37,8 @@ regions and are never filled.
 Region `format_metadata` (`hex-record-region`) records `start_address`,
 `end_address`, `length`, `record_count`, and `first_line`/`last_line`: the
 1-based line span of the contributing data records. `compare_artifacts`
-compares a region's `start_address` and `length`; record and line counts are
+compares none of these fields: a region's name encodes its start and end
+addresses, its length follows from them, and record and line counts are
 layout.
 
 Root `format_metadata` (`hex-records`) records:
