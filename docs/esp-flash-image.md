@@ -327,9 +327,9 @@ and ESP-IDF v5.5.2's `gen_esp32part.py`, `otatool.py` and `parttool.py`,
 once with esptool v5.6.0 and once with 4.12.0. Its `gen_esp32part.py` is
 identical to v6.1's, and its otatool and parttool differ only in import style
 and esptool command spelling. All checks passed in both runs. With v5.6.0 and
-the build already cached, the run took 21.8 s elapsed, 15.9 s user CPU and
-5.7 s system CPU under `/usr/bin/time -l`; the largest single process peaked
-at a 258 MiB resident set, and the combined peak of all processes was not
+the build already cached, the run took 24.1 s elapsed, 16.9 s user CPU and
+6.3 s system CPU under `/usr/bin/time -l`; the largest single process peaked
+at a 278 MiB resident set, and the combined peak of all processes was not
 measured.
 
 The lane does not establish:
