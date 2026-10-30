@@ -640,6 +640,10 @@ const lifecycleErrorDetails = (
         ? {}
         : { constraint: error.constraint }),
       ...(error.field === undefined ? {} : { field: error.field }),
+      ...(error.infoPlist === undefined ? {} : { info_plist: error.infoPlist }),
+      ...(error.probedPaths === undefined
+        ? {}
+        : { probed_paths: [...error.probedPaths] }),
       ...(error.systemCode === undefined
         ? {}
         : { system_code: error.systemCode, boundary: "filesystem-read" }),
