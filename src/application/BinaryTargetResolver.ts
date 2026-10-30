@@ -47,9 +47,14 @@ import { err, ok, type Result } from "../domain/result.js";
 import { readMipsElfMetadata } from "./MipsElfMetadata.js";
 import { validateElfDeclaredRanges } from "../domain/elfDeclaredRanges.js";
 import {
-  resolveAppBundleExecutable,
+  resolveAppleBundleExecutable,
   type ResolvedAppBundle,
 } from "./AppBundleExecutable.js";
+import {
+  OPENABLE_APPLE_BUNDLE_TYPES_TEXT,
+  isUnopenedAppleBundleExtension,
+  openableAppleBundleExtension,
+} from "../domain/apple/appleBundleTypes.js";
 import {
   validateDosComLength,
   type ExecutableFormatHint,
@@ -75,6 +80,7 @@ import {
 } from "../domain/apple/appleArchiveFormat.js";
 import { hasDiskImageSignature } from "../domain/apple/diskImageFormat.js";
 import { hasGodotPckHeader } from "../domain/godotPckFormat.js";
+import { hasUImageMagic } from "../domain/uimageFormat.js";
 import { hasUnityFsHeader } from "../domain/unityfsFormat.js";
 import { detectHexRecordEncoding } from "../domain/firmware/hexRecords.js";
 import { hasUf2Block } from "../domain/firmware/uf2.js";
@@ -83,6 +89,11 @@ import {
   hasDfuSePrefix,
   isDfuSeFile,
 } from "../domain/firmware/dfuse.js";
+import { hasFitImagesNode } from "../domain/firmware/fitImage.js";
+import {
+  ESP8266_REFUSAL,
+  recognizeEspImage,
+} from "../domain/firmware/espImage.js";
 import {
   hasZipSignature,
   locateTrailingZipArchive,
@@ -674,6 +685,7 @@ const detectArtifactFormat = async (
   if (hasZipSignature(magic)) return zipRootPackageFormat(lower);
   if (hasGodotPckHeader(magic)) return "godot-pck";
   if (hasUnityFsHeader(magic)) return "unityfs";
+  if (hasUImageMagic(magic)) return "uimage";
   const hexRecords = detectHexRecordEncoding(magic);
   if (hexRecords !== undefined) return hexRecords;
   if (hasUf2Block(magic)) return "uf2";
@@ -692,6 +704,13 @@ const detectArtifactFormat = async (
     )
   )
     return "dfuse";
+  const esp = recognizeEspImage(magic, initial.size);
+  if (esp === "esp8266")
+    throw new BinaryTargetError(path, ESP8266_REFUSAL, {
+      constraint: "file_format_rejected",
+    });
+  if (esp === "esp-image") return "esp-image";
+  if (hasFitImagesNode(magic)) return "fit";
   // Binary plists, including keyed archives, often use other extensions.
   if (hasBinaryPlistSignature(magic)) return "plist";
   const named = namedArtifactFormat(lower);
@@ -763,12 +782,15 @@ const isArchiveFormat = (
     "asar",
     "godot-pck",
     "unityfs",
+    "uimage",
     "dmg",
     "pkg",
     "intel-hex",
     "srec",
+    "esp-image",
     "uf2",
     "dfuse",
+    "fit",
   ].includes(format);
 
 /** Whether the leading bytes begin any executable header family, valid or not. */
@@ -860,17 +882,27 @@ const resolveAppBundle = async (
 ): Promise<Result<ResolvedAppBundle, BinaryTargetError>> => {
   const metadata = await stat(path);
   if (!metadata.isDirectory()) return ok({ executable: path });
-  if (extname(path).toLowerCase() !== ".app")
+  if (openableAppleBundleExtension(extname(path)) !== undefined)
+    return resolveAppleBundleExecutable(path);
+  // Another Apple bundle type, such as a driver or kernel extension, is not
+  // an application directory and has no JavaScript route.
+  if (isUnopenedAppleBundleExtension(extname(path)))
     return err(
       new BinaryTargetError(
         path,
-        "this opening route requires a file or app bundle",
-        {
-          constraint: "directory_requires_file",
-        },
+        `${extname(path)} bundle directories are not opened by this route; it opens ${OPENABLE_APPLE_BUNDLE_TYPES_TEXT} bundle directories`,
+        { constraint: "bundle_type_unsupported" },
       ),
     );
-  return resolveAppBundleExecutable(path);
+  return err(
+    new BinaryTargetError(
+      path,
+      "this opening route requires a file or a supported Apple bundle directory",
+      {
+        constraint: "directory_requires_file",
+      },
+    ),
+  );
 };
 
 const readExecutableMetadata = async (

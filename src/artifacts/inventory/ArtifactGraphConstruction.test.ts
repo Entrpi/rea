@@ -26,6 +26,13 @@ import {
 } from "../../domain/firmware/uf2.fixture.js";
 
 import { classifyArtifactBytesAtPath } from "../../../tests/fixtures/artifactClassification.js";
+import {
+  ESP32C3_APP_SEGMENTS,
+  esp8266Image,
+  espImage,
+} from "../../../tests/fixtures/espImage.js";
+import { devicetreeFixture } from "../../firmware/devicetree/Devicetree.fixture.js";
+import { fitFixture } from "../fit/FitImage.fixture.js";
 
 it("joins only observed PE signature bytes across stream chunks", () => {
   const bytes = pe(0x8664, 8190);
@@ -480,6 +487,19 @@ it("classifies nested HEX and S-record content as containers by bytes", () => {
   ).toEqual({ kind: "resource", format: "file" });
 });
 
+it("classifies nested ESP images as containers by bytes", () => {
+  const image = espImage({ segments: ESP32C3_APP_SEGMENTS });
+  expect(classifyArtifactBytesAtPath("ota/update.dat", image)).toEqual({
+    kind: "container",
+    format: "esp-image",
+  });
+  // An unsupported ESP8266 image is a plain file, not a container.
+  expect(classifyArtifactBytesAtPath("esp8266.bin", esp8266Image())).toEqual({
+    kind: "resource",
+    format: "file",
+  });
+});
+
 it("classifies nested UF2 by block magics and DfuSe by prefix and suffix", () => {
   const uf2 = uf2File(uf2Image(RP2040_FAMILY, 0x1000_0000, patternBytes(300)));
   expect(classifyArtifactBytesAtPath("firmware/update.bin", uf2)).toEqual({
@@ -513,6 +533,36 @@ it("classifies nested UF2 by block magics and DfuSe by prefix and suffix", () =>
   expect(
     classifyArtifactContent("firmware/update.bin", partial, dfu.length + 1),
   ).toMatchObject({ format: "file" });
+});
+
+it("classifies a FIT by a /images node within the first 4 KiB", () => {
+  const images = [{ name: "kernel", data: Buffer.from("kernel") }];
+  const late = devicetreeFixture({
+    name: "",
+    properties: { padding: Buffer.alloc(4096) },
+    children: [{ name: "images" }],
+  });
+  const configurationsFirst = devicetreeFixture({
+    name: "",
+    children: [{ name: "configurations" }, { name: "images" }],
+  });
+  for (const [path, bytes] of [
+    ["firmware/boot.itb", fitFixture({ images })],
+    ["firmware/boot", configurationsFirst],
+  ] as const)
+    expect(classifyArtifactBytesAtPath(path, bytes)).toEqual({
+      kind: "container",
+      format: "fit",
+    });
+  for (const bytes of [
+    devicetreeFixture(),
+    fitFixture({ images, version: 15 }),
+    late,
+  ])
+    expect(classifyArtifactBytesAtPath("firmware/board.dtb", bytes)).toEqual({
+      kind: "resource",
+      format: "file",
+    });
 });
 
 describe("FAT prefix observation coverage", () => {
