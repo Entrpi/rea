@@ -563,7 +563,9 @@ describe("Ghidra headless launcher", () => {
         }),
       );
   });
+});
 
+describe("Ghidra RISC-V calling-convention policy", () => {
   it.each(GHIDRA_RISCV_CALLING_CONVENTION_IDS)(
     "runs the committed RISC-V policy %s after the no-return refit and before the bridge",
     (policy) => {
