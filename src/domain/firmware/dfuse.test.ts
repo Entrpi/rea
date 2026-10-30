@@ -375,13 +375,32 @@ it("refuses files above the fixed ceiling and more elements than retained", () =
     ok: false,
     error: { kind: "limit", boundary: "capacity" },
   });
-  // Empty elements are counted but retained as no entry, so they are not capped.
-  const empty = decode(
+});
+
+it("counts empty elements past the entry cap and names only the first four", () => {
+  // Empty elements have no entry, so they are not capped; 8 header bytes each
+  // let a file hold millions, and only a count and four descriptions are kept.
+  const empty = Array.from({ length: 65_537 }, (_, index) => ({
+    address: index * 2,
+    data: [],
+  }));
+  const decoded = decode(
     dfuseFile({
-      targets: [{ alternateSetting: 0, elements: elements(65_537, []) }],
+      targets: [
+        { alternateSetting: 0, elements: empty },
+        { alternateSetting: 1, elements: [] },
+      ],
     }),
     1 << 20,
   );
-  if (!empty.ok) throw new Error(empty.error.message);
-  expect(empty.value.metadata.empty_element_count).toBe(65_537);
+  if (!decoded.ok) throw new Error(decoded.error.message);
+  expect(decoded.value.elements).toEqual([]);
+  expect(decoded.value.metadata).toMatchObject({
+    element_count: 65_537,
+    empty_element_count: 65_537,
+    data_bytes: 0,
+  });
+  expect(decoded.value.limitations).toEqual([
+    "DfuSe declarations without bytes have no entry: target 0 element 0 at 0x00000000 (alternate setting 0) holds no bytes; target 0 element 1 at 0x00000002 (alternate setting 0) holds no bytes; target 0 element 2 at 0x00000004 (alternate setting 0) holds no bytes; target 0 element 3 at 0x00000006 (alternate setting 0) holds no bytes; and 65534 more.",
+  ]);
 });
