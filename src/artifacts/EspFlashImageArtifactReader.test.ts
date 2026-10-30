@@ -762,3 +762,54 @@ describe("ESP flash layout written bytes of overlapping partitions", () => {
     }
   });
 });
+
+describe("ESP flash layout app images of overlapping partitions", () => {
+  it("decodes each declared range once and keeps each partition's facts", async () => {
+    // 60 app partitions over one image: 40 hold all of it, 20 cut it short.
+    const image = espImage({
+      segments: [{ address: 0x3c00_0020, data: Buffer.alloc(0xf_0000, 0x5a) }],
+    });
+    const parts = Array.from({ length: 60 }, (_, index) => ({
+      label: `a${String(index)}`,
+      type: 0,
+      subtype: 0x10 + (index % 16),
+      offset: 0x1_0000,
+      size: index < 40 ? 0x10_0000 : 0x8_0000,
+    }));
+    const reader = new EspFlashImageArtifactReader(
+      await writeDump(
+        espFlashDump({
+          size: 0x11_0000,
+          bootloader: { at: 0, bytes: BOOTLOADER },
+          table: partitionTable(parts),
+          parts: [{ at: 0x1_0000, bytes: image }],
+        }),
+      ),
+    );
+    const decode = vi.spyOn(regionReads, "decodeEspFlashImage");
+    try {
+      await list(reader);
+      // The bootloader, the whole image and the image cut at 0x80000.
+      expect(decode).toHaveBeenCalledTimes(3);
+      const apps = reader.formatMetadata()?.apps ?? [];
+      expect(
+        apps.map(({ path, partition_index: index, facts }) => [
+          path,
+          index,
+          facts.status,
+          facts.coverage,
+        ]),
+      ).toEqual(
+        parts.map((part, index) => [
+          `partitions/${part.label}.bin`,
+          index,
+          "esp-image",
+          index < 40 ? "complete" : "unknown",
+        ]),
+      );
+    } finally {
+      decode.mockRestore();
+      await reader.close();
+    }
+  });
+});

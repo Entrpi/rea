@@ -344,26 +344,35 @@ export class EspFlashImageArtifactReader implements ArtifactReader {
     return new Map(held.map((region, index) => [region, extents[index]!]));
   }
 
-  /** ESP image facts for the bootloader region and each app partition. */
+  /**
+   * ESP image facts for the bootloader region and each app partition.
+   * Regions over the same bytes share one decode, however many the table
+   * declares.
+   */
   async #decodeImages(
     context: EspFlashReadContext,
     plan: EspFlashPlan,
   ): Promise<ReadonlyMap<EspFlashRegion, EspFlashImageFacts>> {
     const images = new Map<EspFlashRegion, EspFlashImageFacts>();
+    const decoded = new Map<string, EspFlashImageFacts>();
     for (const region of plan.regions) {
       const image =
         region.role === "bootloader" ||
         (region.partition !== undefined && isEspAppPartition(region.partition));
       if (!image || region.available === 0) continue;
       this.#assertOpen(context.signal);
-      images.set(
-        region,
-        await decodeEspFlashImage(
+      const range = `${String(region.fileOffset)}+${String(region.available)}`;
+      let facts = decoded.get(range);
+      if (facts === undefined) {
+        facts = await decodeEspFlashImage(
           context,
           { start: region.fileOffset, length: region.available },
           () => this.#assertOpen(context.signal),
-        ),
-      );
+        );
+        decoded.set(range, facts);
+      }
+      // Each region owns its facts, so no metadata aliases another's.
+      images.set(region, structuredClone(facts));
     }
     return images;
   }
