@@ -310,7 +310,11 @@ export class EspFlashImageArtifactReader implements ArtifactReader {
     for (const gap of plan.gaps) {
       this.#assertOpen(context.signal);
       gapFirstUnerased.push(
-        await firstUnerasedInRange(context, gap.offset, gap.length),
+        await firstUnerasedInRange(
+          context,
+          { start: gap.offset, length: gap.length },
+          () => this.#assertOpen(context.signal),
+        ),
       );
     }
     return finishEspFlashLayout(plan, { otadataRecords, gapFirstUnerased });

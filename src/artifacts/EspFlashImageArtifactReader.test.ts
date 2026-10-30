@@ -613,3 +613,69 @@ describe("ESP flash layout written-bytes scan lifecycle", () => {
     },
   );
 });
+
+describe("ESP flash layout erased-gap scan lifecycle", () => {
+  it.each(["cancel", "close"] as const)(
+    "settles the erased-gap scan when the caller requests %s after its first chunk",
+    async (action) => {
+      // One small partition leaves the rest of a 9 MiB dump as one erased gap.
+      const parts = [
+        { label: "nvs", type: 1, subtype: 2, offset: 0x9000, size: 0x1000 },
+      ];
+      const reader = new EspFlashImageArtifactReader(
+        await writeDump(
+          espFlashDump({
+            size: 0x90_0000,
+            bootloader: { at: 0, bytes: BOOTLOADER },
+            table: partitionTable(parts),
+          }),
+        ),
+      );
+      const controller = new AbortController();
+      const reason = { stage: "erased-gap scan" };
+      let completion: Promise<void> | undefined;
+      let scanned = 0;
+      let acknowledge = (): void => undefined;
+      const scanning = new Promise<void>((resolve) => {
+        acknowledge = resolve;
+      });
+      const scan = regionReads.firstUnerasedInRange;
+      // Count the chunks the scan examines once the reader admits them.
+      const observer = vi
+        .spyOn(regionReads, "firstUnerasedInRange")
+        .mockImplementation((context, range, assertOpen) =>
+          scan(context, range, () => {
+            assertOpen();
+            if (range.length < 0x10_0000) return;
+            scanned += 1;
+            if (scanned === 1) acknowledge();
+          }),
+        );
+      try {
+        const pending = reader
+          .entries(controller.signal)
+          [Symbol.asyncIterator]()
+          .next();
+        await Promise.race([
+          scanning,
+          pending.then(() => {
+            throw new Error("Preparation settled before the scan began");
+          }),
+        ]);
+        const requestedAt = scanned;
+        if (action === "cancel") controller.abort(reason);
+        else completion = reader.close();
+        await expect(pending).rejects.toMatchObject(
+          action === "cancel"
+            ? { reason: "cancelled", cause: reason }
+            : { reason: "unavailable" },
+        );
+        await completion;
+        expect(scanned).toBe(requestedAt);
+      } finally {
+        observer.mockRestore();
+        await reader.close();
+      }
+    },
+  );
+});

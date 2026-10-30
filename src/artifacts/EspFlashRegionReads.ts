@@ -58,12 +58,13 @@ export const readEspFlashRange = async (
 /** The file offset of the first byte in a range that is not erased flash. */
 export const firstUnerasedInRange = async (
   context: EspFlashReadContext,
-  start: number,
-  length: number,
+  range: { readonly start: number; readonly length: number },
+  assertOpen: () => void,
 ): Promise<number | undefined> => {
-  if (length <= 0) return undefined;
-  let position = start;
-  for await (const chunk of chunks(context, start, length)) {
+  if (range.length <= 0) return undefined;
+  let position = range.start;
+  for await (const chunk of chunks(context, range.start, range.length)) {
+    assertOpen();
     const found = firstUnerased(chunk, position);
     if (found !== undefined) return found;
     position += chunk.length;
