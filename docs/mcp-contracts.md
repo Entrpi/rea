@@ -1339,16 +1339,15 @@ known and differ. If only one value is known, storage comparison is unknown;
 when both are omitted, storage is not compared.
 
 `compare_artifacts` also compares the declarations in `format_metadata` of
-UnityFS members, PyInstaller entries, .NET bundle members, Node SEA members,
-Intel HEX/S-record regions, ESP image segments and FIT images; each format's
-guide names the compared fields. A changed declaration is a metadata change,
-including when content is unavailable. A declaration that only one side
-records, or that the other side records as another kind, is unknown and adds a
-limitation. A field that either side could not read is unknown, and the other
-fields still compare. Other kinds are not compared: their fields record
-layout, come from the artifact's own bytes, or repeat occurrence fields,
-except Godot PCK source paths, which [Godot PCK archives](godot-pck.md)
-explains.
+UnityFS members, PyInstaller entries, Node SEA members, ESP image segments and
+FIT images; each format's guide names the compared fields. A changed
+declaration is a metadata change, including when content is unavailable. A
+declaration that only one side records, or that the other side records as
+another kind, is unknown and adds a limitation. A field that either side could
+not read is unknown, and the other fields still compare. Other kinds are not
+compared: their fields record layout, come from the artifact's own bytes, or
+repeat occurrence fields, except Godot PCK source paths, which
+[Godot PCK archives](godot-pck.md) explains.
 
 POSIX letter-colon names such as `a:b` remain valid logical
 names; Windows extraction refuses names its filesystem cannot materialize.
