@@ -347,12 +347,15 @@ const espFlashDumpProbes = (
   const root = inventory.occurrences.find(
     ({ logical_path }) => logical_path === ".",
   )?.format_metadata;
-  if (root?.kind !== "esp-image" || root.flash_dump === null) return [];
-  const offset = offsetText(root.flash_dump.flash_offset);
+  if (root?.kind !== "esp-image") return [];
+  // Evidence recorded before REA reported the origin has no hint to offer.
+  const dump = root.flash_dump;
+  if (dump === null || dump === undefined) return [];
+  const offset = offsetText(dump.flash_offset);
   return [
     {
       operation: "open_binary",
-      rationale: `Reopen the file with format esp-flash-image and flash_offset ${offset}, then inspect_artifact: it is a flash dump read from flash ${offset}, with a partition table at file offset ${offsetText(root.flash_dump.table_file_offset)}.`,
+      rationale: `Reopen the file with format esp-flash-image and flash_offset ${offset}, then inspect_artifact: it is a flash dump read from flash ${offset}, with a partition table at file offset ${offsetText(dump.table_file_offset)}.`,
       authority: "artifact-bytes",
     },
   ];
