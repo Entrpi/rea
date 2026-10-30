@@ -79,9 +79,12 @@ const formatSchema = z.enum([
   "pkg",
   "intel-hex",
   "srec",
+  "esp-image",
+  "fit",
   "plist",
   "javascript",
   "source-map",
+  "uimage",
 ]);
 const kindSchema = z.enum(["executable", "database", "archive", "artifact"]);
 const subjectBaseSchema = z.object({

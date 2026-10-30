@@ -194,9 +194,9 @@ it("passes Rizin decoder and map inputs as flags before the artifact", async () 
       operation: "execute_rizin_command",
       issues: [
         {
-          path: [],
-          reason: "invalid_value",
-          message: expect.stringMatching(/^asm_cpu: /u),
+          path: ["asm_cpu"],
+          reason: "invalid_format",
+          message: expect.stringMatching(/^must be a Rizin name: /u),
         },
       ],
     },
