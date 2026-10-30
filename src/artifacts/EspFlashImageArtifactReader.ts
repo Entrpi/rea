@@ -118,6 +118,7 @@ export class EspFlashImageArtifactReader implements ArtifactReader {
       await this.#prepared;
       await this.#source.read(signal);
     });
+    this.#assertOpen(signal);
     if (this.#coverage !== undefined)
       options?.onCoverage?.({
         ...this.#coverage,
@@ -127,6 +128,7 @@ export class EspFlashImageArtifactReader implements ArtifactReader {
       this.#assertOpen(signal);
       yield copyArtifactEntry(entry);
     }
+    this.#assertOpen(signal);
   }
 
   async open(entry: ArtifactEntry, signal?: AbortSignal): Promise<Readable> {
@@ -163,16 +165,39 @@ export class EspFlashImageArtifactReader implements ArtifactReader {
       // Retirement can destroy the stream before its consumer listens.
       output.on("error", () => undefined);
       this.#streams.add(output);
-      output.once("close", () => this.#streams.delete(output));
+      let producerComplete = false;
+      const onAbort = (): void => {
+        // Preserve active read/validation errors; after production, the caller
+        // still owns buffered bytes and cancellation must retire that result.
+        if (!producerComplete || output.destroyed) return;
+        output.destroy(
+          new ArtifactReaderFailure("cancelled", `${LABEL} read cancelled`, {
+            cause: signal?.reason,
+          }),
+        );
+      };
+      const retired = new Promise<void>((resolve) => {
+        output.once("close", () => {
+          this.#streams.delete(output);
+          signal?.removeEventListener("abort", onAbort);
+          resolve();
+        });
+      });
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) onAbort();
       void this.#scope
-        .run(
-          () =>
+        .run(async () => {
+          await Promise.all([
             new Promise<void>((resolve) => {
               pipeline(source, output, () => {
+                producerComplete = true;
+                if (signal?.aborted) onAbort();
                 resolve();
               });
             }),
-        )
+            retired,
+          ]);
+        })
         .catch((cause: unknown) =>
           output.destroy(
             cause instanceof Error
