@@ -38,6 +38,14 @@ const UF2_FAMILY_NAMES: ReadonlyMap<number, string> = new Map([
   [0xada5_2840, "NRF52840"],
   [0x68ed_2b88, "SAMD21"],
   [0x5511_4460, "SAMD51"],
+  [0x9fff_d543, "RTL8710A"],
+  [0x22e0_d6fc, "RTL8710B"],
+  [0xe08f_7564, "RTL8720C"],
+  [0x3379_cfe2, "RTL8720D"],
+  [0x675a_40b0, "BK7231U"],
+  [0x7b3e_f230, "BK7231N"],
+  [0x6a82_cc42, "BK7251"],
+  [0xde12_70b7, "BL602"],
 ]);
 
 /** The registry short name for a family ID, or null when REA does not name it. */
