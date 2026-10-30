@@ -20,8 +20,8 @@ A file is a flash image when REA finds a partition table in the entry
 structure ESP-IDF's bootloader verifies (`esp_partition_table_verify`):
 32-byte `0x50AA` entries, at most one `0xEBEB` MD5 entry over the entries
 before it, and a terminating entry within `0xC00` bytes. ESP-IDF accepts a
-table with no entries, but REA requires one so that erased flash is not a
-table. A table whose MD5 does not match, or that has a second MD5 entry, is
+table with no partition entries, but REA requires one, so that neither
+erased flash nor a lone MD5 entry is read as a table. A table whose MD5 does not match, or that has a second MD5 entry, is
 still read, with `md5.status` `invalid` and a limitation, because the
 bootloader would refuse it. The table is located in this order:
 

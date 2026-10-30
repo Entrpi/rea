@@ -99,6 +99,11 @@ describe("ESP partition tables", () => {
   it.each([
     ["erased flash", Buffer.alloc(0xc00, 0xff), "the first entry is empty"],
     [
+      "an MD5 entry alone",
+      partitionTable([]),
+      "entry 1 at 0x20 ends the table before any partition entry",
+    ],
+    [
       "a foreign entry",
       Buffer.concat([
         partitionEntry(TWO_OTA_PARTITIONS[0]!),
