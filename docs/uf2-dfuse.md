@@ -47,9 +47,11 @@ label, not file content. It comes from a small table copied from Microsoft's
 [`cf3bd7f9`](https://github.com/microsoft/uf2/blob/cf3bd7f9c274b949528f8cd6a19eef2502a687d2/utils/uf2families.json),
 which the root's `family_name_registry` names. The table covers the ESP32
 family, ESP8266, RP2040, the RP2350 and RP2XXX download families, STM32F4,
-nRF52840, SAMD21 and SAMD51; other IDs keep their value with `family_name:
-null`. A familyID names a target family; it does not establish the CPU state,
-memory map or entry point.
+nRF52840, SAMD21 and SAMD51. It also covers the families that LibreTiny builds
+for and the registry lists: RTL8710A, RTL8710B, RTL8720C, RTL8720D, BK7231U,
+BK7231N, BK7251 and BL602. Other IDs, LibreTiny's LN882H among them, keep their
+value with `family_name: null`. A familyID names a target family; it does not
+establish the CPU state, memory map or entry point.
 
 Root `format_metadata` (`uf2`) records:
 

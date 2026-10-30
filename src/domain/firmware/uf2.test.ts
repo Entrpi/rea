@@ -226,6 +226,33 @@ it("keeps families apart even when they target the same addresses", () => {
   ]);
 });
 
+it("names the LibreTiny families that the cited registry lists", () => {
+  // LibreTiny also builds LN882H (0xa38090a8), which that registry omits.
+  const families = new Map<number, string | null>([
+    [0x9fff_d543, "RTL8710A"],
+    [0x22e0_d6fc, "RTL8710B"],
+    [0xe08f_7564, "RTL8720C"],
+    [0x3379_cfe2, "RTL8720D"],
+    [0x675a_40b0, "BK7231U"],
+    [0x7b3e_f230, "BK7231N"],
+    [0x6a82_cc42, "BK7251"],
+    [0xde12_70b7, "BL602"],
+    [0xa380_90a8, null],
+  ]);
+  const decoded = image(
+    uf2File(
+      [...families.keys()].flatMap((familyId) =>
+        uf2Image(familyId, 0x0, patternBytes(256)),
+      ),
+    ),
+  );
+  expect(
+    new Map(
+      decoded.regions.map(({ familyId, familyName }) => [familyId, familyName]),
+    ),
+  ).toEqual(families);
+});
+
 it("reports numbered blocks that are absent and leaves coverage unknown", () => {
   const blocks = uf2Image(RP2040_FAMILY, 0x1000_0000, patternBytes(1024));
   const decoded = image(uf2File([blocks[0]!, blocks[1]!, blocks[3]!]));
