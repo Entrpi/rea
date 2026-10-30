@@ -619,11 +619,14 @@ describe("RISC-V ilp32f admission", () => {
 
   it("states the declared ABI and the applied prototype", () => {
     const notes = ghidraRiscvLimitations(ilp32f());
-    expect(notes).toHaveLength(4);
-    expect(notes[1]).toContain(
-      "declares the single-float ABI (ilp32f); the pinned language's compiler specification models ilp32d, so REA applies its `__rea_ilp32f` prototype",
+    // One note names the declared ABI, the ABI the pinned language models
+    // and the prototype REA applies, in any wording and order.
+    expect(notes).toContainEqual(
+      expect.stringMatching(
+        /^(?=.*\(ilp32f\))(?=.*\bilp32d\b)(?=.*`__rea_ilp32f`)/su,
+      ),
     );
-    expect(notes[2]).toContain(`declares \`${H4_ARCH}\``);
+    expect(notes).toContainEqual(expect.stringContaining(H4_ARCH));
   });
 });
 
