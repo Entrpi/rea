@@ -1040,7 +1040,10 @@ it.skipIf(process.platform === "win32")(
         throw new Error("closed reader compilation unexpectedly succeeded");
       expect(outcome.cause).toMatchObject({ name: "AbortError" });
       await expect(access(state.root)).rejects.toThrow();
-      await expect(reader.prepare()).rejects.toThrow(/reader is closed/u);
+      await expect(reader.prepare()).rejects.toMatchObject({
+        _tag: "ProcessAdmissionError",
+        code: "reader_closed",
+      });
       await expect(reader.close()).resolves.toBeUndefined();
     } finally {
       await Promise.allSettled([preparation]);
@@ -1309,6 +1312,11 @@ it.skipIf(!onDarwin)(
         duplicateTokenFailsClosed: true,
         finalAssignmentArgumentRead: true,
         missingAppleBoundaryFailsClosed: true,
+        malformedBuffersRejected: true,
+        malformedObservation: {
+          state: "unavailable",
+          reason: "malformed_procargs",
+        },
         nonAsciiPathRead: true,
         realTokenRead: true,
         reservedArgumentIgnored: true,
@@ -1438,7 +1446,9 @@ it.skipIf(!onDarwin)(
     const host = createSystemProcessOwnershipHost("darwin");
     const children: Awaited<ReturnType<typeof startNodeChild>>[] = [];
     try {
-      const executables = [join(root, "n"), join(root, "node")];
+      const executables = Array.from({ length: 8 }, (_, index) =>
+        join(root, "n".repeat(index + 1)),
+      );
       for (const executable of executables)
         await symlink(process.execPath, executable);
       for (let index = 0; index < executables.length; index += 1) {
@@ -1464,8 +1474,10 @@ it.skipIf(!onDarwin)(
       });
       const observations = await host.runTokens?.(entries);
       expect(children.map(({ pid }) => observations?.get(pid))).toEqual([
-        { state: "readable", runId: "synthetic-padding-0" },
-        { state: "readable", runId: "synthetic-padding-1" },
+        ...executables.map((_, index) => ({
+          state: "readable",
+          runId: `synthetic-padding-${String(index)}`,
+        })),
         { state: "readable" },
       ]);
     } finally {
