@@ -273,6 +273,7 @@ const recordObservation = (
     readonly encrypted?: boolean;
     readonly executable?: boolean;
     readonly limitations?: string[];
+    readonly unpacked?: boolean;
   } = {},
 ) => {
   const inventory = artifactInventoryResultSchema.parse(
@@ -321,6 +322,7 @@ const recordObservation = (
       ? {}
       : { format_metadata: formatMetadata }),
     limitations: record.limitations ?? [],
+    ...(record.unpacked === undefined ? {} : { unpacked: record.unpacked }),
   });
   inventory.coverage = { scope: "container-entries", status: "complete" };
   inventory.manifest.node_count = inventory.nodes.length;
@@ -576,5 +578,31 @@ it("compares a node-less record's occurrence fields but not its limitations", ()
   expect(compareArtifacts(plain, recordObservation(namespace))).toMatchObject({
     status: "unchanged",
     changes: [],
+  });
+});
+
+it("compares a node-less record's recorded ASAR storage", () => {
+  // No reader records storage on a metadata record. A recorded value is a
+  // declared fact like `encrypted`, and an omitted one stays unknown.
+  expect(
+    compareArtifacts(
+      recordObservation(runtimeOption, { unpacked: false }),
+      recordObservation(runtimeOption, { unpacked: true }),
+    ).changes,
+  ).toEqual([
+    expect.objectContaining({
+      logical_path: "record",
+      classification: "changed",
+      dimensions: ["metadata"],
+    }),
+  ]);
+  expect(
+    compareArtifacts(
+      recordObservation(runtimeOption, { unpacked: true }),
+      recordObservation(runtimeOption),
+    ),
+  ).toMatchObject({
+    status: "unknown",
+    changes: [{ classification: "unknown", dimensions: ["availability"] }],
   });
 });
