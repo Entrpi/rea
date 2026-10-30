@@ -692,8 +692,16 @@ export class ReverseEngineeringService {
         stderrInvalidUtf8 = capture.stderrInvalidUtf8 === true;
       }
     }
-    if (earlyFailure !== undefined)
+    if (earlyFailure !== undefined) {
+      // Without command output there is no Evidence to carry what the probe
+      // observed, so the failure keeps it.
+      if (identification.probed)
+        earlyFailure.retainDiagnostics({
+          provider: identification.identity,
+          ...identification.parameters,
+        });
       return err(this.#registerCleanupFailure(earlyFailure, cleanupOwner));
+    }
     if (failure !== undefined && cleanupOwner !== undefined)
       failure = this.#registerCleanupFailure(failure, cleanupOwner);
     let digestAfter: string | null = null;
@@ -878,7 +886,8 @@ export class ReverseEngineeringService {
     const unidentified = (
       reason: string,
       executable = profile.executable,
-      parameters: Readonly<Record<string, JsonValue>> = {},
+      // What the lookup, hash and probe observed; absent when no probe ran.
+      observed?: Readonly<Record<string, JsonValue>>,
     ): ProviderIdentification => ({
       executable,
       identity: profile.identity,
@@ -888,8 +897,9 @@ export class ReverseEngineeringService {
       ],
       parameters:
         probe === undefined
-          ? parameters
-          : { ...parameters, provider_identity: "assumed" },
+          ? {}
+          : { ...observed, provider_identity: "assumed" },
+      probed: observed !== undefined,
     });
     if (probe === undefined)
       return ok(unidentified("no reliable version probe was performed"));
@@ -955,7 +965,8 @@ export class ReverseEngineeringService {
       signal,
       timeoutMs,
     );
-    if (!outcome.ok) return outcome;
+    // A probe that ends the call keeps the path and digest it ran from.
+    if (!outcome.ok) return err(outcome.error.retainDiagnostics(parameters));
     const completed = outcome.value;
     if (completed.status !== "read" && completed.status !== "unrecognized")
       return ok(
@@ -987,6 +998,7 @@ export class ReverseEngineeringService {
         ...identification.limitations,
       ],
       parameters: { ...bannerParameters, provider_identity: "banner" },
+      probed: true,
     });
   }
 
@@ -1100,6 +1112,8 @@ interface ProviderIdentification {
   readonly identity: Evidence["provider"];
   readonly limitations: readonly string[];
   readonly parameters: Readonly<Record<string, JsonValue>>;
+  /** A probe ran, so the parameters hold what it and the lookup observed. */
+  readonly probed: boolean;
 }
 
 /** One version probe's outcome. */
