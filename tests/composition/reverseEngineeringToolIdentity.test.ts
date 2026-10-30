@@ -453,7 +453,7 @@ posix.each(["cancellation", "deadline"] as const)(
 posix(
   "returns the caller's cancellation from the probe without starting the command",
   async () => {
-    const { executable, path } = await fixture();
+    const { executable, path, digest } = await fixture();
     const caller = new AbortController();
     const reason = { caller: "stop during version probe" };
     const run = vi.fn(
@@ -479,7 +479,12 @@ posix(
     if (result.ok) throw new Error("Expected cancellation");
     expect(result.error._tag).toBe("AnalysisCancelledError");
     expect(result.error.cause).toBe(reason);
-    expect(result.error.diagnostics).toMatchObject({ phase: "version_probe" });
+    // The path and digest it probed survive the cancellation.
+    expect(result.error.diagnostics).toMatchObject({
+      phase: "version_probe",
+      provider_executable_path: executable,
+      provider_executable_sha256: await digest(),
+    });
     expect(run).toHaveBeenCalledOnce();
   },
 );
