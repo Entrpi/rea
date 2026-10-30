@@ -83,6 +83,7 @@ const formatSchema = z.enum([
   "intel-hex",
   "srec",
   "esp-image",
+  "fit",
   "plist",
   "javascript",
   "source-map",
