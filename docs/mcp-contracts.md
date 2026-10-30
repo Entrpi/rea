@@ -1338,6 +1338,8 @@ support for omitted historical values.
 known and differ. If only one value is known, storage comparison is unknown;
 when both are omitted, storage is not compared.
 
+<!-- BEGIN:compare-artifacts:compared-format-metadata-kinds -->
+
 `compare_artifacts` also compares the declarations in the `format_metadata`
 of UnityFS members (`unityfs-entry`), PyInstaller entries
 (`pyinstaller-entry`), Node SEA members (`node-sea-entry`),
@@ -1350,6 +1352,8 @@ the other fields still compare. Other kinds are not compared: their fields
 record layout, come from the bytes of the artifact or its container, or
 repeat occurrence fields, except Godot PCK source paths, which
 [Godot PCK archives](godot-pck.md) explains.
+
+<!-- END:compare-artifacts:compared-format-metadata-kinds -->
 
 Every occurrence records `entry_kind`, `executable` and `encrypted`. A
 different entry kind, `encrypted` value or occurrence limitation text is a
