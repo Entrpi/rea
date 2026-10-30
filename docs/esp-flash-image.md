@@ -107,8 +107,9 @@ where its own `chip_id` says the ROM loads it.
 
 Each partition entry is `partitions/<label>.bin` when the label is a safe
 name of up to 16 letters, digits, `.`, `_` and `-` that starts with a
-letter, digit or underscore and has at least one letter or underscore, and
-no other label repeats it, ignoring case as some file systems do; it is
+letter, digit or underscore and has at least one letter or underscore, is
+not a Windows device name such as `NUL` or `COM1`, alone or before a dot,
+and no other label repeats it, ignoring case as some file systems do; it is
 `partitions/<index>.bin` otherwise. `source_path` keeps the label, the
 table's own name for the partition. Its `format_metadata`
 (`esp-flash-partition`) records the table `index`, `label` (null when not
