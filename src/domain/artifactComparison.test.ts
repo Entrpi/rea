@@ -449,6 +449,28 @@ it("does not compare HEX region metadata, which the region's path encodes", () =
     });
 });
 
+it("compares a node-less record of any compared kind by its declaration", () => {
+  // No reader emits such a record; the rule follows the table, not a format.
+  expect(
+    compareArtifacts(
+      recordObservation(espImageSegment),
+      recordObservation(espImageSegment),
+    ),
+  ).toMatchObject({ status: "unchanged", changes: [] });
+  expect(
+    compareArtifacts(
+      recordObservation(espImageSegment),
+      recordObservation(movedSegment),
+    ).changes,
+  ).toEqual([
+    expect.objectContaining({
+      logical_path: "record",
+      classification: "changed",
+      dimensions: ["metadata"],
+    }),
+  ]);
+});
+
 it("compares node-less records by declaration and keeps content changes", () => {
   expect(
     compareArtifacts(
