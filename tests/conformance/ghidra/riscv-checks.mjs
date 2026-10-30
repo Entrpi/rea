@@ -389,8 +389,18 @@ export function assertRiscvIlp32CallSites(calls) {
 }
 
 /**
+ * Where a stripped build returns: in the typed build's registers, or in none
+ * when the result goes through caller memory addressed by `a0`.
+ */
+const strippedReturnStorage = (abi) =>
+  abi.parameters.some(([name]) => name === "__return_storage_ptr__")
+    ? "<VOID>"
+    : abi.return[1];
+
+/**
  * Typed functions keep their names and types and use exactly the table's
- * storage. Stripped functions get one inferred word per location, in order.
+ * storage. Stripped functions get one inferred word per parameter location, in
+ * order, and their return storage; recovered types are not compared.
  */
 export function assertRiscvIlp32Storage(boundaries, { stripped = false } = {}) {
   assert.deepEqual(
@@ -406,6 +416,11 @@ export function assertRiscvIlp32Storage(boundaries, { stripped = false } = {}) {
     for (const value of [boundary.return_type, ...parameters])
       assert.doesNotMatch(value.storage ?? "", FLOAT_REGISTER, name);
     if (stripped) {
+      assert.equal(
+        boundary.return_type.storage,
+        strippedReturnStorage(want),
+        `${name} inferred return storage`,
+      );
       if (want.variadic !== undefined) continue;
       assert.deepEqual(
         parameters.map((parameter) => parameter.storage),

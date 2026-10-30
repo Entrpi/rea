@@ -335,6 +335,23 @@ describe("RISC-V ilp32 conformance checks", () => {
     );
   });
 
+  it("checks a stripped build's return storage, not its recovered types", () => {
+    const stripped = (text: string) =>
+      assertRiscvIlp32Storage(boundaries(text), { stripped: true });
+    expect(() =>
+      stripped(STRIPPED.replaceAll("undefined8@", "ulonglong@")),
+    ).not.toThrow();
+    // A register-pair return that loses its high word is refused.
+    expect(() =>
+      stripped(
+        STRIPPED.replace(
+          "rea_riscv_abi_wide undefined8@a1:4,a0:4",
+          "rea_riscv_abi_wide undefined4@a0:4",
+        ),
+      ),
+    ).toThrow(/rea_riscv_abi_wide inferred return storage/u);
+  });
+
   it("reads the caller's arguments through the corrected storage", () => {
     expect(() => assertRiscvIlp32Caller(TYPED_CALLER, ADDRESSES)).not.toThrow();
     expect(() =>

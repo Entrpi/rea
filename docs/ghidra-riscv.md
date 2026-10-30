@@ -308,7 +308,9 @@ For the soft-float builds the lane also checks:
   `long double` passed by reference (the pointed-to copies hold the source
   values), aligned variadic pairs, and an indirect call.
 - `inspect_native_api` reports `__rea_ilp32` with exactly that storage for the
-  typed build, and one integer word per location for the stripped build.
+  typed build. The stripped build has one integer word per parameter location
+  and returns in the typed build's registers, or in none when the result goes
+  through caller memory.
 - The caller's pseudocode passes the source constants through that storage and
   names no floating-point register.
 - Retained Evidence states the prototype outcome; the stripped build has no
