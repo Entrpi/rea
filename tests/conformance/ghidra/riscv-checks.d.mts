@@ -14,7 +14,10 @@ export interface RiscvAbiFunction {
   readonly return: readonly [string, string];
   readonly parameters: readonly RiscvAbiParameter[];
   readonly variadic?: Readonly<Record<string, RiscvWord>>;
-  readonly stripped?: readonly string[];
+  readonly stripped?: {
+    readonly return?: string;
+    readonly parameters?: readonly string[];
+  };
 }
 export interface RiscvAbiCallback {
   readonly caller: string;

@@ -395,8 +395,11 @@ For the soft- and single-float builds the lane also checks:
   both ways round, float registers running out, and an indirect call with a
   float-and-integer structure.
 - `inspect_native_api` reports the policy's prototype with exactly that storage
-  for the typed builds, and for the stripped builds the storage Ghidra infers
-  from the registers each function reads.
+  for the typed builds. For the stripped builds it reports the storage Ghidra
+  infers from the registers each function uses. Their returns use the typed
+  build's registers, or none when the result goes through caller memory; a
+  single-float function that leaves a structure's float in `fa0` unchanged
+  returns only the integer register it writes.
 - The callers' pseudocode passes the source constants through that storage. In
   the soft-float builds it names no floating-point register; in the typed
   single-float build it names no register value that a prototype leaves out.
