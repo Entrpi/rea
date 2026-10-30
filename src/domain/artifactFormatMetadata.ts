@@ -874,15 +874,9 @@ const declarationsByKind: {
     notCompared:
       "Its fields come from the file's own records, which content comparison covers.",
   },
-  /**
-   * Where a region's bytes load: its start address and length. The end
-   * address follows from them, and record and line counts are layout.
-   */
   "hex-record-region": {
-    declaration: (metadata) => ({
-      start_address: metadata.start_address,
-      length: metadata.length,
-    }),
+    notCompared:
+      "start_address and end_address restate the region's path, and length follows from them; record and line counts are layout.",
   },
   uimage: {
     notCompared:

@@ -455,6 +455,51 @@ it("does not compare ESP signature block metadata", () => {
     });
 });
 
+it("does not compare HEX region metadata, which the region's path encodes", () => {
+  const region: FormatMetadata = {
+    kind: "hex-record-region",
+    start_address: 0x0800_0000,
+    end_address: 0x0800_001f,
+    length: 32,
+    record_count: 2,
+    first_line: 1,
+    last_line: 2,
+  };
+  // Record and line counts are layout, and equal bytes stay unchanged beside
+  // an observation without the metadata, such as an extracted region.
+  for (const other of [
+    declared({ ...region, record_count: 4, first_line: 3, last_line: 6 }),
+    observation({ hash_status: "verified" }),
+  ])
+    expect(compareArtifacts(declared(region), other)).toMatchObject({
+      status: "unchanged",
+      changes: [],
+      limitations: [],
+    });
+});
+
+it("compares a node-less record of any compared kind by its declaration", () => {
+  // No reader emits such a record; the rule follows the table, not a format.
+  expect(
+    compareArtifacts(
+      recordObservation(espImageSegment),
+      recordObservation(espImageSegment),
+    ),
+  ).toMatchObject({ status: "unchanged", changes: [] });
+  expect(
+    compareArtifacts(
+      recordObservation(espImageSegment),
+      recordObservation(movedSegment),
+    ).changes,
+  ).toEqual([
+    expect.objectContaining({
+      logical_path: "record",
+      classification: "changed",
+      dimensions: ["metadata"],
+    }),
+  ]);
+});
+
 it("compares node-less records by declaration and keeps content changes", () => {
   expect(
     compareArtifacts(
