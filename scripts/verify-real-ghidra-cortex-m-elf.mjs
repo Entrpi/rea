@@ -2,7 +2,6 @@
 // Real-Ghidra lane for M-profile ARM ELF executables: each variant's pinned
 // decoder, float passing, header-selected images, and the language override.
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   mkdir,
@@ -15,7 +14,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
@@ -45,6 +43,7 @@ import {
   requireMcpOutput,
 } from "./lib/mcp-verifier-results.mjs";
 import { createVerifierRun, completeVerifierRun } from "./lib/verifier-run.mjs";
+import { createVerifierCommands } from "./lib/verify-commands.mjs";
 
 if (process.argv.length !== 2)
   throw new Error("Usage: node scripts/verify-real-ghidra-cortex-m-elf.mjs");
@@ -74,9 +73,10 @@ const tools = {
   readelf: process.env.REA_LLVM_READELF ?? "llvm-readelf",
   objdump: process.env.REA_LLVM_OBJDUMP ?? "llvm-objdump",
 };
-const execute = promisify(execFile);
 const entrypoint = fileURLToPath(new URL("./rea.mjs", import.meta.url));
 const run = createVerifierRun();
+// Every LLVM and CLI command runs as an owned process tree with a deadline.
+const commands = await createVerifierCommands();
 const workspace = await mkdtemp(join(tmpdir(), "rea-cortex-m-elf-proof-"));
 const runtime = join(workspace, "runtime");
 const fixtureDirectory = join(workspace, "fixtures");
@@ -179,7 +179,10 @@ try {
         : undefined;
     validators.set(tool.name, existing ?? ajv.compile(tool.outputSchema));
   }
-  const built = await buildCortexMElfFixtures(fixtureDirectory, tools);
+  const built = await buildCortexMElfFixtures(fixtureDirectory, {
+    ...tools,
+    commands,
+  });
   for (const fixture of built.fixtures) {
     const report = { name: fixture.name, variant: fixture.variant };
     for (const stripped of [false, true])
@@ -215,7 +218,13 @@ try {
 } catch (cause) {
   failure = cause;
 }
-for (const close of [() => client.close(), () => transport.close()]) {
+// The command owner closes before the lineage check and before the workspace
+// is removed; a failed close keeps the workspace for inspection.
+for (const close of [
+  () => client.close(),
+  () => transport.close(),
+  () => commands.close(),
+]) {
   try {
     await close();
   } catch (cause) {
@@ -381,7 +390,7 @@ async function verifyDecoding(fixture, path, expected, stripped) {
   for (const symbol of checked) {
     // The stripped image keeps the layout, so the unstripped symbols address it.
     const listed = await llvmFunctionInstructions(
-      tools.objdump,
+      { ...tools, commands },
       fixture.path,
       symbol,
     );
@@ -544,7 +553,7 @@ async function verifySeededHandler(fixture) {
   const evidence = parseEvidence(
     JSON.parse(
       (
-        await execute(
+        await commands.exec(
           process.execPath,
           [
             entrypoint,
@@ -645,7 +654,7 @@ async function primaskThroughCli(fixture, environment) {
   return parseEvidence(
     JSON.parse(
       (
-        await execute(
+        await commands.exec(
           process.execPath,
           [
             entrypoint,

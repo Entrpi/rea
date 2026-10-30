@@ -1,11 +1,7 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
-
-const execute = promisify(execFile);
 
 /**
  * One build per M-profile variant, ARMv7E-M with each float ABI (soft, softfp
@@ -145,10 +141,14 @@ SECTIONS
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 /** Symbol addresses from LLVM, with the Thumb bit cleared from code addresses. */
-const symbolAddresses = async (readelf, path) => {
-  const { stdout } = await execute(readelf, ["--wide", "-s", path], {
-    timeout: 30000,
-  });
+const symbolAddresses = async (tools, path) => {
+  const { stdout } = await tools.commands.exec(
+    tools.readelf,
+    ["--wide", "-s", path],
+    {
+      timeout: 30000,
+    },
+  );
   const symbols = {};
   for (const line of stdout.split("\n")) {
     const fields = line.trim().split(/\s+/u);
@@ -161,12 +161,18 @@ const symbolAddresses = async (readelf, path) => {
 };
 
 /** The attribute and header facts LLVM reads, the lane's independent oracle. */
-export const readelfArmFacts = async (readelf, path) => {
-  const header = await execute(readelf, ["-h", path], { timeout: 30000 });
-  const flags = /Flags:\s+(0x[0-9a-f]+)/u.exec(header.stdout)?.[1];
-  const { stdout } = await execute(readelf, ["--arch-specific", path], {
+export const readelfArmFacts = async (tools, path) => {
+  const header = await tools.commands.exec(tools.readelf, ["-h", path], {
     timeout: 30000,
   });
+  const flags = /Flags:\s+(0x[0-9a-f]+)/u.exec(header.stdout)?.[1];
+  const { stdout } = await tools.commands.exec(
+    tools.readelf,
+    ["--arch-specific", path],
+    {
+      timeout: 30000,
+    },
+  );
   // Each attribute block names its numeric tag and, for ULEB128 tags, a number.
   const values = new Map();
   for (const block of stdout.split("Attribute {").slice(1)) {
@@ -187,13 +193,16 @@ export const readelfArmFacts = async (readelf, path) => {
 /**
  * Build every source-owned image, unstripped with DWARF and stripped of
  * symbols and debug sections. Never execute target code.
+ *
+ * `tools.commands` is the caller's verifier command owner: each tool runs as
+ * an owned process tree with a deadline.
  */
 export async function buildCortexMElfFixtures(directory, tools) {
   const source = fileURLToPath(new URL("../c/cortex-m.c", import.meta.url));
   const vectors = fileURLToPath(
     new URL("./cortex-m-vectors.S", import.meta.url),
   );
-  const version = await execute(tools.clang, ["--version"], {
+  const version = await tools.commands.exec(tools.clang, ["--version"], {
     timeout: 10000,
   });
   const fixtures = [];
@@ -221,10 +230,14 @@ export async function buildCortexMElfFixtures(directory, tools) {
       "-o",
       path,
     ];
-    await execute(tools.clang, args, { timeout: 60000 });
-    await execute(tools.strip, ["--strip-all", "-o", stripped, path], {
-      timeout: 30000,
-    });
+    await tools.commands.exec(tools.clang, args, { timeout: 60000 });
+    await tools.commands.exec(
+      tools.strip,
+      ["--strip-all", "-o", stripped, path],
+      {
+        timeout: 30000,
+      },
+    );
     const bytes = await readFile(path);
     if (
       bytes.toString("hex", 0, 4) !== "7f454c46" ||
@@ -243,9 +256,9 @@ export async function buildCortexMElfFixtures(directory, tools) {
       sha256: sha256(bytes),
       stripped_sha256: sha256(await readFile(stripped)),
       entry: hex(bytes.readUInt32LE(24) & ~1),
-      symbols: await symbolAddresses(tools.readelf, path),
-      readelf: await readelfArmFacts(tools.readelf, path),
-      stripped_readelf: await readelfArmFacts(tools.readelf, stripped),
+      symbols: await symbolAddresses(tools, path),
+      readelf: await readelfArmFacts(tools, path),
+      stripped_readelf: await readelfArmFacts(tools, stripped),
       arguments: args,
     });
   }
@@ -261,9 +274,9 @@ export async function buildCortexMElfFixtures(directory, tools) {
  * LLVM's instructions for one function in address order: the mnemonic and,
  * for a direct branch, its target.
  */
-export const llvmFunctionInstructions = async (objdump, path, symbol) => {
-  const { stdout } = await execute(
-    objdump,
+export const llvmFunctionInstructions = async (tools, path, symbol) => {
+  const { stdout } = await tools.commands.exec(
+    tools.objdump,
     ["-d", "--no-show-raw-insn", `--disassemble-symbols=${symbol}`, path],
     { timeout: 30000 },
   );
