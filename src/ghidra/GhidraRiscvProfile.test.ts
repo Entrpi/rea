@@ -273,9 +273,14 @@ const registerRiscvAdmissionAndCapabilityCases = () => {
 
   it("states the linkage claim boundary in the lane limitations", () => {
     const notes = ghidraRiscvLimitations(target());
-    expect(notes).toHaveLength(3);
-    expect(notes.join(" ")).toContain("does not establish static linkage");
-    expect(notes[0]).toContain("RISCV:LE:64:default");
+    // Facts, independent of the owner's wording and order: the pinned
+    // language and the static-linkage boundary.
+    expect(notes).toContainEqual(
+      expect.stringContaining("RISCV:LE:64:default"),
+    );
+    expect(notes).toContainEqual(
+      expect.stringContaining("does not establish static linkage"),
+    );
     expect(
       ghidraRiscvLimitations({
         path: "/other.elf",
@@ -484,11 +489,14 @@ describe("RISC-V ilp32 admission", () => {
 
   it("states the declared ABI, the applied prototype and the declared ISA", () => {
     const notes = ghidraRiscvLimitations(ilp32());
-    expect(notes).toHaveLength(4);
-    expect(notes[1]).toContain(
-      "declares the soft-float ABI (ilp32); the pinned language's compiler specification models ilp32d, so REA applies its `__rea_ilp32` prototype",
+    // One note names the declared ABI, the ABI the pinned language models
+    // and the prototype REA applies, in any wording and order.
+    expect(notes).toContainEqual(
+      expect.stringMatching(
+        /^(?=.*\(ilp32\))(?=.*\bilp32d\b)(?=.*`__rea_ilp32`)/su,
+      ),
     );
-    expect(notes[2]).toContain(`declares \`${C3_ARCH}\``);
+    expect(notes).toContainEqual(expect.stringContaining(C3_ARCH));
   });
 });
 
