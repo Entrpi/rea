@@ -305,11 +305,18 @@ await withVerifierCleanup(async () => {
   assert.equal(truncated.inventory.manifest.root_format, "esp-image");
   assert.equal(truncated.inventory.coverage.status, "unknown");
   assert.equal(truncated.root.checksum.status, "unavailable");
-  assert.ok(
-    truncated.inventory.limitations.some((text) =>
-      text.startsWith("ESP image is truncated: segment "),
-    ),
+  const truncatedSegment = truncated.segments.at(-1);
+  assert.ok(truncatedSegment);
+  assert.ok(Number.isSafeInteger(truncatedSegment.declared_size));
+  assert.ok(truncatedSegment.source_location);
+  assert.equal(
+    truncatedSegment.source_location.offset + truncatedSegment.declared_size,
+    0x1000,
   );
+  assert.ok(
+    truncatedSegment.format_metadata.data_len > truncatedSegment.declared_size,
+  );
+  assert.ok(truncatedSegment.limitations.length > 0);
   report.images.push({ name: "truncated.bin", coverage: "unknown" });
 
   if (xtensa === undefined)

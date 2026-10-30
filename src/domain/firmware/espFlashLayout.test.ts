@@ -23,7 +23,7 @@ import {
   ESP32C3_BOOTLOADER_SEGMENTS,
   esp8266Image,
   espImage,
-} from "./espImage.fixture.js";
+} from "../../../tests/fixtures/espImage.js";
 
 const table = (bytes: Uint8Array) => {
   const decoded = decodeEspPartitionTable(bytes);
