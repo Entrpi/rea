@@ -89,10 +89,9 @@ the fixture in `tests/conformance/c/riscv-float-abi.c`, the stock model
 decompiles `rea_riscv_abi_pick(1.5f, 2.5f, sel)` as
 `rea_riscv_abi_pick(in_fa0,in_fa1,0x3fc00000)`.
 
-### Decision record: D3, RISC-V float ABIs (provisional)
+### Decision record: D3, RISC-V float ABIs
 
-Proposed in [#7477](https://github.com/morluto/rea/issues/7477). No maintainer
-has accepted it yet.
+Decided in [#7477](https://github.com/morluto/rea/issues/7477).
 
 - **Choice.**
   - Admit little-endian ELF32 `ET_EXEC` images that declare the soft-float ABI
