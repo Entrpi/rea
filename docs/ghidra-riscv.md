@@ -97,10 +97,9 @@ values as ilp32d does, but `double` values in integer registers, and a
 structure of one `float` and one integer in `fa0` and `a0`; the stock model
 joins that structure into `a1:a0`.
 
-### Decision record: D3, RISC-V float ABIs (provisional)
+### Decision record: D3, RISC-V float ABIs
 
-Proposed in [#7477](https://github.com/morluto/rea/issues/7477). No maintainer
-has accepted it yet.
+Decided in [#7477](https://github.com/morluto/rea/issues/7477).
 
 - **Choice.**
   - Admit little-endian ELF32 `ET_EXEC` images that declare the soft-float ABI
