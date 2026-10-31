@@ -7,7 +7,7 @@ import { comparisonLimitations } from "../../../../src/domain/managed/managedMem
 import { executeManagedMemberComparison } from "../../../../src/application/managed/ManagedMemberComparisonService.js";
 import { managedMemberComparisonResultSchema } from "../../../../src/domain/managed/managedMemberComparison.js";
 
-it("keeps field comparison policy and delivers its owning limitation for changed defaults", async () => {
+it("keeps field comparison policy and delivers its owning limitation for changed defaults", () => {
   const observe = (hex: string, hasDefault = true, moduleByte = 0) => {
     const bytes = buildManagedPeFixture({
       mvid: Buffer.alloc(16, moduleByte),
@@ -37,7 +37,7 @@ it("keeps field comparison policy and delivers its owning limitation for changed
   const right = observe("02000000");
   expect(left.report.fields[0]?.constant?.value).toBe(1);
   expect(right.report.fields[0]?.constant?.value).toBe(2);
-  const result = await executeManagedMemberComparison({
+  const result = executeManagedMemberComparison({
     left: left.evidence,
     right: right.evidence,
   });
@@ -63,7 +63,7 @@ it("keeps field comparison policy and delivers its owning limitation for changed
   const ordinary = observe("", false, 1);
   const otherOrdinary = observe("", false, 2);
   expect(ordinary.report.fields[0]?.constant).toBeNull();
-  const baseline = await executeManagedMemberComparison({
+  const baseline = executeManagedMemberComparison({
     left: ordinary.evidence,
     right: otherOrdinary.evidence,
   });

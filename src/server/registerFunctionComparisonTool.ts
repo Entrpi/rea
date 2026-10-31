@@ -1,11 +1,9 @@
-import { resolveEvidenceSources } from "../application/EvidenceInputResolver.js";
+import { resolvePairedEvidenceRequest } from "../application/EvidenceInputResolver.js";
 import type { EvidenceMcpServer } from "./EvidenceMcpServer.js";
 
-import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import type { BinarySessionPort } from "../application/binary/BinarySessionPort.js";
 import { toolContract } from "../contracts/toolContracts.js";
 import { createEvidence } from "../domain/evidence.js";
-import { PAIRED_EVIDENCE_SOURCES } from "../domain/evidenceReference.js";
 import { parseFunctionEvidence } from "../domain/functionDossierEvidence.js";
 import { FUNCTION_COMPARISON_PROVIDER } from "../domain/comparisonEvidenceIdentity.js";
 import type { RecordUnknownInput } from "../domain/residualUnknown.js";
@@ -23,7 +21,6 @@ export const registerFunctionComparisonTool = (
   server: EvidenceMcpServer,
   session: BinarySessionPort,
   contract: ReturnType<typeof toolContract<"compare_functions">>,
-  resources: ArtifactResourceScope,
 ): void => {
   const admission = withAdmittedAnalysis({ kind: "session", session });
   server.registerTool(
@@ -36,15 +33,9 @@ export const registerFunctionComparisonTool = (
         contract.name,
         context.mcpReq.signal,
         async () => {
-          const resolved = await resolveEvidenceSources(
+          const resolved = resolvePairedEvidenceRequest(
             input,
-            PAIRED_EVIDENCE_SOURCES,
             session.evidenceForAnalysis.bind(session),
-            {
-              operation: contract.name,
-              signal: context.mcpReq.signal,
-              resources,
-            },
           );
           if (!resolved.ok)
             return server.delivery.toCallToolResult(resolved, contract);

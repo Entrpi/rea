@@ -1,12 +1,8 @@
 import {
-  resolveEvidenceSources,
+  resolveEvidenceInput,
   type EvidenceLookup,
 } from "../EvidenceInputResolver.js";
-import type { EvidenceFileReadOptions } from "../analysisView/evidenceFileSource.js";
-import {
-  APPLICATION_EVIDENCE_SOURCE,
-  PAIRED_EVIDENCE_SOURCES,
-} from "../../domain/evidenceReference.js";
+import { retainedEvidenceReferenceSchema } from "../../domain/evidenceReference.js";
 import { parseAnalysisInput } from "../AnalysisInput.js";
 import type { ResolvedSourceToBundleReference } from "./SourceToBundleReference.js";
 import { z } from "zod";
@@ -77,69 +73,64 @@ const exportShapeFrameSchema = z.strictObject({
   right: z.unknown().nonoptional(),
 });
 
+const resolveWorkflowEvidence = (
+  raw: unknown,
+  lookup: EvidenceLookup | undefined,
+): Result<unknown, AnalysisError> => {
+  const reference = retainedEvidenceReferenceSchema.safeParse(raw);
+  return reference.success
+    ? resolveEvidenceInput(reference.data, lookup)
+    : ok(raw);
+};
+
 /** Resolve both selections before authenticating either graph, retaining diagnostic inputs. */
-const resolveApplicationGraphPair = async (
+const resolveApplicationGraphPair = (
   operation: string,
   input: { readonly left: unknown; readonly right: unknown },
   lookup: EvidenceLookup | undefined,
-  options: EvidenceFileReadOptions,
-): Promise<
-  Result<
-    {
-      readonly left: ApplicationGraphEvidenceSource;
-      readonly right: ApplicationGraphEvidenceSource;
-      readonly selected: { readonly left: unknown; readonly right: unknown };
-    },
-    AnalysisError
-  >
+): Result<
+  {
+    readonly left: ApplicationGraphEvidenceSource;
+    readonly right: ApplicationGraphEvidenceSource;
+    readonly selected: { readonly left: unknown; readonly right: unknown };
+  },
+  AnalysisError
 > => {
-  const selected = await resolveEvidenceSources(
-    input,
-    PAIRED_EVIDENCE_SOURCES,
-    lookup,
-    { ...options, operation },
-  );
-  if (!selected.ok) return selected;
-  const left = parseApplicationGraphEvidence(selected.value.left, ["left"]);
+  const selectedLeft = resolveWorkflowEvidence(input.left, lookup);
+  if (!selectedLeft.ok) return selectedLeft;
+  const selectedRight = resolveWorkflowEvidence(input.right, lookup);
+  if (!selectedRight.ok) return selectedRight;
+  const left = parseApplicationGraphEvidence(selectedLeft.value, ["left"]);
   if (!left.ok)
     return err(applicationGraphEvidenceInputError(operation, left.error));
-  const right = parseApplicationGraphEvidence(selected.value.right, ["right"]);
+  const right = parseApplicationGraphEvidence(selectedRight.value, ["right"]);
   if (!right.ok)
     return err(applicationGraphEvidenceInputError(operation, right.error));
   return ok({
     left: left.value,
     right: right.value,
-    selected: { left: selected.value.left, right: selected.value.right },
+    selected: { left: selectedLeft.value, right: selectedRight.value },
   });
 };
 
 /** Authenticate Evidence and derive one bounded cross-layer feature trace. */
-export const traceApplicationFeatureEvidence = async (
+export const traceApplicationFeatureEvidence = (
   rawInput: unknown,
   lookup?: EvidenceLookup,
-  options: EvidenceFileReadOptions = {},
-): Promise<
-  Result<
-    ApplicationWorkflowExecution<ApplicationFeatureTraceResult>,
-    AnalysisError
-  >
+): Result<
+  ApplicationWorkflowExecution<ApplicationFeatureTraceResult>,
+  AnalysisError
 > => {
   const operation = "trace_application_feature";
   const request = parseAnalysisInput(
     operation,
     rawInput,
     featureTraceFrameSchema,
-    options.signal,
   );
   if (!request.ok) return request;
-  const selected = await resolveEvidenceSources(
-    request.value,
-    APPLICATION_EVIDENCE_SOURCE,
-    lookup,
-    { ...options, operation },
-  );
+  const selected = resolveWorkflowEvidence(request.value.application, lookup);
   if (!selected.ok) return selected;
-  const input = selected.value;
+  const input = { ...request.value, application: selected.value };
   const sourceResult = parseApplicationGraphEvidence(input.application, [
     "application",
   ]);
@@ -195,30 +186,21 @@ export const traceApplicationFeatureEvidence = async (
 };
 
 /** Authenticate both graphs and derive a tiered cross-version change graph. */
-export const compareApplicationVersionsEvidence = async (
+export const compareApplicationVersionsEvidence = (
   rawInput: unknown,
   lookup?: EvidenceLookup,
-  options: EvidenceFileReadOptions = {},
-): Promise<
-  Result<
-    ApplicationWorkflowExecution<ApplicationVersionComparisonResult>,
-    AnalysisError
-  >
+): Result<
+  ApplicationWorkflowExecution<ApplicationVersionComparisonResult>,
+  AnalysisError
 > => {
   const operation = "compare_application_versions";
   const request = parseAnalysisInput(
     operation,
     rawInput,
     versionComparisonFrameSchema,
-    options.signal,
   );
   if (!request.ok) return request;
-  const pair = await resolveApplicationGraphPair(
-    operation,
-    request.value,
-    lookup,
-    options,
-  );
+  const pair = resolveApplicationGraphPair(operation, request.value, lookup);
   if (!pair.ok) return pair;
   const { left, right } = pair.value;
   const input = { ...request.value, ...pair.value.selected };
@@ -322,30 +304,21 @@ export const compareSourceToBundleEvidence = (
  * Authenticate both graphs and compare one exact export return shape.
  * @public
  */
-export const compareJavaScriptExportShapesEvidence = async (
+export const compareJavaScriptExportShapesEvidence = (
   rawInput: unknown,
   lookup?: EvidenceLookup,
-  options: EvidenceFileReadOptions = {},
-): Promise<
-  Result<
-    ApplicationWorkflowExecution<JavaScriptExportShapeComparisonResult>,
-    AnalysisError
-  >
+): Result<
+  ApplicationWorkflowExecution<JavaScriptExportShapeComparisonResult>,
+  AnalysisError
 > => {
   const operation = "compare_javascript_export_shapes";
   const request = parseAnalysisInput(
     operation,
     rawInput,
     exportShapeFrameSchema,
-    options.signal,
   );
   if (!request.ok) return request;
-  const pair = await resolveApplicationGraphPair(
-    operation,
-    request.value,
-    lookup,
-    options,
-  );
+  const pair = resolveApplicationGraphPair(operation, request.value, lookup);
   if (!pair.ok) return pair;
   const { left, right } = pair.value;
   const input = { ...request.value, ...pair.value.selected };

@@ -1,8 +1,9 @@
 import type { EvidenceMcpServer } from "../EvidenceMcpServer.js";
 import { runAdmittedToolOperation } from "../admittedToolOperation.js";
+import { resolveApplicationEvidenceRequest } from "../../application/EvidenceInputResolver.js";
 import { recordEvidenceSources } from "../../application/investigation/recordEvidenceSources.js";
 
-import { traceJavaScriptSemanticsEvidence } from "../../application/javascript/JavaScriptSemanticTraceService.js";
+import { traceJavaScriptSemanticsEvidenceValidated } from "../../application/javascript/JavaScriptSemanticTraceService.js";
 import { toolContract } from "../../contracts/toolContracts.js";
 import { logToolExecution } from "../toolLogging.js";
 import { toolRegistrationOptions } from "../toolRegistrationOptions.js";
@@ -26,27 +27,32 @@ export const registerTraceJavaScriptSemanticsTool = (
         contract.name,
         context.mcpReq.signal,
         async () => {
+          const resolved = resolveApplicationEvidenceRequest(
+            input,
+            options.evidenceById,
+          );
+          if (!resolved.ok)
+            return server.delivery.toCallToolResult(resolved, contract);
+          const parsed = resolved.value;
           const result = await logToolExecution(
             options.logger,
             contract.name,
             () =>
-              traceJavaScriptSemanticsEvidence(input, options.evidenceById, {
-                signal: context.mcpReq.signal,
-                resources: options.artifactResources,
-              }),
+              Promise.resolve(
+                traceJavaScriptSemanticsEvidenceValidated(parsed),
+              ),
           );
           if (!result.ok)
             return server.delivery.toCallToolResult(result, contract);
-          const recorded = recordEvidenceSources(
-            options.recordEvidence,
-            result.value.sources,
-          );
+          const recorded = recordEvidenceSources(options.recordEvidence, [
+            parsed.application,
+          ]);
           if (!recorded.ok)
             return server.delivery.toCallToolResult(recorded, contract);
           return recordResult(
             { ...options, delivery: server.delivery },
             contract,
-            result.value.evidence,
+            result.value,
           );
         },
       ),

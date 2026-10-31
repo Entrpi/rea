@@ -196,30 +196,6 @@ that could match but lack a requested name/type. Those candidates remain unknown
 and are excluded from the matched total. Exhausting the known matches does not
 prove absence among unresolved or unexamined source rows.
 
-To compare two builds without sending their inspections back, give
-`compare_managed_members` each summary's `parent_evidence_id`:
-
-```json
-{
-  "left": {
-    "kind": "retained-evidence",
-    "evidence_id": "<left parent_evidence_id>"
-  },
-  "right": {
-    "kind": "retained-evidence",
-    "evidence_id": "<right parent_evidence_id>"
-  }
-}
-```
-
-Each side can also be complete inline Evidence or an `evidence-file` source,
-such as a bundle written by `--evidence-bundle`; see
-[Evidence sources](mcp-contracts.md#tool-results). Every form gives the same
-comparison Evidence. The summary record itself is refused with
-`invalid_request` at its side, because it is a view of the inspection. The two
-sides must resolve to different records: one record named twice, in any forms,
-is refused with `invalid_request` at `right`.
-
 #### CLI summary and saved member rows
 
 The CLI accepts the same `complete` and `summary` detail choices. Omitted or

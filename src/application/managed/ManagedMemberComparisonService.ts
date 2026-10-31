@@ -1,9 +1,4 @@
 import { parseAnalysisInput } from "../AnalysisInput.js";
-import {
-  resolveEvidenceSources,
-  type EvidenceLookup,
-} from "../EvidenceInputResolver.js";
-import type { EvidenceFileReadOptions } from "../analysisView/evidenceFileSource.js";
 import { z } from "zod";
 
 import {
@@ -11,7 +6,6 @@ import {
   type ManagedMemberComparisonResult,
 } from "../../domain/managed/managedMemberComparison.js";
 import { readManagedMemberEvidence } from "../../domain/managed/managedMemberComparisonMatch.js";
-import { PAIRED_EVIDENCE_SOURCES } from "../../domain/evidenceReference.js";
 import type { BinaryTarget } from "../../domain/binaryTargetTypes.js";
 import type { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
 import {
@@ -48,15 +42,10 @@ export interface ManagedMemberComparisonExecution {
   readonly sources: readonly [Evidence, Evidence];
 }
 
-/**
- * Resolve and authenticate both source records, then compare their parsed
- * observations. Two sides are the same record only once both are resolved.
- */
-export const executeManagedMemberComparison = async (
+/** Authenticate both source records, then compare their parsed observations. */
+export const executeManagedMemberComparison = (
   input: unknown,
-  lookup?: EvidenceLookup,
-  options: EvidenceFileReadOptions = {},
-): Promise<Result<ManagedMemberComparisonExecution, AnalysisError>> => {
+): Result<ManagedMemberComparisonExecution, AnalysisError> => {
   const operation = "compare_managed_members";
   const request = parseAnalysisInput(
     operation,
@@ -64,16 +53,9 @@ export const executeManagedMemberComparison = async (
     managedMemberComparisonRequestSchema,
   );
   if (!request.ok) return request;
-  const resolved = await resolveEvidenceSources(
-    request.value,
-    PAIRED_EVIDENCE_SOURCES,
-    lookup,
-    { ...options, operation },
-  );
-  if (!resolved.ok) return resolved;
-  const left = readManagedMemberEvidence(resolved.value.left, "left");
+  const left = readManagedMemberEvidence(request.value.left, "left");
   if (!left.ok) return left;
-  const right = readManagedMemberEvidence(resolved.value.right, "right");
+  const right = readManagedMemberEvidence(request.value.right, "right");
   if (!right.ok) return right;
   if (left.value.evidence.evidence_id === right.value.evidence.evidence_id)
     return err(

@@ -146,7 +146,6 @@ cliTest.skipIf(process.platform === "win32").for(
     "capture-browser-scenario",
     "capture-electron-scenario",
     "compare-wasm-interfaces",
-    "trace-application-feature",
   ].flatMap((command) =>
     (
       [

@@ -423,24 +423,14 @@ export const registerSessionTools = (
       });
     }
   };
-  registerProcessComparisonTool(
-    server,
-    session,
-    compareContract,
-    options.artifactResources,
-  );
+  registerProcessComparisonTool(server, session, compareContract);
   registerArtifactComparisonTool(
     server,
     session,
     compareArtifactsContract,
     options.artifactResources,
   );
-  registerFunctionComparisonTool(
-    server,
-    session,
-    compareFunctionsContract,
-    options.artifactResources,
-  );
+  registerFunctionComparisonTool(server, session, compareFunctionsContract);
   registerNativeFunctionMatchingTool(
     server,
     session,

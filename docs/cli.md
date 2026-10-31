@@ -698,25 +698,6 @@ For an artifact summary selected from a bundle, include its complete parent
 inventory in the same bundle. The command resolves that parent from the
 authenticated file records; a summary-only file cannot supply missing facts.
 
-The other commands that take Evidence for a comparison or an application
-workflow accept the same sources in their `left`, `right` or `application`
-fields: `compare-wasm-interfaces`, `trace-application-feature`,
-`trace-javascript-semantics`, `compare-application-versions`,
-`compare-source-to-bundle` and `compare-javascript-export-shapes`. A saved
-record does not have to be copied into the request:
-
-```bash
-rea analyze-javascript-application /absolute/path/to/app --json > app-evidence.json
-rea trace-application-feature '{"application":{"kind":"evidence-file","path":"app-evidence.json"},"seed":{"kind":"module","value":"main.js","match":"exact"}}' --json
-```
-
-Two comparison commands take files instead of a source request.
-`compare-process-captures LEFT RIGHT` reads one saved capture record from each
-file; see [process capture](process-capture.md#compare-two-captures).
-`compare-managed-members LEFT RIGHT` inspects two PE files and compares them;
-see [member comparison](managed-code-analysis.md#member-comparison). Their MCP
-tools take the three source forms.
-
 ## Import historical source
 
 Historical source inventories preserve exact filenames, including literal backslashes

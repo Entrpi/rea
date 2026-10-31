@@ -4,10 +4,8 @@ import { absoluteLocalPathStringSchema } from "../domain/localPath.js";
 import { bundleComparisonInputSchema } from "../domain/bundleComparison.js";
 
 import { processTraceSpecificationSchema } from "../domain/process/processTraceSpecification.js";
-import {
-  PAIRED_EVIDENCE_SOURCES,
-  evidenceSourceShape,
-} from "../domain/evidenceReference.js";
+import { evidenceSchema } from "../domain/evidence.js";
+import { evidenceSourceInputSchema } from "../domain/evidenceReference.js";
 import { prefixedDigestSchema } from "./../domain/digests.js";
 import { evidenceRecordFiltersSchema } from "../domain/evidenceRecordSummary.js";
 import { residualUnknownSchema } from "../domain/residualUnknown.js";
@@ -47,17 +45,19 @@ export const bundleComparisonMcpInputSchema =
     ),
   });
 
-/** Name each compared process capture once: inline, retained, or in a local Evidence file. */
+/** Evidence references for deterministic process comparison. */
 export const processComparisonInputSchema = z.strictObject({
-  ...evidenceSourceShape(PAIRED_EVIDENCE_SOURCES),
+  left: evidenceSchema,
+  right: evidenceSchema,
   trace_spec: processTraceSpecificationSchema.optional(),
   max_capture_age_ms: z.int().nonnegative().optional(),
 });
 
 /** Name each compared artifact inventory once: inline, retained, or in a local Evidence file. */
-export const artifactComparisonInputSchema = z.strictObject(
-  evidenceSourceShape(PAIRED_EVIDENCE_SOURCES),
-);
+export const artifactComparisonInputSchema = z.strictObject({
+  left: evidenceSourceInputSchema,
+  right: evidenceSourceInputSchema,
+});
 export type ArtifactComparisonInput = z.output<
   typeof artifactComparisonInputSchema
 >;

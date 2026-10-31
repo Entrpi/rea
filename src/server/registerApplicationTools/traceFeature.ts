@@ -30,10 +30,9 @@ export const registerTraceFeatureTool = (
             options.logger,
             traceContract.name,
             () =>
-              traceApplicationFeatureEvidence(input, options.evidenceById, {
-                signal: context.mcpReq.signal,
-                resources: options.artifactResources,
-              }),
+              Promise.resolve(
+                traceApplicationFeatureEvidence(input, options.evidenceById),
+              ),
           );
           if (!result.ok)
             return server.delivery.toCallToolResult(result, traceContract);

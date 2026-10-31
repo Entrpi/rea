@@ -193,7 +193,7 @@ try {
     ),
     true,
   );
-  const applicationTrace = await traceApplicationFeatureEvidence({
+  const applicationTrace = traceApplicationFeatureEvidence({
     application: applicationGraph.value,
     native_observations: [],
     seed: {

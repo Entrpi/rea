@@ -178,7 +178,7 @@ const recordedBefore = ({ nesting_read, types, ...rest }: Inspection) => ({
   ...rest,
   types: types.map(({ enclosing_type_token, name_sha256, ...type }) => type),
 });
-const compare = async (
+const compare = (
   left: ReturnType<typeof nestedInspection>,
   right: ReturnType<typeof nestedInspection>,
   edit: {
@@ -201,7 +201,7 @@ const compare = async (
         authority: "shipped-artifact",
       },
     );
-  const result = await executeManagedMemberComparison(
+  const result = executeManagedMemberComparison(
     compareManagedMembersInputSchema.parse({
       left: observe(left, edit.left),
       right: observe(right, edit.right),
@@ -214,8 +214,8 @@ const compare = async (
 };
 
 describe("managed member comparison request envelope", () => {
-  it("rejects missing and extra fields before reading source Evidence", async () => {
-    const missing = await executeManagedMemberComparison({ left: null });
+  it("rejects missing and extra fields before reading source Evidence", () => {
+    const missing = executeManagedMemberComparison({ left: null });
     expect(missing).toMatchObject({
       ok: false,
       error: {
@@ -224,7 +224,7 @@ describe("managed member comparison request envelope", () => {
       },
     });
 
-    const extra = await executeManagedMemberComparison({
+    const extra = executeManagedMemberComparison({
       left: null,
       right: null,
       ignored: true,
@@ -257,7 +257,7 @@ const withCilDigests =
     }),
   });
 
-const pairs = (comparison: Awaited<ReturnType<typeof compare>>) => {
+const pairs = (comparison: ReturnType<typeof compare>) => {
   const of = (
     items: readonly {
       readonly left: { readonly token: string } | null;
@@ -278,10 +278,10 @@ const pairs = (comparison: Awaited<ReturnType<typeof compare>>) => {
 const original = nestedInspection();
 const swapped = nestedInspection({ swapEnclosing: true });
 
-it("does not equate missing nested parents with genuinely top-level types", async () => {
+it("does not equate missing nested parents with genuinely top-level types", () => {
   const missing = nestedInspection({ nestedClassRows: [] });
   const topLevel = nestedInspection({ topLevelTypes: true });
-  const result = await compare(missing, topLevel);
+  const result = compare(missing, topLevel);
   expect(result.summary.unchanged).toBe(0);
   expect(
     [...result.methods, ...result.fields].every(
@@ -292,7 +292,7 @@ it("does not equate missing nested parents with genuinely top-level types", asyn
 
 it.each(["left", "right"] as const)(
   "preserves a current enclosing-cycle gap beside %s historical Evidence",
-  async (historicalSide) => {
+  (historicalSide) => {
     const cyclic = nestedInspection({
       nestedClassRows: [
         [4, 5],
@@ -303,8 +303,8 @@ it.each(["left", "right"] as const)(
     expect(cyclic.inspection.nesting_read).toBe(true);
     const result =
       historicalSide === "left"
-        ? await compare(original, cyclic, { left: recordedBefore })
-        : await compare(cyclic, original, { right: recordedBefore });
+        ? compare(original, cyclic, { left: recordedBefore })
+        : compare(cyclic, original, { right: recordedBefore });
     expect(result.summary.unchanged).toBe(0);
     expect(
       [...result.methods, ...result.fields].every(
@@ -315,8 +315,8 @@ it.each(["left", "right"] as const)(
 );
 
 describe("managed member comparison of nested types", () => {
-  it("uses owned type identity while preserving omitted display labels", async () => {
-    const result = await compare(original, swapped, {
+  it("uses owned type identity while preserving omitted display labels", () => {
+    const result = compare(original, swapped, {
       left: (inspection) => ({
         ...inspection,
         methods: inspection.methods.map((method) => ({
@@ -329,27 +329,27 @@ describe("managed member comparison of nested types", () => {
         })),
       }),
     });
-    expect(pairs(result)).toEqual(pairs(await compare(original, swapped)));
+    expect(pairs(result)).toEqual(pairs(compare(original, swapped)));
     expect(
       [...result.methods, ...result.fields].every(
         (item) => item.left?.declaring_type === null,
       ),
     ).toBe(true);
   });
-  it("retains nested identity when selected inventories omit enclosing types", async () => {
+  it("retains nested identity when selected inventories omit enclosing types", () => {
     const left = nestedInspection({}, ["Inner"]);
     const right = nestedInspection({ swapEnclosing: true }, ["Inner"]);
     expect(left.inspection.types.map(({ full_name }) => full_name)).toEqual([
       "Inner",
       "Inner",
     ]);
-    expect(pairs(await compare(left, right))).toEqual({
-      methods: pairs(await compare(original, swapped)).methods.slice(0, 2),
-      fields: pairs(await compare(original, swapped)).fields,
+    expect(pairs(compare(left, right))).toEqual({
+      methods: pairs(compare(original, swapped)).methods.slice(0, 2),
+      fields: pairs(compare(original, swapped)).fields,
     });
   });
 
-  it("withholds unchanged claims when current nesting rows are malformed", async () => {
+  it("withholds unchanged claims when current nesting rows are malformed", () => {
     const malformed = nestedInspection({
       swapEnclosing: true,
       nestedClassRows: [
@@ -359,7 +359,7 @@ describe("managed member comparison of nested types", () => {
         [6, 5],
       ],
     });
-    const comparison = await compare(original, malformed);
+    const comparison = compare(original, malformed);
     expect(comparison.methods.every(({ status }) => status === "unknown")).toBe(
       true,
     );
@@ -368,7 +368,7 @@ describe("managed member comparison of nested types", () => {
     );
   });
 
-  it("withholds unchanged claims for a current enclosing cycle", async () => {
+  it("withholds unchanged claims for a current enclosing cycle", () => {
     const cyclic = nestedInspection({
       nestedClassRows: [
         [4, 5],
@@ -376,7 +376,7 @@ describe("managed member comparison of nested types", () => {
         [6, 4],
       ],
     });
-    const comparison = await compare(original, cyclic);
+    const comparison = compare(original, cyclic);
     expect(comparison.methods.every(({ status }) => status === "unknown")).toBe(
       true,
     );
@@ -385,10 +385,10 @@ describe("managed member comparison of nested types", () => {
     );
   });
 
-  it("pairs members of same-named nested types by their enclosing types", async () => {
+  it("pairs members of same-named nested types by their enclosing types", () => {
     // Moving each Inner under the other top-level type turns Fixture.A+Inner
     // from TypeDef 4 on the left into TypeDef 5 on the right.
-    expect(pairs(await compare(original, swapped))).toEqual({
+    expect(pairs(compare(original, swapped))).toEqual({
       methods: [
         ["0x06000001", "0x06000002", "changed", "exact-il-signature", "exact"],
         ["0x06000002", "0x06000001", "changed", "exact-il-signature", "exact"],
@@ -401,10 +401,10 @@ describe("managed member comparison of nested types", () => {
     });
   });
 
-  it("reports bodies swapped between same-named nested types as changed", async () => {
+  it("reports bodies swapped between same-named nested types as changed", () => {
     // Give each Inner.M its own CIL, then swap the bodies between A and B.
     // Fixture.A+Inner.M is MethodDef 1 on the left and MethodDef 2 on the right.
-    const comparison = await compare(original, swapped, {
+    const comparison = compare(original, swapped, {
       left: withCilDigests({
         "0x06000001": "a".repeat(64),
         "0x06000002": "b".repeat(64),
@@ -428,27 +428,27 @@ describe("managed member comparison of nested types", () => {
     expect(comparison.summary).toMatchObject({ changed: 3 });
   });
 
-  it("retains explicitly limited bare names for historical observations", async () => {
+  it("retains explicitly limited bare names for historical observations", () => {
     const bare = pairs(
-      await compare(original, swapped, {
+      compare(original, swapped, {
         left: recordedBefore,
         right: recordedBefore,
       }),
     );
 
-    expect(bare).not.toEqual(pairs(await compare(original, swapped)));
+    expect(bare).not.toEqual(pairs(compare(original, swapped)));
+    expect(pairs(compare(original, swapped, { left: recordedBefore }))).toEqual(
+      bare,
+    );
     expect(
-      pairs(await compare(original, swapped, { left: recordedBefore })),
+      pairs(compare(original, swapped, { right: recordedBefore })),
     ).toEqual(bare);
     expect(
-      pairs(await compare(original, swapped, { right: recordedBefore })),
-    ).toEqual(bare);
-    expect(
-      (await compare(original, swapped, { left: recordedBefore })).limitations,
+      compare(original, swapped, { left: recordedBefore }).limitations,
     ).toContainEqual(expect.stringContaining("legacy bare-name comparison"));
   });
 
-  it("does not pair a nested type with a top-level type of the same name", async () => {
+  it("does not pair a nested type with a top-level type of the same name", () => {
     const topLevel = nestedInspection({ topLevelTypes: true });
 
     expect(
@@ -456,7 +456,7 @@ describe("managed member comparison of nested types", () => {
         ?.name_sha256,
     ).toMatch(/^[a-f0-9]{64}$/u);
     expect(
-      pairs(await compare(original, topLevel)).methods.filter(
+      pairs(compare(original, topLevel)).methods.filter(
         ([left, right]) => left !== null && right !== null,
       ),
     ).toEqual([]);
@@ -464,12 +464,12 @@ describe("managed member comparison of nested types", () => {
 });
 
 describe("managed nested type names", () => {
-  it("keeps a top-level name containing the separator apart from nesting", async () => {
+  it("keeps a top-level name containing the separator apart from nesting", () => {
     // Produce the literal plus sign in PE metadata, which C# identifiers disallow.
     const literal = nestedInspection({
       literalTopLevelName: "Fixture.A+Inner",
     });
-    const spelled = await compare(original, literal);
+    const spelled = compare(original, literal);
     expect(
       literal.inspection.types.find((type) => type.token === "0x02000005"),
     ).toMatchObject({
@@ -485,9 +485,9 @@ describe("managed nested type names", () => {
     ]);
   });
 
-  it("warns of an undecoded counterpart only for the same enclosing type", async () => {
+  it("warns of an undecoded counterpart only for the same enclosing type", () => {
     // Keep only Fixture.B+Inner.M on the right, with an undecoded signature.
-    const comparison = await compare(original, original, {
+    const comparison = compare(original, original, {
       right: (inspection) => ({
         ...inspection,
         methods: inspection.methods
@@ -594,7 +594,7 @@ describe("managed member comparison subject identity", () => {
 });
 
 describe("managed call-target comparison", () => {
-  it("keeps changed call targets visible when another target fact is unavailable", async () => {
+  it("keeps changed call targets visible when another target fact is unavailable", () => {
     const il = Buffer.from([0x28, 1, 0, 0, 0x0a, 0x28, 1, 0, 0, 0x0a, 0x2a]);
     const observe = (
       name: string,
@@ -646,7 +646,7 @@ describe("managed call-target comparison", () => {
             : edge,
         ),
     );
-    const result = await executeManagedMemberComparison(
+    const result = executeManagedMemberComparison(
       compareManagedMembersInputSchema.parse({
         left,
         right: rightWithOneUnknownTarget,
@@ -667,7 +667,7 @@ describe("managed call-target comparison", () => {
       "/fixture/no-edges.dll",
       () => [],
     );
-    const unknown = await executeManagedMemberComparison(
+    const unknown = executeManagedMemberComparison(
       compareManagedMembersInputSchema.parse({ left, right: unavailableEdges }),
     );
     if (!unknown.ok) throw unknown.error;
@@ -680,7 +680,7 @@ describe("managed call-target comparison", () => {
 });
 
 describe("managed member comparison path workflow", () => {
-  it("preserves undecoded signatures as unknown through content-addressed partial Evidence", async () => {
+  it("preserves undecoded signatures as unknown through content-addressed partial Evidence", () => {
     const observe = (signature: number, path: string) => {
       const bytes = buildManagedPeFixture({
         methodSignature: Buffer.from([signature]),
@@ -706,7 +706,7 @@ describe("managed member comparison path workflow", () => {
       left: observe(0xff, "/tmp/partial-left.dll"),
       right: observe(0xfe, "/tmp/partial-right.dll"),
     });
-    const result = await executeManagedMemberComparison(input);
+    const result = executeManagedMemberComparison(input);
     if (!result.ok) throw result.error;
     const comparison = managedMemberComparisonResultSchema.parse(
       result.value.evidence.normalized_result,

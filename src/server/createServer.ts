@@ -943,7 +943,6 @@ export const createServer = (
         recordEvidence,
         analysisAdmission,
         evidenceById,
-        artifactResources,
       );
       registerApkSignatureTools(
         server,
@@ -980,7 +979,6 @@ export const createServer = (
       registerManagedTools(server, { ...evidenceOptions, evidenceById });
       if (session !== undefined)
         registerManagedWorkflowTools(server, {
-          artifactResources,
           logger: toolLogger,
           recordEvidence,
           recordEvidenceWithUnknown,

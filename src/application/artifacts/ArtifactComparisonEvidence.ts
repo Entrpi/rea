@@ -1,6 +1,6 @@
 import {
   resolveEvidenceInput,
-  resolveEvidenceSources,
+  resolvePairedEvidenceSources,
   type EvidenceLookup,
 } from "../EvidenceInputResolver.js";
 import { AnalysisError } from "../../domain/analysisErrorBase.js";
@@ -8,7 +8,6 @@ import { AnalysisInputError } from "../../domain/analysisErrorCore.js";
 import { inspectAnalysisViewValidated } from "../analysisView/AnalysisViewService.js";
 import type { EvidenceFileReadOptions } from "../analysisView/evidenceFileSource.js";
 import type { ArtifactComparisonInput } from "../../contracts/sessionToolSchemas.js";
-import { PAIRED_EVIDENCE_SOURCES } from "../../domain/evidenceReference.js";
 import { artifactInventorySummaryViewResultSchema } from "../../domain/analysisView/analysisView.js";
 import {
   compareArtifacts,
@@ -43,16 +42,15 @@ export interface ArtifactComparisonOutcome {
 }
 
 /**
- * Select both sides through the shared Evidence source owner, authenticate
- * them, then resolve a summary to its exact complete parent inventory: from
- * the authenticated bundle that held the summary, else the retained session.
+ * Select both sides through the shared paired-source owner, authenticate them,
+ * then resolve a summary to its exact retained parent inventory.
  */
 export const resolveArtifactComparisonSources = async (
   input: ArtifactComparisonInput,
   evidenceById: EvidenceLookup | undefined,
   options: EvidenceFileReadOptions = {},
 ): Promise<Result<ArtifactComparisonSources, AnalysisError>> => {
-  return resolveEvidenceSources(input, PAIRED_EVIDENCE_SOURCES, evidenceById, {
+  return resolvePairedEvidenceSources(input, evidenceById, {
     ...options,
     operation: OPERATION,
     resolveEvidence: (candidate, related, side) => {
