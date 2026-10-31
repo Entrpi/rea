@@ -644,6 +644,23 @@ describe("RISC-V ilp32 conformance checks", () => {
     );
   });
 
+  it("checks a stripped build's return storage, not its recovered types", () => {
+    const stripped = (text: string) =>
+      assertRiscvStorage("ilp32", boundaries(text), { stripped: true });
+    expect(() =>
+      stripped(STRIPPED.replaceAll("undefined8@", "ulonglong@")),
+    ).not.toThrow();
+    // A register-pair return that loses its high word is refused.
+    expect(() =>
+      stripped(
+        STRIPPED.replace(
+          "rea_riscv_abi_wide undefined8@a1:4,a0:4",
+          "rea_riscv_abi_wide undefined4@a0:4",
+        ),
+      ),
+    ).toThrow(/rea_riscv_abi_wide inferred return storage/u);
+  });
+
   it("reads the caller's arguments through the corrected storage", () => {
     const caller = "rea_riscv_abi_caller";
     expect(() =>
@@ -747,14 +764,21 @@ describe("RISC-V ilp32f conformance checks", () => {
 
   it("accepts the derived prototypes and refuses misplaced ones", () => {
     const derived = boundaries(SINGLE_DERIVED, "__rea_ilp32f");
+    const stripped = (text: string) =>
+      assertRiscvStorage("ilp32f", boundaries(text, "__rea_ilp32f"), {
+        stripped: true,
+      });
     expect(() => assertRiscvStorage("ilp32f", derived)).not.toThrow();
+    expect(() => stripped(SINGLE_STRIPPED)).not.toThrow();
+    // A stripped float-pair return that loses its high word is refused.
     expect(() =>
-      assertRiscvStorage(
-        "ilp32f",
-        boundaries(SINGLE_STRIPPED, "__rea_ilp32f"),
-        { stripped: true },
+      stripped(
+        SINGLE_STRIPPED.replace(
+          "rea_riscv_abi_pair undefined8@fa1:4,fa0:4",
+          "rea_riscv_abi_pair undefined4@fa0:4",
+        ),
       ),
-    ).not.toThrow();
+    ).toThrow(/rea_riscv_abi_pair inferred return storage/u);
     expect(Object.keys(derived)).toEqual(
       Object.keys(RISCV_ABIS.ilp32f.functions),
     );

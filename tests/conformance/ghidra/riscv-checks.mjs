@@ -142,8 +142,9 @@ const ILP32_FUNCTIONS = {
  * The ilp32f storage of the same functions, plus the single-float-only ones
  * that `rea_riscv_abi_single_caller` calls. Floats of 32 bits or fewer take
  * fa0-fa7, a float and an integer split across both files, and anything
- * else uses the ilp32 convention. `stripped` is the storage Ghidra infers for
- * the stripped build where that is not one word per typed location.
+ * else uses the ilp32 convention. `stripped` records what Ghidra infers for
+ * the stripped build where that differs: `parameters` when they are not one
+ * word per typed location, and `return` when it is not the typed storage.
  */
 const ILP32F_FUNCTIONS = {
   rea_riscv_abi_pick: {
@@ -192,7 +193,7 @@ const ILP32F_FUNCTIONS = {
       ],
       ["tag", "int", "a1:4"],
     ],
-    stripped: ["a0:4", "a1:4"],
+    stripped: { return: "a0:4", parameters: ["a0:4", "a1:4"] },
   },
   rea_riscv_abi_large: {
     return: ["rea_riscv_abi_large *", "a0:4"],
@@ -215,6 +216,8 @@ const ILP32F_FUNCTIONS = {
   rea_riscv_abi_quad: ILP32_FUNCTIONS.rea_riscv_abi_quad,
   rea_riscv_abi_variadic: ILP32_FUNCTIONS.rea_riscv_abi_variadic,
   // The integer part first, so the float takes the more significant word.
+  // The stripped function changes only the flag: Ghidra recovers the byte it
+  // returns in a0, not the float left in fa0.
   rea_riscv_abi_flagged: {
     caller: "rea_riscv_abi_single_caller",
     return: ["rea_riscv_abi_flagged", "fa0:4,a0:4"],
@@ -228,7 +231,7 @@ const ILP32F_FUNCTIONS = {
       ],
       ["scale", "float", "fa1:4", { fa1: 0x41bc0000 }, "23.5"],
     ],
-    stripped: ["fa0:4", "fa1:4", "a0:1"],
+    stripped: { return: "a0:1", parameters: ["fa0:4", "fa1:4", "a0:1"] },
   },
   // a to h fill fa0-fa7: value and z use integer registers. The stripped
   // function never reads a to g, and Ghidra infers no float parameters after
@@ -256,7 +259,7 @@ const ILP32F_FUNCTIONS = {
       ],
       ["z", "float", "a2:4", { a2: 0x41ec0000 }, "29.5"],
     ],
-    stripped: ["a0:4", "a1:4", "a2:4"],
+    stripped: { parameters: ["a0:4", "a1:4", "a2:4"] },
   },
 };
 
@@ -625,10 +628,21 @@ export function assertRiscvCallSites(name, calls) {
 }
 
 /**
+ * Where a stripped build returns, unless the table records what Ghidra infers
+ * instead: in the typed build's registers, or in none when the result goes
+ * through caller memory addressed by `a0`.
+ */
+const strippedReturnStorage = (want) =>
+  want.stripped?.return ??
+  (want.parameters.some(([parameter]) => parameter === "__return_storage_ptr__")
+    ? "<VOID>"
+    : want.return[1]);
+
+/**
  * Typed functions keep their names and types and use exactly the table's
- * storage. Stripped functions
- * get one inferred word per location, in order, unless the table records what
- * Ghidra infers instead.
+ * storage. Stripped functions get one inferred word per parameter location, in
+ * order, and their return storage, unless the table records what Ghidra infers
+ * instead; recovered types are not compared.
  */
 export function assertRiscvStorage(
   name,
@@ -650,10 +664,15 @@ export function assertRiscvStorage(
       for (const value of [boundary.return_type, ...parameters])
         assert.doesNotMatch(value.storage ?? "", FLOAT_REGISTER, function_);
     if (stripped) {
+      assert.equal(
+        boundary.return_type.storage,
+        strippedReturnStorage(want),
+        `${function_} inferred return storage`,
+      );
       if (want.variadic !== undefined) continue;
       assert.deepEqual(
         parameters.map((parameter) => parameter.storage),
-        want.stripped ??
+        want.stripped?.parameters ??
           ordered(
             want.parameters.flatMap(([, , storage]) =>
               riscvStorageLocations(storage),
