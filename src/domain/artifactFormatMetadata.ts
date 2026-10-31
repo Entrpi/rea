@@ -929,11 +929,11 @@ const declarationsByKind: {
   },
   uf2: {
     notCompared:
-      "Its fields come from the file's own blocks, which content comparison covers.",
+      "Its counts come from the file's own blocks, which content comparison covers, and family_name_registry names REA's label registry.",
   },
   "uf2-region": {
     notCompared:
-      "Its familyID and addresses are in its path, and content comparison covers its bytes.",
+      "Its familyID and addresses are in its path, family_name is REA's label for the familyID, and its block counts and positions are layout; content comparison covers its bytes.",
   },
   dfuse: {
     notCompared:
