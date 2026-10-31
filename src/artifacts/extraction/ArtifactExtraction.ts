@@ -4,9 +4,14 @@ import {
   assertArtifactSelectedSource,
   resolveArtifactSourcePath,
 } from "../ArtifactSelectedSource.js";
-import { hashStableRootArtifactHandle } from "../inventory/hashStableRootArtifact.js";
+import { InesArtifactReader } from "../InesArtifactReader.js";
+import {
+  openRootArtifact,
+  hashStableRootArtifactHandle,
+} from "../inventory/hashStableRootArtifact.js";
 import { absoluteCallerPath } from "../../filesystem/callerPath.js";
 import type { AsarHeaderAdmission } from "../../config/asarHeaderAdmission.js";
+import type { EspFlashSelection } from "../../domain/firmware/espFlashLocation.js";
 import { artifactFormatDescriptor } from "../artifactFormats.js";
 import { createArtifactReader } from "../createArtifactReader.js";
 import { resolveAsarHeaderAdmission } from "../AsarHeader.js";
@@ -59,6 +64,8 @@ import type { ArtifactIntegrityPolicyName } from "../../domain/artifactIntegrity
 /** Local extraction input with the output root chosen by the adapter. */
 export interface ArtifactExtractionInput {
   readonly asarHeaderAdmission?: AsarHeaderAdmission;
+  /** Caller inputs when the target was explicitly selected as an ESP flash image. */
+  readonly espFlashSelection?: EspFlashSelection | undefined;
   readonly inputPath: string;
   readonly expectedRootSha256?: string | undefined;
   /** Selected artifact spelling; packed I/O remains on inputPath. */
@@ -99,6 +106,7 @@ const extractArtifactInScope = async (
         asarHeaderAdmission:
           input.asarHeaderAdmission ??
           resolveAsarHeaderAdmission(input.environment),
+        espFlashSelection: input.espFlashSelection,
         integrity: input.integrityPolicy,
       },
       probeFacts,
@@ -161,7 +169,19 @@ export const materializeArtifactInventoryInScope = async (
   // A directory source must never acquire its own output as a new member on
   // the verification traversal. Resolve the selected parent before any write.
   if (transferredSource === undefined) {
-    const canonicalSource = await realpath(sourcePath);
+    let canonicalSource: string;
+    try {
+      canonicalSource = await realpath(sourcePath);
+    } catch (cause: unknown) {
+      abortIfNeeded(signal);
+      if (inventorySourceChanged(cause))
+        throw new ArtifactReaderFailure(
+          "integrity",
+          `Inventoried source changed: ${sourcePath}`,
+          { cause },
+        );
+      throw cause;
+    }
     if ((await lstat(canonicalSource)).isDirectory()) {
       const { canonicalOutput } = await SafeOutputTree.resolveDestination(
         input.outputRoot,
@@ -328,11 +348,12 @@ const materializeSelection = async ({
       transferredSource.admission.source,
       "Artifact extraction",
     );
-  const reader = createReader(
+  const reader = await createReader(
     sourcePath,
     input,
-    inventory.manifest.root_format,
+    inventory.manifest,
     transferredSource,
+    signal,
   );
   const readerOwner: ArtifactResourceOwner = {
     kind: "reader" as const,
@@ -638,15 +659,61 @@ const requireExtractableFormat = async (
 };
 
 /** Reader selection belongs to inventory classification, not the adapter hint. */
-const createReader = (
+const createReader = async (
   path: string,
   input: Pick<
     ArtifactExtractionInput,
-    "inputPath" | "selectedPath" | "environment" | "asarHeaderAdmission"
+    | "inputPath"
+    | "selectedPath"
+    | "environment"
+    | "asarHeaderAdmission"
+    | "resourceScope"
+    | "espFlashSelection"
   >,
-  containerFormat: ArtifactGraphManifest["root_format"],
+  manifest: ArtifactGraphManifest,
   transferredSource?: ActiveArtifactInventorySource,
-): ArtifactReader => {
+  signal?: AbortSignal,
+): Promise<ArtifactReader> => {
+  const containerFormat = manifest.root_format;
+  if (containerFormat === "ines" && transferredSource === undefined) {
+    let source: Awaited<ReturnType<typeof openRootArtifact>>;
+    try {
+      source = await openRootArtifact(path, input.resourceScope, signal);
+    } catch (cause: unknown) {
+      abortIfNeeded(signal);
+      if (
+        inventorySourceChanged(cause) ||
+        (cause instanceof ArtifactReaderFailure && cause.reason === "format")
+      )
+        throw new ArtifactReaderFailure(
+          "integrity",
+          `Inventoried source changed: ${path}`,
+          { cause },
+        );
+      throw cause;
+    }
+    try {
+      const digest = await hashStableRootArtifactHandle(
+        path,
+        source.handle,
+        source.initial,
+        signal,
+      );
+      assertAdmittedRootDigest(path, manifest.root_sha256, digest.sha256);
+      return new InesArtifactReader(path, source, source.owner);
+    } catch (cause: unknown) {
+      const attempt = await input.resourceScope.release({
+        kind: "file-handle",
+        handle: source.owner,
+        resource: `iNES source ${path}`,
+      });
+      if (attempt.kind === "failed")
+        throw input.resourceScope.cleanupFailure({ kind: "failed", cause }, [
+          attempt,
+        ]);
+      throw cause;
+    }
+  }
   // DMG inventory may mount read-only, but extraction has no DMG authority.
   const reader =
     containerFormat === "dmg"
@@ -661,6 +728,7 @@ const createReader = (
             input.selectedPath ?? input.inputPath,
           ),
           admission: transferredSource?.admission,
+          espFlashSelection: input.espFlashSelection,
           asarHeaderAdmission:
             containerFormat === "asar"
               ? (input.asarHeaderAdmission ??
@@ -683,3 +751,10 @@ const preflight = (entry: ArtifactEntry): void => {
       `Selected artifact entry cannot be read: ${entry.path}`,
     );
 };
+
+const inventorySourceChanged = (cause: unknown): boolean =>
+  cause instanceof Error &&
+  "code" in cause &&
+  ["ENOENT", "ENOTDIR", "EISDIR", "ENOTFILE", "ESTALE", "ELOOP"].includes(
+    String(cause.code),
+  );

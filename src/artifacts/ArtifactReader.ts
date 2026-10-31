@@ -194,6 +194,7 @@ export interface ArtifactReader {
     | "directory"
     | ZipPackageFormat
     | "asar"
+    | "ines"
     | "godot-pck"
     | "unityfs"
     | "uimage"
@@ -206,6 +207,7 @@ export interface ArtifactReader {
     | "esp-image"
     | "uf2"
     | "dfuse"
+    | "esp-flash-image"
     | "fit"
     | "file";
   entries(

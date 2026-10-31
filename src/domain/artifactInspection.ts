@@ -22,6 +22,7 @@ import { isJavaScriptSourcePath } from "./javascript/javascriptArtifactFiles.js"
 import { admitRawBinary } from "./rawBinary.js";
 import { uniqueSorted } from "./canonicalOrdering.js";
 import { evidenceSchema, parseEvidence, type Evidence } from "./evidence.js";
+import { offsetText } from "./firmware/espImageStructures.js";
 import { jsonValueSchema } from "./jsonValue.js";
 import { prefixedDigestSchema } from "./../domain/digests.js";
 
@@ -31,7 +32,12 @@ const artifactIdSchema = prefixedDigestSchema("art");
 
 const inspectionObservationSchema = z.strictObject({
   observation_id: prefixedDigestSchema("aio"),
-  kind: z.enum(["root-manifest", "integrity"]),
+  kind: z.enum([
+    "root-manifest",
+    "integrity",
+    "container-header",
+    "reconstruction",
+  ]),
   subject: textSchema,
   value: jsonValueSchema,
   evidence_id: evidenceIdSchema,
@@ -232,6 +238,22 @@ const allObservations = (
   ...inventory.integrity_contradictions.map((value) =>
     observation("integrity", value.contradiction_id, value, evidenceId),
   ),
+  ...(inventory.ines === undefined
+    ? []
+    : [
+        observation(
+          "container-header",
+          inventory.manifest.root_artifact_id,
+          inventory.ines.header,
+          evidenceId,
+        ),
+        observation(
+          "reconstruction",
+          inventory.manifest.root_artifact_id,
+          inventory.ines.reconstruction,
+          evidenceId,
+        ),
+      ]),
 ];
 
 const observation = (
@@ -344,10 +366,33 @@ const probesFor = (
           },
         ]
       : [];
+  if (format === "esp-image") return espFlashDumpProbes(inventory);
   if (format === "fit") return fitProbes(inventory);
   return format === "directory"
     ? directoryProbes(inventory)
     : probesForFormat(format);
+};
+
+// An ESP image that its reader found at the start of a flash dump read from
+// a later address is better read as that dump.
+const espFlashDumpProbes = (
+  inventory: ArtifactInventoryResult,
+): ArtifactInspectionResult["next_probes"] => {
+  const root = inventory.occurrences.find(
+    ({ logical_path }) => logical_path === ".",
+  )?.format_metadata;
+  if (root?.kind !== "esp-image") return [];
+  // Evidence recorded before REA reported the origin has no hint to offer.
+  const dump = root.flash_dump;
+  if (dump === null || dump === undefined) return [];
+  const offset = offsetText(dump.flash_offset);
+  return [
+    {
+      operation: "open_binary",
+      rationale: `Reopen the file with format esp-flash-image and flash_offset ${offset}, then inspect_artifact: it is a flash dump read from flash ${offset}, with a partition table at file offset ${offsetText(dump.table_file_offset)}.`,
+      authority: "artifact-bytes",
+    },
+  ];
 };
 
 const fitProbes = (

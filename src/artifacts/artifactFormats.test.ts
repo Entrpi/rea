@@ -27,6 +27,7 @@ type FormatsWithReaders =
   | "bun-standalone"
   | "dmg"
   | "asar"
+  | "ines"
   | "godot-pck"
   | "unityfs"
   | "uimage"
@@ -39,6 +40,7 @@ type FormatsWithReaders =
   | "esp-image"
   | "uf2"
   | "dfuse"
+  | "esp-flash-image"
   | "fit";
 
 const readerFormatsMatch: Equal<ArtifactReaderFormat, FormatsWithReaders> =
