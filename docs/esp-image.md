@@ -240,7 +240,9 @@ and a partition table sits where that origin puts `0x8000` (file offset
 `table_file_offset`, a limitation says to reopen the file with
 `format: "esp-flash-image"` and that `flash_offset`, and `inspect_artifact`
 lists the same `open_binary` call as a next probe. `flash_dump` is null for
-every other image.
+every other image. Evidence that REA recorded before it reported the field
+omits it; REA still reads and compares such Evidence, and the omission says
+nothing about where the file was read from.
 
 ## Limits
 

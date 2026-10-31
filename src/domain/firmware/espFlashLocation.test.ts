@@ -165,6 +165,19 @@ describe("ESP flash layout location", () => {
     });
   });
 
+  it("does not read a lone MD5 entry as a table", async () => {
+    const md5Only = flashImage(0x2_0000, [
+      { at: 0, bytes: c3Bootloader },
+      { at: 0x8000, bytes: partitionTable([]) },
+    ]);
+    expect((await locate(md5Only)).ok).toBe(false);
+    expect(await locate(md5Only, { partitionTableOffset: 0x8000 })).toEqual({
+      ok: false,
+      error:
+        "no partition table at the given offset 0x8000: entry 1 at 0x20 ends the table before any partition entry",
+    });
+  });
+
   it("rejects a table offset outside the dump", async () => {
     expect(
       await locate(dump(0x8000), { partitionTableOffset: 0x10_0000 }),
