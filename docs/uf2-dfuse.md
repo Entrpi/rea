@@ -156,9 +156,9 @@ declared one in `image_size`.
 | `DFUImageSize` that equals neither the file length nor the bytes before the suffix | Fails with the declared size, the suffix offset, the file length and whether the suffix CRC matches |
 | A target size or an element size that disagrees with the bytes that hold it        | Fails with the byte offset and the declared and available sizes                                     |
 | An element whose address range wraps past `0xFFFFFFFF`                             | Fails with its byte offset                                                                          |
-| Overlapping elements of one alternate setting                                      | Kept as separate entries; a limitation names them; coverage is unaffected                           |
+| Overlapping elements of one alternate setting                                      | Kept as separate entries; a limitation names the first four; coverage is unaffected                 |
 | The same addresses in different alternate settings                                 | Separate entries; an alternate setting selects a device memory                                      |
-| Elements of 0 bytes, and targets with no elements                                  | No entry; counted, and a limitation names their addresses and alternate settings                    |
+| Elements of 0 bytes, and targets with no elements                                  | No entry; counted; a limitation names the first four, with address and alternate setting            |
 
 A CRC mismatch is an integrity contradiction, never proof of a cause. With the
 default `integrity_policy` `fail`, inspection and extraction fail with

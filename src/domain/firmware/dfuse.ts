@@ -115,9 +115,9 @@ const formatFailure = (
   message: `byte offset ${String(offset)}: ${detail}`,
 });
 
-/** At most NAMED_ELEMENTS descriptions, then a count of the rest. */
-const named = (items: readonly string[]): string =>
-  `${items.slice(0, NAMED_ELEMENTS).join("; ")}${items.length > NAMED_ELEMENTS ? `; and ${String(items.length - NAMED_ELEMENTS)} more` : ""}`;
+/** At most NAMED_ELEMENTS descriptions, then a count of the rest of `total`. */
+const named = (items: readonly string[], total = items.length): string =>
+  `${items.slice(0, NAMED_ELEMENTS).join("; ")}${total > NAMED_ELEMENTS ? `; and ${String(total - NAMED_ELEMENTS)} more` : ""}`;
 
 class RetainingDfuSeDecoder implements RegionDecoder<DfuSeImage> {
   readonly #bytes: Uint8Array;
@@ -214,10 +214,10 @@ const parseDfuSe = (
         : [
             `${String(overlaps.length)} DfuSe element(s) overlap an earlier element of the same alternate setting; each stays a separate entry and no bytes were merged: ${named(overlaps)}.`,
           ]),
-      ...(walk.unlisted.length === 0
+      ...(walk.unlistedCount === 0
         ? []
         : [
-            `DfuSe declarations without bytes have no entry: ${named(walk.unlisted)}.`,
+            `DfuSe declarations without bytes have no entry: ${named(walk.unlisted, walk.unlistedCount)}.`,
           ]),
     ],
   });
@@ -226,8 +226,13 @@ const parseDfuSe = (
 /** Targets and elements in file order; every size is checked against its container. */
 class TargetWalk {
   readonly elements: DfuSeElement[] = [];
-  /** Empty elements and element-less targets, which no entry can show. */
+  /**
+   * The first NAMED_ELEMENTS empty elements and element-less targets, which no
+   * entry can show. A file can hold millions of empty elements, so the rest
+   * are only counted in `unlistedCount`.
+   */
   readonly unlisted: string[] = [];
+  unlistedCount = 0;
   elementCount = 0;
   emptyElements = 0;
 
@@ -281,8 +286,9 @@ class TargetWalk {
             ),
     };
     if (declaredElements === 0)
-      this.unlisted.push(
-        `target ${String(targetIndex)} (alternate setting ${String(target.alternateSetting)}) declares no elements`,
+      this.#unlisted(
+        () =>
+          `target ${String(targetIndex)} (alternate setting ${String(target.alternateSetting)}) declares no elements`,
       );
     let position = bodyStart;
     for (let index = 0; index < declaredElements; index += 1) {
@@ -343,8 +349,9 @@ class TargetWalk {
     this.elementCount += 1;
     if (size === 0) {
       this.emptyElements += 1;
-      this.unlisted.push(
-        `${name} at ${hex32(address)} (alternate setting ${String(target.alternateSetting)}) holds no bytes`,
+      this.#unlisted(
+        () =>
+          `${name} at ${hex32(address)} (alternate setting ${String(target.alternateSetting)}) holds no bytes`,
       );
     } else
       this.elements.push({
@@ -355,6 +362,12 @@ class TargetWalk {
         bytes: this.bytes.subarray(dataOffset, dataOffset + size),
       });
     return ok(dataOffset + size);
+  }
+
+  /** Count a declaration without bytes; describe only the first few. */
+  #unlisted(describe: () => string): void {
+    this.unlistedCount += 1;
+    if (this.unlisted.length < NAMED_ELEMENTS) this.unlisted.push(describe());
   }
 }
 
