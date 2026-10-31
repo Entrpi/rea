@@ -194,6 +194,7 @@ export interface ArtifactReader {
     | "directory"
     | ZipPackageFormat
     | "asar"
+    | "ines"
     | "godot-pck"
     | "unityfs"
     | "uimage"

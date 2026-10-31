@@ -7,6 +7,7 @@ import {
   type ArtifactIntegrityPair,
 } from "../../domain/artifactIntegrity.js";
 import { isAbsolute } from "node:path";
+import { createHash, type Hash } from "node:crypto";
 
 import {
   annotateEnglishUnicodeCaseCollisions,
@@ -23,6 +24,10 @@ import {
 import { ArtifactTraversalObservation } from "../ArtifactTraversalObservation.js";
 import { DirectoryArtifactEntryAccessDenied } from "../DirectoryArtifactReader.js";
 import { AsarArtifactReader } from "../AsarArtifactReader.js";
+import {
+  InesArtifactReader,
+  type InesRegionScan,
+} from "../InesArtifactReader.js";
 import type { ArtifactNode } from "../../domain/artifactGraph.js";
 import {
   classifyArtifactContent,
@@ -62,6 +67,13 @@ interface ScanContext {
   readonly registry: ArtifactPathRegistry;
   readonly expandedContainerIds: Set<string>;
   readonly ownedReaders: ArtifactReader[];
+  readonly reconstruction:
+    | {
+        readonly hash: Hash;
+        readonly regionOrder: string[];
+        bytes: number;
+      }
+    | undefined;
   readonly traversal: ArtifactTraversalObservation;
 }
 
@@ -76,6 +88,7 @@ export const scanReader = async (
   readonly occurrences: MutableOccurrence[];
   readonly pendingContradictions: PendingIntegrityContradiction[];
   readonly caseCollisionLimitation: string | undefined;
+  readonly inesRegionScan: InesRegionScan | undefined;
   readonly unknownParentOccurrences: ReadonlySet<MutableOccurrence>;
   readonly traversal: ArtifactReaderTraversal;
   /** A recorded disagreement between the root's own checksum and its bytes. */
@@ -88,6 +101,7 @@ export const scanReader = async (
       occurrences,
       pendingContradictions,
       caseCollisionLimitation: undefined,
+      inesRegionScan: undefined,
       unknownParentOccurrences: new Set(),
       traversal: { status: "complete", limitations: [] },
       rootContradiction: undefined,
@@ -104,6 +118,10 @@ export const scanReader = async (
     registry: new ArtifactPathRegistry(),
     expandedContainerIds: new Set<string>(),
     ownedReaders,
+    reconstruction:
+      reader instanceof InesArtifactReader
+        ? { hash: createHash("sha256"), regionOrder: [], bytes: 0 }
+        : undefined,
     traversal: new ArtifactTraversalObservation(),
   };
   await visitArtifactEntries(context, reader, "");
@@ -126,6 +144,14 @@ export const scanReader = async (
     occurrences,
     pendingContradictions,
     caseCollisionLimitation: annotateEnglishUnicodeCaseCollisions(occurrences),
+    inesRegionScan:
+      context.reconstruction === undefined
+        ? undefined
+        : {
+            region_order: context.reconstruction.regionOrder,
+            bytes: context.reconstruction.bytes,
+            sha256: context.reconstruction.hash.digest("hex"),
+          },
     unknownParentOccurrences: parentResolution.unknownParentOccurrences,
     traversal: context.traversal.snapshot(),
     rootContradiction,
@@ -341,12 +367,23 @@ const digestArtifactEntry = async (
 > => {
   if ((entry.kind !== "file" && entry.kind !== "slice") || entry.encrypted)
     return undefined;
+  const reconstruction =
+    currentReader === context.reader ? context.reconstruction : undefined;
+  if (reconstruction !== undefined && entry.byteOffset !== reconstruction.bytes)
+    throw new ArtifactReaderFailure("integrity", "Noncontiguous iNES regions");
   const digest = await hashReadable(
     await currentReader.open(entry, context.signal),
     context.signal,
     entry.declaredIntegrity?.algorithm,
     context.asarHeaderAdmission,
+    reconstruction === undefined
+      ? undefined
+      : (chunk) => {
+          reconstruction.hash.update(chunk);
+          reconstruction.bytes += chunk.length;
+        },
   );
+  reconstruction?.regionOrder.push(entry.path);
   const claim = entry.declaredIntegrity;
   const observed = claim?.algorithm === "md5" ? digest.md5 : digest.sha256;
   if (claim !== null && observed === undefined)

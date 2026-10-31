@@ -102,6 +102,7 @@ export const liveBinaryTargetSummaryVariants = [
     format: z.enum([
       ...ZIP_PACKAGE_FORMATS,
       "asar",
+      "ines",
       "godot-pck",
       "unityfs",
       "uimage",
