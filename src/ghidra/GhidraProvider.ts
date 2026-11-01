@@ -73,6 +73,7 @@ import { resolveGhidraExtensions } from "./extensions/GhidraExtensions.js";
 import {
   CAPABILITIES,
   existingProjectCapabilities,
+  EXISTING_PROJECT_WINDOWS_REMEDIATION,
   EXISTING_PROJECT_WINDOWS_UNAVAILABLE,
   windowsP0Capabilities,
   WINDOWS_P0_NATIVE_PE_ARCHITECTURES,
@@ -224,6 +225,7 @@ export class GhidraProvider implements AnalysisProviderCandidate {
         status: "unavailable",
         code: "unsupported_host",
         reason: EXISTING_PROJECT_WINDOWS_UNAVAILABLE,
+        remediation: EXISTING_PROJECT_WINDOWS_REMEDIATION,
         diagnostics,
       };
     if (installation.status === "available" && readiness?.available === false)
@@ -231,15 +233,13 @@ export class GhidraProvider implements AnalysisProviderCandidate {
         status: "unavailable",
         code: readiness.code,
         reason: readiness.reason,
+        remediation: readiness.remediation,
         diagnostics: {
           ...diagnostics,
           windows_security: jsonObjectSchema.parse(
             windowsNativeCapabilities(installation.platform, readiness),
           ),
-          windows_native_failure: {
-            stage: readiness.failureStage,
-            remediation: readiness.remediation,
-          },
+          windows_native_failure: { stage: readiness.failureStage },
         },
       };
     return installation.status === "available"
@@ -253,6 +253,7 @@ export class GhidraProvider implements AnalysisProviderCandidate {
           status: "unavailable",
           code: installation.rejection.code,
           reason: installation.rejection.reason,
+          remediation: installation.rejection.remediation,
           diagnostics,
         };
   }

@@ -19,10 +19,11 @@ import { silentLogger } from "../logger.js";
 import { ghidraProfileInstallationHost as host } from "./GhidraInstallation.fixture.js";
 import { GhidraProvider } from "./GhidraProvider.js";
 
-// Digests commit to the current shared policy, including the instruction status
-// revision that prevents reuse of snapshots with the previous ambiguous result.
-// On embedded-integration they also include Change 2's no_return_repair
-// revision, so they differ from main's.
+// Digests commit to the current shared policy, including the instruction
+// status, load-image relocation-symbol and procedure search revisions that
+// prevent reuse of snapshots with earlier results. On embedded-integration
+// they also include Change 2's no_return_repair revision, so they differ from
+// main's.
 const RAW_DIGESTS = {
   "6502": "2f46de2d69712a2f676957273405d342fd40f004529b0247d0454a79d7e480db",
   "x86-disabled-analyzer":
@@ -96,6 +97,8 @@ describe("raw-binary analysis profile digest", () => {
       language_id: "6502:LE:16:default",
       language_selection: "caller-supplied-v1",
       load_image_evidence: "independent-raw-mapping-context-v4",
+      load_image_observations:
+        "source-mappings-entry-context-relocation-symbol-v3",
       instruction_status: "unlisted-address-without-decode-v1",
       analyzer_preset: "ghidra-default",
     });

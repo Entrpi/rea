@@ -380,8 +380,9 @@ it("does not project cancellation cleanup as incomplete after a successful retry
 });
 
 it("returns cancellation with the completed observation when the caller interrupts service close", async () => {
+  const evidence = observation("complete");
   const service = {
-    inspectWithObjdump: vi.fn(async () => ok(observation("complete"))),
+    inspectWithObjdump: vi.fn(async () => ok(evidence)),
     close: vi.fn(async () => {
       process.emit("SIGINT");
     }),
@@ -389,7 +390,10 @@ it("returns cancellation with the completed observation when the caller interrup
 
   const result = await runObjdump(service);
 
-  expect(result).toMatchObject({ code: "cancelled" });
+  expect(result).toMatchObject({
+    code: "cancelled",
+    details: { partial_observation: evidence },
+  });
   expect(process.exitCode).toBe(130);
 });
 
