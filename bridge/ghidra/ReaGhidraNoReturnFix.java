@@ -17,6 +17,8 @@ import java.util.TreeSet;
  * libc/TLS imports have no body to inspect, so clear their flags by exact external ABI name.
  * Callers treated the call as a terminator and the decompiler truncated them. Clear the flag, then re-disassemble only
  * the call sites of the functions that were cleared and refit their owning functions in place.
+ * Then end the resolved computed calls to functions that keep their flag: Ghidra applies the flag
+ * only to calls with a decoded flow, so these calls keep a fallthrough the decompiler never follows.
  */
 public final class ReaGhidraNoReturnFix extends GhidraScript {
   private static final Set<String> RETURNING_IMPORTS = Set.of(
@@ -83,9 +85,48 @@ public final class ReaGhidraNoReturnFix extends GhidraScript {
         }
       }
     }
+    // The disassembler applies a callee's flag only to a call it decoded a flow for. A computed
+    // call that analysis resolves later, such as a RISC-V auipc+jalr pair, keeps its fallthrough.
+    TreeSet<Address> computed = new TreeSet<>();
+    for (Function f : fm.getFunctions(true)) {
+      monitor.checkCancelled();
+      if (!f.hasNoReturn() || f.isThunk()) continue;
+      for (Reference reference : currentProgram.getReferenceManager().getReferencesTo(f.getEntryPoint())) {
+        monitor.checkCancelled();
+        if (!reference.getReferenceType().isCall()) continue;
+        Instruction ins = li.getInstructionAt(reference.getFromAddress());
+        if (ins != null && resolvedComputedCall(ins, f.getEntryPoint())) computed.add(ins.getAddress());
+      }
+    }
+    TreeSet<Address> ended = new TreeSet<>();
+    for (Address s : computed) {
+      monitor.checkCancelled();
+      // Ghidra's own idiom (FixupNoReturnFunctionsScript): the call keeps its reference, not its fallthrough.
+      li.getInstructionAt(s).setFlowOverride(FlowOverride.CALL_RETURN);
+      Function owner = fm.getFunctionContaining(s);
+      if (owner != null && !owner.isThunk()) ended.add(owner.getEntryPoint());
+    }
+    for (Address entry : ended) {
+      monitor.checkCancelled();
+      // Refit once per owner, after all of its calls have ended.
+      CreateFunctionCmd.fixupFunctionBody(currentProgram, fm.getFunctionAt(entry), monitor);
+      owners.add(entry);
+    }
     // No analyzeChanges here: on libpl2.so it adds about 70 s, which pushes startup past the 330 s deadline.
-    println(
-        "REA no-return fix: cleared=" + cleared.size() + " sites=" + redone + " refit=" + owners.size());
+    println("REA no-return fix: cleared=" + cleared.size() + " sites=" + redone + " computed="
+        + computed.size() + " refit=" + owners.size());
+  }
+
+  /** An unconditional computed call without a decoded flow whose only resolved flow is the callee. */
+  private static boolean resolvedComputedCall(Instruction instruction, Address callee) {
+    FlowType flow = instruction.getFlowType();
+    if (!flow.isCall() || !flow.isComputed() || flow.isConditional() || flow.isTerminal()) return false;
+    // Never replace an override that analysis chose.
+    if (instruction.getFlowOverride() != FlowOverride.NONE) return false;
+    // getFlows() includes references that analysis added; getDefaultFlows() has only decoded flows.
+    if (instruction.getDefaultFlows().length != 0) return false;
+    Address[] flows = instruction.getFlows();
+    return flows.length == 1 && flows[0].equals(callee);
   }
 
   private void enqueueReturning(Function function, Set<Address> cleared, Deque<Address> pending) {

@@ -32,7 +32,9 @@ import {
   assertRiscvCallSites,
   assertRiscvCaller,
   assertRiscvStorage,
+  assertRiscvTerminalCall,
   inspectRiscvCallSites,
+  inspectRiscvFarCalls,
 } from "../tests/conformance/ghidra/riscv-checks.mjs";
 import {
   mcpTextValue,
@@ -236,6 +238,14 @@ try {
     callSites.push({ abi, fixture: fixture.path, ...sites });
     typed.push(fixture);
   }
+  // -mno-relax keeps the soft-float fixture's call to the no-return
+  // function as one auipc+jalr pair.
+  const [typedSoft] = typed;
+  const farCalls = await inspectRiscvFarCalls(typedSoft.path);
+  assert.deepEqual(
+    farCalls.calls.map((value) => BigInt(value.target)),
+    [BigInt(typedSoft.symbols.rea_riscv_stop)],
+  );
   const fixtures = [
     await buildRiscvFixture(workspace, 32),
     await buildRiscvFixture(workspace, 64),
@@ -430,6 +440,7 @@ try {
       assert.match(floatCode, /\bdouble\b/u);
     }
     let storage;
+    let noReturn;
     if (abi) {
       const boundaries = {};
       for (const name of Object.keys(abi.functions))
@@ -447,6 +458,38 @@ try {
         assertRiscvCaller(abiName, name, caller.pseudocode, fixture.symbols, {
           stripped,
         });
+      }
+      // Only the typed soft-float build holds the unrelaxed call that
+      // farCalls read, and only its DWARF declares rea_riscv_stop no-return.
+      if (fixture.path === typedSoft.path) {
+        const [far] = farCalls.calls;
+        const instruction = await call("inspect_native_instruction", {
+          address: far.jalr,
+        });
+        const stopCaller = functionDossierSchema.parse(
+          await call("analyze_function", {
+            procedure: fixture.symbols.rea_riscv_stop_caller,
+            detail: "complete",
+          }),
+        );
+        assertRiscvTerminalCall({
+          call: far,
+          callee: {
+            name: "rea_riscv_stop",
+            address: fixture.symbols.rea_riscv_stop,
+          },
+          instruction,
+          dossier: stopCaller,
+        });
+        noReturn = {
+          call: far,
+          listing_flow: instruction.flow.classification_evidence.map(
+            ({ value }) => value,
+          ),
+          limitations: stopCaller.limitations.filter((value) =>
+            value.includes("rea_riscv_stop"),
+          ),
+        };
       }
       storage = {
         abi: abiName,
@@ -641,6 +684,7 @@ try {
             abi: storage,
             prototype_outcome: outcomes.map((match) => match[0]),
           }),
+      ...(noReturn === undefined ? {} : { no_return: noReturn }),
       cli: true,
       stdio_mcp: true,
       snapshot_replay: true,
@@ -656,6 +700,9 @@ try {
         command: sites.command,
         version: sites.version,
         calls: sites.calls.map((value) => `${value.caller}:${value.target}`),
+        ...(sites.fixture === typedSoft.path
+          ? { far_calls: farCalls.calls }
+          : {}),
       },
     });
 } catch (cause) {

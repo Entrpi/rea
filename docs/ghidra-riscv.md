@@ -364,7 +364,8 @@ assembly sources:
 - An RV32 soft-float build of `riscv-float-abi.c` with ESP32-C3's
   `-march=rv32imc_zicsr_zifencei -mabi=ilp32`, and an RV32 single-float build
   with ESP32-H4's `-march=rv32imafc_zicsr_zifencei -mabi=ilp32f`, both typed
-  with DWARF.
+  with DWARF. The soft-float build also links `riscv-noreturn.c`, compiled
+  separately with `-mno-relax`.
 - The same objects of each linked with `--strip-all`. Every allocated section
   keeps its address and bytes, so the typed build's symbols locate its
   functions.
@@ -406,6 +407,11 @@ For the soft- and single-float builds the lane also checks:
   function definitions.
 - The unmodelled build is admitted by its headers, then refused over MCP and
   the CLI with the bridge's reason, which names its three signatures.
+- An LLVM objdump reading finds the call from `rea_riscv_stop_caller` to
+  `rea_riscv_stop`, which DWARF declares no-return, as one `auipc`+`jalr` pair,
+  as in ESP-IDF's calls between flash and IRAM. In the typed soft-float build,
+  Ghidra's Listing ends that computed call, its basic block has no successor, and the
+  caller's terminal-call limitation names `rea_riscv_stop`.
 
 Header-mutated copies check admission. The RV32 double-float image relabelled as
 soft-float (`e_flags` `0x1`) or single-float (`0x3`), refused before these

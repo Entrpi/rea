@@ -42,9 +42,16 @@ export interface RiscvCallSite {
   /** Caller memory at the call, by offset from the caller's incoming `sp`. */
   readonly memory: ReadonlyMap<number, { word?: number; stack?: number }>;
 }
+/** An `auipc`+`jalr` call; the target comes from the pair's immediates. */
+export interface RiscvFarCall {
+  readonly auipc: string;
+  readonly jalr: string;
+  readonly target: string;
+}
 export function riscvStorageLocations(storage: string): readonly string[];
 export function assertRiscvAbiTableConsistent(name: RiscvAbiName): void;
 export function parseRiscvCallSites(listing: string): readonly RiscvCallSite[];
+export function parseRiscvFarCalls(listing: string): readonly RiscvFarCall[];
 export function inspectRiscvCallSites(
   path: string,
   callers: readonly string[],
@@ -53,6 +60,42 @@ export function inspectRiscvCallSites(
   version: string | undefined;
   calls: readonly RiscvCallSite[];
 }>;
+export function inspectRiscvFarCalls(path: string): Promise<{
+  command: string;
+  version: string | undefined;
+  calls: readonly RiscvFarCall[];
+}>;
+export function assertRiscvTerminalCall(observation: {
+  readonly call: RiscvFarCall;
+  readonly callee: { readonly name: string; readonly address: string };
+  readonly instruction: {
+    readonly address: string;
+    readonly status: string;
+    readonly flow: {
+      readonly kind: string;
+      readonly computed: boolean;
+      readonly conditional: boolean;
+      readonly classification_evidence?: readonly {
+        readonly source: string;
+        readonly value: string;
+      }[];
+    };
+    readonly references: readonly {
+      readonly target_address: string;
+      readonly call: boolean;
+    }[];
+  };
+  readonly dossier: {
+    readonly pseudocode: string;
+    readonly callees: readonly { readonly address: string }[];
+    readonly basic_blocks: readonly {
+      readonly start: string;
+      readonly end: string;
+      readonly successors: readonly string[];
+    }[];
+    readonly limitations: readonly string[];
+  };
+}): void;
 export function assertRiscvCallSites(
   name: RiscvAbiName,
   calls: readonly RiscvCallSite[],

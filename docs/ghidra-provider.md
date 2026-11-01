@@ -293,8 +293,21 @@ external implementations are not inspected. The repair re-disassembles affected
 terminal calls and refits their owning functions, preserving independent function
 entries. If a recovered caller reveals a decoded return, its propagated no-return
 flag and affected callers are repaired in the same pass. Unknown imports and
-genuine no-return imports keep their flags. Analysis profiles version this repair
-so snapshots produced before it are not reused. Windows P0 does not run it.
+genuine no-return imports keep their flags.
+
+Ghidra's disassembler applies a callee's no-return flag only to a call whose
+target it decodes. A computed call that analysis resolves later, such as a
+RISC-V `auipc`+`jalr` pair, keeps its fallthrough, although the decompiler stops
+at it. After the clearing passes, the repair therefore ends each computed call
+that has no decoded target and whose only resolved target is a non-external,
+non-thunk function that keeps its flag. It sets Ghidra's `CALL_RETURN` flow
+override, as Ghidra's `FixupNoReturnFunctionsScript` does, and refits the owning
+functions. The call keeps its reference to the callee. Instruction flow,
+basic-block successors and terminal-call limitations then agree with the
+pseudocode. The repair does not change conditional calls, calls with another
+resolved target or an existing flow override, or calls whose target is a thunk
+or an external function. Analysis profiles version this repair so snapshots
+produced before it are not reused. Windows P0 does not run it.
 
 `npm run verify:ghidra` compiles the versioned C oracle into debug and stripped
 host-native targets (x86-64/AArch64 ELF on Linux or Mach-O on macOS), plus a native
