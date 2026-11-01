@@ -673,7 +673,7 @@ describe("RISC-V calling-convention handshake", () => {
       reason: "a report from a double-float session",
       value: target(),
       reported: report,
-      operation: "health",
+      operation: "list_procedures",
     },
   ] as const)("rejects $reason", async ({ value, reported, operation }) => {
     const { counts, client } = await session(value, reported);
