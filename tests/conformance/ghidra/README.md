@@ -8,8 +8,11 @@ binaries and Ghidra projects are never committed.
   `../c/riscv-float-abi.c`, `riscv-probe.S` and `riscv-isa-probe.S` produce
   typed and stripped RV32 ilp32 images whose calls cover every rule of the ilp32
   policy; `riscv-checks.mjs` holds that policy's expected storage and the
-  call-site oracle. `npm run verify:ghidra:riscv` exercises real CLI/MCP
-  discovery, decompilation, argument storage, output schemas, profile and
+  call-site oracle. `../c/riscv-noreturn.c`, compiled separately with
+  `-mno-relax`, adds an `auipc`+`jalr` call to a DWARF no-return function,
+  whose fallthrough Ghidra's Listing must not keep.
+  `npm run verify:ghidra:riscv` exercises real CLI/MCP discovery,
+  decompilation, argument storage, terminal calls, output schemas, profile and
   snapshot identity, admission and refusal diagnostics, immutable source bytes,
   and owned cleanup. It requires BYO Ghidra 12.1.4/JDK 21+ and RISC-V
   Clang/LLD/LLVM readelf/LLVM objdump; `REA_RISCV_CLANG`, `REA_RISCV_LLD`,
