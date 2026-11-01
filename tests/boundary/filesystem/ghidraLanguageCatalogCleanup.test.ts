@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 
 import {
@@ -8,6 +8,7 @@ import {
 } from "../../../src/artifacts/ArtifactResourceScope.js";
 import { ArtifactReaderFailure } from "../../../src/artifacts/ArtifactReader.js";
 import { readGhidraLanguageCatalog } from "../../../src/ghidra/GhidraLanguageCatalog.js";
+import { catalogLanguage } from "../../fixtures/ghidraLanguageCatalog.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 interface FileControl {
@@ -98,16 +99,26 @@ const control = (name: string, overrides: Partial<FileControl> = {}) => {
   return value;
 };
 
+const definition = (name: string): string =>
+  `<language_definitions><language id="${name}:LE:32:default"/></language_definitions>`;
+const definitionPath = (root: string, name: string): string =>
+  join(root, "Ghidra/Processors", name, "data/languages", `${name}.ldefs`);
+
 const installation = async (name: string): Promise<string> => {
   const root = await createTestTempDirectory("rea-ghidra-ldefs-cleanup-");
-  const languages = join(root, "Ghidra/Processors", name, "data/languages");
-  await mkdir(languages, { recursive: true });
-  await writeFile(
-    join(languages, `${name}.ldefs`),
-    `<language_definitions><language id="${name}:LE:32:default"/></language_definitions>`,
-  );
+  await mkdir(dirname(definitionPath(root, name)), { recursive: true });
+  await writeFile(definitionPath(root, name), definition(name));
   return root;
 };
+
+/** The catalog entries that `installation(name)` wrote under `root`. */
+const catalogOf = (root: string, name: string) => [
+  catalogLanguage(
+    `${name}:LE:32:default`,
+    definitionPath(root, name),
+    definition(name),
+  ),
+];
 
 const scopes: ArtifactResourceScope[] = [];
 const scope = (): ArtifactResourceScope => {
@@ -139,9 +150,10 @@ it("retries the retained close in the caller scope before the next read", async 
   });
   expect(resources.hasPending).toBe(true);
   retained.closeFails = false;
-  expect(
-    await readGhidraLanguageCatalog(await installation("x86"), resources),
-  ).toEqual([{ id: "x86:LE:32:default", compilerSpecIds: [] }]);
+  const x86 = await installation("x86");
+  expect(await readGhidraLanguageCatalog(x86, resources)).toEqual(
+    catalogOf(x86, "x86"),
+  );
   expect(retained.closeCalls).toBe(2);
   expect(resources.hasPending).toBe(false);
 });
@@ -172,9 +184,10 @@ it("keeps one scope's retained close out of another scope", async () => {
   await expect(
     readGhidraLanguageCatalog(await installation("isolated"), failed),
   ).rejects.toBeInstanceOf(ArtifactReaderFailure);
-  expect(
-    await readGhidraLanguageCatalog(await installation("x86"), scope()),
-  ).toEqual([{ id: "x86:LE:32:default", compilerSpecIds: [] }]);
+  const x86 = await installation("x86");
+  expect(await readGhidraLanguageCatalog(x86, scope())).toEqual(
+    catalogOf(x86, "x86"),
+  );
   expect(failed.hasPending).toBe(true);
 });
 

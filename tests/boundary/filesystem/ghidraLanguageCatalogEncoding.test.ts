@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { ArtifactResourceScope } from "../../../src/artifacts/ArtifactResourceScope.js";
 import { readGhidraLanguageCatalog } from "../../../src/ghidra/GhidraLanguageCatalog.js";
+import { catalogLanguage } from "../../fixtures/ghidraLanguageCatalog.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 const xml =
@@ -57,10 +58,18 @@ it.each([
     );
     await mkdir(directory, { recursive: true });
     await writeFile(join(directory, "toy.ldefs"), bytes);
+    // The digest covers the file's bytes, byte-order mark included.
     if (expectedError === null)
       expect(
         await readGhidraLanguageCatalog(root, new ArtifactResourceScope()),
-      ).toEqual([{ id: "toy:LE:32:default", compilerSpecIds: ["default"] }]);
+      ).toEqual([
+        catalogLanguage(
+          "toy:LE:32:default",
+          join(directory, "toy.ldefs"),
+          bytes,
+          [{ id: "default", spec: null }],
+        ),
+      ]);
     else
       await expect(
         readGhidraLanguageCatalog(root, new ArtifactResourceScope()),
