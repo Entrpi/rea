@@ -160,7 +160,7 @@ try {
   assert.ok(profile.value.profile);
   assert.equal(
     profile.value.profile.parameters.no_return_repair,
-    "returning-imports-decoded-return-v2",
+    "returning-imports-decoded-return-v3",
   );
   const client = provider.createClient(target.value, profile.value.profile);
   cleaned = false;
