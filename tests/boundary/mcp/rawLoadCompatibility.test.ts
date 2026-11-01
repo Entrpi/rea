@@ -118,21 +118,32 @@ describe("raw-binary snapshots saved before base_address", () => {
     const { target } = f;
     const profile = await ghidraProfile(target);
     expect(snapshotMatchesTarget(snapshot.target, target)).toBe(true);
-    // Upstream's instruction-status revision (#7823) keeps every Ghidra
-    // snapshot saved before it from replaying, and on this integration branch
-    // so does Change 2's no-return revision. Apart from those parameters, the
-    // profile is the one this snapshot recorded.
+    // Upstream's instruction-status (#7823), load-image observation (#8531)
+    // and procedure search (#8520) revisions keep every Ghidra snapshot saved
+    // before them from replaying, and on this integration branch so does
+    // Change 2's no-return revision. Apart from those parameters, the profile
+    // is the one this snapshot recorded.
     const mismatch = snapshotBindingMismatch(snapshot, target, profile);
     expect(mismatch).not.toHaveProperty("target");
     expect(mismatch).toHaveProperty("profile_digest");
     const {
       instruction_status: status,
+      load_image_observations: observations,
+      procedure_search: search,
       no_return_repair: repair,
       ...parameters
     } = profile.parameters;
-    const { no_return_repair: recordedRepair, ...recorded } =
-      snapshot.binding.analysis_profile.parameters;
+    const {
+      load_image_observations: recordedObservations,
+      no_return_repair: recordedRepair,
+      ...recorded
+    } = snapshot.binding.analysis_profile.parameters;
     expect(status).toBe("unlisted-address-without-decode-v1");
+    expect(search).toBe("primary-and-exact-entry-symbol-names-v1");
+    expect([recordedObservations, observations]).toEqual([
+      "source-mappings-entry-context-v2",
+      "source-mappings-entry-context-relocation-symbol-v3",
+    ]);
     expect([recordedRepair, repair]).toEqual([
       "returning-imports-decoded-return-v2",
       "returning-imports-decoded-return-v3",

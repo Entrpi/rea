@@ -25,40 +25,41 @@ import { GhidraProvider } from "./GhidraProvider.js";
 // they also include Change 2's no_return_repair revision, so they differ from
 // main's.
 const RAW_DIGESTS = {
-  "6502": "2f46de2d69712a2f676957273405d342fd40f004529b0247d0454a79d7e480db",
+  "6502": "e9c0e7164d010bd785133569e4698ad611cae1596a3181cc5c28bca6a9c9a720",
   "x86-disabled-analyzer":
-    "59ae58c25642294b25b49558c2cb97842055880e5162345327772187eb2f4ba4",
+    "fbc90648778a6fa435735b426f05d8e2964519caec680b6420525442eeb1c69f",
 } as const;
 
-// Computed by upstream main at 07dfd1261, which has neither a separate base nor
-// a variant. A raw load whose base is its caller-selected entry keeps these
-// profile digests, so it stays reusable wherever main's raw sessions and
-// snapshots are.
+// Computed by upstream main at d3ab0faf5, which has neither a separate base nor
+// a variant, and recomputed on embedded-integration, where Change 2's
+// no_return_repair revision changes every Ghidra profile. A raw load whose base
+// is its caller-selected entry keeps these profile digests, so it stays
+// reusable wherever this branch's raw sessions and snapshots are.
 const LEGACY_RAW_DIGESTS = [
   [
     "x86",
     "0x1000",
-    "483304099622c0ef797a3347001c10062c085a153debf596813fdb296af51ed4",
+    "86e7e7d47025308202a3858a8d95cdff1d7fee587ba1396f5c4bccfbea65864a",
   ],
   [
     "x86_64",
     "0x401000",
-    "7a417601142d70802ee03d9b2b6e6367274c846cbbb5caefab721f3861a3f6b1",
+    "f9e0c04061cace3e6d974b7b01463b261df39ef4a773ee54d7c5c748c6d494fb",
   ],
   [
     "arm",
     "0x8000000",
-    "c643e887171ca03cb32e5beb8a29fb030bb8bdb58731dbd93218220233d098c6",
+    "5a35de408a7eee78c2a3494161d8268b82edf03d206992d3c10b08f37008e0ad",
   ],
   [
     "arm64",
     "0x80000",
-    "75b5bdb395a62b0e5f27b5b69aa2f7c1ec61b82424613808e195b5ff7288716a",
+    "430943b8e86cfc4ad7bc2fbfa1abeea73d1d04dbecc8bc4d5317032de4b94a2b",
   ],
   [
     "m68k",
     "0x1000",
-    "dc494e832ab3becc4f6aa8f104dcf8b6b64fb7196090d4862289cd6601054503",
+    "3a843be5d2bc5a75d8f17a0516f341abeac4d0e8bbb2ecbb4c9e0fbc81ef53b8",
   ],
 ] as const;
 
@@ -223,7 +224,7 @@ describe("M-profile raw-binary analysis profile", () => {
     const digest = (await profile(reset("armv7-m"))).digest;
     // Pinned so a change to raw_load semantics must bump its version.
     expect(digest).toBe(
-      "295a2d811f52dac799c07a7b935f47d6cd02bbe2c1080e21ef850f9584989e79",
+      "303a2f95017432019a65d9b8500ca13be9ebf6246c8be83a6c9a76e1b6e4dbda",
     );
     expect(
       (await profile(reset("armv7-m", { baseAddress: "0x8000000" }))).digest,
