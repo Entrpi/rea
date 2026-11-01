@@ -142,6 +142,7 @@ it("keeps the probe's identification when the command then fails to start", asyn
   const executable = join(directory, "rizin");
   const artifactPath = join(directory, "sample.bin");
   await writeFile(artifactPath, "fixture");
+  const artifactDigest = await sha256(artifactPath);
   const server = createServer(
     { kind: "fixed", analysis },
     { environment: { ...process.env, PATH: directory } },
@@ -203,6 +204,9 @@ it("keeps the probe's identification when the command then fails to start", asyn
         details: {
           diagnostics: {
             ...scenario.diagnostics,
+            provider_executable: "rizin",
+            artifact_path: artifactPath,
+            artifact_sha256: artifactDigest,
             provider_executable_path: executable,
             provider_executable_sha256: digest,
             provider_version_banner: scenario.banner,

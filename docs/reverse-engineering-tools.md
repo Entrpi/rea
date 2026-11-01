@@ -98,9 +98,13 @@ records the tool and version as the provider name and version, and records the
 executable path, its SHA-256 and the banner in its parameters; a banner longer
 than 2,048 UTF-8 bytes is cut within that budget, between characters, and
 marked by `provider_version_banner_truncated`; a cut banner identifies no tool,
-since the cut could fall inside its version. These describe the file at that path when
-REA checked it; they cannot prove the exact bytes executed if the file changes
-before the launch. A different tool that accepts the same arguments, such as
+since the cut could fall inside its version. The budget and the recorded banner
+cover the line as printed, surrounding whitespace included; only identification
+ignores that whitespace. These describe the file at that path when
+REA checked it; they cannot prove the exact bytes or version executed if the
+file changes before the launch, and Evidence that records them says so in a
+limitation.
+A different tool that accepts the same arguments, such as
 radare2, still runs: its Evidence names that tool and adds a limitation. A probe
 that fails, times out, prints output that is not valid UTF-8 or prints an
 unrecognized banner leaves the version unknown, and the command still runs.
@@ -110,18 +114,49 @@ has `provider_identity: "banner"`. The
 probe's exit status and output, each stream cut to 2,048 UTF-8 bytes in the
 same way, are recorded in `provider_version_probe`,
 where `stdout_invalid_utf8` and `stderr_invalid_utf8` mark output that was not
-valid UTF-8 and so holds replacement characters.
+valid UTF-8 and so holds replacement characters, and `completion_status` is
+`unknown`, as for the command, when the probe's output was not fully collected
+or the probe was killed, signalled or left no exit code.
 Each call's lookup, hash and probe use that call's `command_timeout_ms` budget
 and cancellation; a lookup or hash that reaches the deadline ends the call
-without running the command. REA probes before every command and reuses no
-reading: a launcher, such as a version-manager shim, keeps its path and SHA-256
+without running the command. A hash that fails for another reason, for example
+on an executable that can be run but not read, leaves the version unknown
+without a probe; the command still runs the path the lookup found, which
+Evidence records without a SHA-256. REA probes before every command and reuses
+no reading: a launcher, such as a version-manager shim, keeps its path and SHA-256
 while the tool it runs changes, so only the call's own probe describes the tool
 that answers. Each call therefore launches the executable twice, the probe and
 then the command. If the command then fails to start, for example with `E2BIG`
 because its arguments exceed the host's launch limit, the call returns no
 Evidence; the error's `details.diagnostics` keep `provider`, the tool and
-version, and the `provider_*` parameters above. A probe that is cancelled, or
-whose cleanup is incomplete, keeps the executable path and SHA-256 there.
+version, the selected `provider_executable`, and the `provider_*` parameters
+above. A probe that is cancelled, or
+whose cleanup is incomplete, keeps the executable path and SHA-256 there; a hash
+that is cancelled or reaches the deadline keeps the executable path; and a lookup
+that is cancelled or reaches the deadline keeps the path it was checking, as
+`executable_lookup_candidate`. Every error from the lookup through the launch
+also keeps the selected `provider_executable` and, for a call with a target, its
+`artifact_path` and `artifact_sha256`.
+
+REA reports a version only for the file it runs. The lookup moves past what every native
+`PATH` search moves past: a missing file, a non-directory, a denied directory
+and a file without execute permission. On Linux and macOS it also skips an
+entry too long for the native path buffer. At any other error, such as a
+symbolic link loop, a stale network file handle or an I/O error, at least one
+of the searches of glibc, musl, Android and libuv stops, so the lookup stops
+there. The
+command then runs by name, with the version unknown, and the host's own search
+decides what runs. A found file that does not start with `ENOENT` or `EACCES`,
+as when a script's interpreter is missing or not executable, is one a native
+search moves past. The command then also runs as selected, with the version
+unknown, and a limitation names that file. When the host refuses to inspect an
+explicitly selected path (`EACCES` or `EPERM`), the command runs that path with
+the version unknown, and Evidence or the launch failure keeps it as
+`provider_executable_path`. A lookup or hash that stops waiting for a stalled
+`stat` or `access` leaves that call running; a later lookup or hash of the same
+path waits for it instead of starting another. A hash also ends at the deadline
+or on cancellation while the file's open is still pending, and a later hash of
+the same path waits for that open to return before it opens the file again.
 
 Captured stdout and stderr are retained up to a 16 MiB combined limit; `output_truncated` marks output beyond that limit. One-shot commands use the `command_timeout_ms` budget described above. That 16 MiB cap has no runtime override. A typed failure's `captured_output` marks a stream that held invalid UTF-8 with `stdout_invalid_utf8` or `stderr_invalid_utf8`.
 

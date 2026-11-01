@@ -72,7 +72,9 @@ export const resolveProcessScenarioRuntimePaths = async (
  * Resolve a selected executable through the caller's effective PATH. A denied
  * lookup of an explicitly selected path is a host access failure; PATH search
  * continues past denied directories, and an existing file without execute
- * permission remains an invalid selection.
+ * permission remains an invalid selection. The harness verifies the file it
+ * launches, so capture cannot defer to the host's search: where the lookup
+ * stops because a native search can stop there, the scenario is rejected.
  */
 export const resolveExecutable = async (
   command: string,
