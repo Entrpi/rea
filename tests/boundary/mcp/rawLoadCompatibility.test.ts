@@ -119,14 +119,25 @@ describe("raw-binary snapshots saved before base_address", () => {
     const profile = await ghidraProfile(target);
     expect(snapshotMatchesTarget(snapshot.target, target)).toBe(true);
     // Upstream's instruction-status revision (#7823) keeps every Ghidra
-    // snapshot saved before it from replaying. Apart from that parameter, the
+    // snapshot saved before it from replaying, and on this integration branch
+    // so does Change 2's no-return revision. Apart from those parameters, the
     // profile is the one this snapshot recorded.
     const mismatch = snapshotBindingMismatch(snapshot, target, profile);
     expect(mismatch).not.toHaveProperty("target");
     expect(mismatch).toHaveProperty("profile_digest");
-    const { instruction_status: status, ...parameters } = profile.parameters;
+    const {
+      instruction_status: status,
+      no_return_repair: repair,
+      ...parameters
+    } = profile.parameters;
+    const { no_return_repair: recordedRepair, ...recorded } =
+      snapshot.binding.analysis_profile.parameters;
     expect(status).toBe("unlisted-address-without-decode-v1");
-    expect(parameters).toEqual(snapshot.binding.analysis_profile.parameters);
+    expect([recordedRepair, repair]).toEqual([
+      "returning-imports-decoded-return-v2",
+      "returning-imports-decoded-return-v3",
+    ]);
+    expect(parameters).toEqual(recorded);
     // The saved image still parses, and its facts equal what this version
     // produces. Limitation prose is not frozen; later versions may reword it.
     const entry = snapshot.entries.find(

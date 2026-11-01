@@ -21,10 +21,12 @@ import { GhidraProvider } from "./GhidraProvider.js";
 
 // Digests commit to the current shared policy, including the instruction status
 // revision that prevents reuse of snapshots with the previous ambiguous result.
+// On embedded-integration they also include Change 2's no_return_repair
+// revision, so they differ from main's.
 const RAW_DIGESTS = {
-  "6502": "8e33776d1cc5c5d77d32923d5978c05ec2d989d00920dd458cc2dafb4c9c0cad",
+  "6502": "2f46de2d69712a2f676957273405d342fd40f004529b0247d0454a79d7e480db",
   "x86-disabled-analyzer":
-    "d17bddc8ac110c891d30fb989fc7906df421bd9bea5df4aac05a950f50c7bdaf",
+    "59ae58c25642294b25b49558c2cb97842055880e5162345327772187eb2f4ba4",
 } as const;
 
 // Computed by upstream main at 07dfd1261, which has neither a separate base nor
@@ -35,27 +37,27 @@ const LEGACY_RAW_DIGESTS = [
   [
     "x86",
     "0x1000",
-    "1efa8bf6ae3bd0db5789c3bde41150c1765d11a5dd01171dfcc8e13c9e0156c5",
+    "483304099622c0ef797a3347001c10062c085a153debf596813fdb296af51ed4",
   ],
   [
     "x86_64",
     "0x401000",
-    "b9b8398e6735a2c038d375193bbc546dae535415d8a33a46fd1f093e28534eef",
+    "7a417601142d70802ee03d9b2b6e6367274c846cbbb5caefab721f3861a3f6b1",
   ],
   [
     "arm",
     "0x8000000",
-    "454105d882ed5c647e47e1c6f4aa2f30be36a17c7c048b783e10c5498c20fc2a",
+    "c643e887171ca03cb32e5beb8a29fb030bb8bdb58731dbd93218220233d098c6",
   ],
   [
     "arm64",
     "0x80000",
-    "fd1482d39496d4bdacdce7f91fc7fb5d1c653e492a771db3ca887e3c1f29f618",
+    "75b5bdb395a62b0e5f27b5b69aa2f7c1ec61b82424613808e195b5ff7288716a",
   ],
   [
     "m68k",
     "0x1000",
-    "afe1d0b29de91b03169900e59565c4caae78097c02e1768d76c17c6230b0b919",
+    "dc494e832ab3becc4f6aa8f104dcf8b6b64fb7196090d4862289cd6601054503",
   ],
 ] as const;
 
@@ -218,7 +220,7 @@ describe("M-profile raw-binary analysis profile", () => {
     const digest = (await profile(reset("armv7-m"))).digest;
     // Pinned so a change to raw_load semantics must bump its version.
     expect(digest).toBe(
-      "6c9ab13284488b310460e9b0b85cab0c5d4fc0e6d95b0164c411c783c4a763b7",
+      "295a2d811f52dac799c07a7b935f47d6cd02bbe2c1080e21ef850f9584989e79",
     );
     expect(
       (await profile(reset("armv7-m", { baseAddress: "0x8000000" }))).digest,
