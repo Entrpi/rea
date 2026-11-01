@@ -10,7 +10,7 @@ import { parseConfig } from "../../../src/config/parseConfig.js";
 import { toolContract } from "../../../src/contracts/toolContracts.js";
 import {
   parseAnalysisSnapshot,
-  snapshotMatchesBinding,
+  snapshotBindingMismatch,
   snapshotMatchesTarget,
   snapshotTarget,
 } from "../../../src/domain/analysisSnapshot.js";
@@ -121,7 +121,9 @@ describe("raw-binary snapshots saved before base_address", () => {
     // Upstream's instruction-status revision (#7823) keeps every Ghidra
     // snapshot saved before it from replaying. Apart from that parameter, the
     // profile is the one this snapshot recorded.
-    expect(snapshotMatchesBinding(snapshot, target, profile)).toBe(false);
+    const mismatch = snapshotBindingMismatch(snapshot, target, profile);
+    expect(mismatch).not.toHaveProperty("target");
+    expect(mismatch).toHaveProperty("profile_digest");
     const { instruction_status: status, ...parameters } = profile.parameters;
     expect(status).toBe("unlisted-address-without-decode-v1");
     expect(parameters).toEqual(snapshot.binding.analysis_profile.parameters);
@@ -159,8 +161,8 @@ describe("raw-binary snapshots saved before base_address", () => {
     );
     expect(snapshotMatchesTarget(snapshot.target, target)).toBe(false);
     expect(
-      snapshotMatchesBinding(snapshot, target, await ghidraProfile(target)),
-    ).toBe(false);
+      snapshotBindingMismatch(snapshot, target, await ghidraProfile(target)),
+    ).toHaveProperty("target");
   });
 });
 
