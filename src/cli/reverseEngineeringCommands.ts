@@ -23,11 +23,11 @@ import type { CliInstance } from "./types.js";
 import { withCommandCancellation } from "./commandCancellation.js";
 import { CLI_COMMANDS } from "../cliCommandNames.js";
 import type { ReverseEngineeringService } from "../application/reverse/ReverseEngineeringService.js";
+import { gdbOneShotCommandMayInvalidateDetachProof } from "../gdb/GdbSessionManager.js";
 import {
-  GdbSessionManager,
-  gdbOneShotCommandMayInvalidateDetachProof,
-} from "../gdb/GdbSessionManager.js";
-import { RizinDebugSessionManager } from "../rizin/RizinDebugSessionManager.js";
+  createGdbSessionManager,
+  createRizinDebugSessionManager,
+} from "../composition/debuggerSessions.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import {
   analysisEvidenceDeliveryOptions,
@@ -172,8 +172,7 @@ export const registerReverseEngineeringCommands = (
   environment: Readonly<NodeJS.ProcessEnv>,
   createGdbManager: (
     environment: Readonly<NodeJS.ProcessEnv>,
-  ) => GdbSessionManager = (providerEnvironment) =>
-    new GdbSessionManager({ environment: providerEnvironment }),
+  ) => ReturnType<typeof createGdbSessionManager> = createGdbSessionManager,
   createService: typeof createReverseEngineeringService = createReverseEngineeringService,
 ): void => {
   const service = createService(environment);
@@ -434,7 +433,7 @@ export const registerReverseEngineeringCommands = (
     run: ({ args, options }) =>
       withCommandCancellation((signal) =>
         logCliCommand(logger, CLI_COMMANDS.debugWithRizin, async () => {
-          const manager = new RizinDebugSessionManager(environment);
+          const manager = createRizinDebugSessionManager(environment);
           let sessionId: string | undefined;
           return finishAnalysisCommand(
             async () => {
