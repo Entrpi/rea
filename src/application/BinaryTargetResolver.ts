@@ -44,7 +44,7 @@ import type {
 import { err, ok, type Result } from "../domain/result.js";
 import { readArmElfAttributes } from "./ArmElfAttributes.js";
 import { readMipsElfMetadata } from "./MipsElfMetadata.js";
-import { readXtensaElfAbi } from "./XtensaElfMetadata.js";
+import { readXtensaElfInfo } from "./XtensaElfMetadata.js";
 import {
   validateElfDeclaredRanges,
   type ElfDeclarationRead,
@@ -1208,9 +1208,9 @@ const readElfMetadata = async (
       ...parsed.value,
       xtensa: {
         ...parsed.value.xtensa,
-        abi: await readXtensaElfAbi(handle, fileSize, () =>
+        ...(await readXtensaElfInfo(handle, fileSize, () =>
           throwIfTargetResolutionCancelled(signal),
-        ),
+        )),
       },
     });
   if (parsed.value.architecture === "riscv")

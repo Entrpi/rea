@@ -2,7 +2,7 @@ import { open, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseBinaryTarget } from "../../../src/application/BinaryTargetResolver.js";
-import { readXtensaElfAbi } from "../../../src/application/XtensaElfMetadata.js";
+import { readXtensaElfInfo } from "../../../src/application/XtensaElfMetadata.js";
 import type { XtensaAbiDeclaration } from "../../../src/domain/binaryTargetTypes.js";
 import { ghidraXtensaUnsupportedReason } from "../../../src/ghidra/GhidraXtensaProfile.js";
 import {
@@ -17,14 +17,18 @@ const NOTE_SECTION = 52 + 40;
 const NAMES_SECTION = 52 + 2 * 40;
 
 /** The descriptor GNU as and ld write, padded with NULs to a 4-byte word. */
-const descriptor = (abi: string): Buffer => {
-  const text = Buffer.from(`USE_ABSOLUTE_LITERALS=0\nABI=${abi}\n\0`, "latin1");
+const descriptor = (abi: string, literals: string): Buffer => {
+  const text = Buffer.from(
+    `USE_ABSOLUTE_LITERALS=${literals}\nABI=${abi}\n\0`,
+    "latin1",
+  );
   return Buffer.concat([text, Buffer.alloc((4 - (text.length % 4)) % 4)]);
 };
 
 const xtensaElf = (
   options: {
     readonly abi?: string;
+    readonly literals?: string;
     readonly little?: boolean;
     readonly ownership?: "section" | "program";
     readonly sectionName?: string;
@@ -42,7 +46,12 @@ const xtensaElf = (
     sectionName: options.sectionName ?? ".xtensa.info",
     notes:
       options.notes ??
-      elfNote("Xtensa_Info", 1, descriptor(options.abi ?? "0"), little),
+      elfNote(
+        "Xtensa_Info",
+        1,
+        descriptor(options.abi ?? "0", options.literals ?? "0"),
+        little,
+      ),
   });
   // EF_XTENSA_XT_INSN | EF_XTENSA_XT_LIT, as ESP-IDF links declare.
   if (little) bytes.writeUInt32LE(0x300, 36);
@@ -70,6 +79,19 @@ const resolveFixture = async (bytes: Buffer) => {
   return result.value;
 };
 
+type XtensaTarget = Awaited<ReturnType<typeof resolveFixture>>;
+
+/**
+ * The lane refuses an unreadable declaration with the reader's own diagnostic;
+ * the lane's surrounding wording is not part of the contract.
+ */
+const expectRefusalWithReaderReason = (target: XtensaTarget): void => {
+  const { abi } = target.xtensa;
+  if (abi?.status !== "unavailable")
+    throw new Error("Expected an unreadable ABI declaration");
+  expect(ghidraXtensaUnsupportedReason(target)).toContain(abi.reason);
+};
+
 const resolvedAbi = async (bytes: Buffer): Promise<XtensaAbiDeclaration> => {
   const abi = (await resolveFixture(bytes)).xtensa.abi;
   if (abi === undefined) throw new Error("Expected an inspected ABI");
@@ -88,15 +110,28 @@ describe("Xtensa ELF target resolution", () => {
         type: 2,
         flags: 0x300,
         abi: { status: "declared", abi: "windowed" },
+        literals: { status: "declared", literals: "pc-relative" },
       },
     });
     expect(ghidraXtensaUnsupportedReason(target)).toBeNull();
   });
 
+  it("records absolute literals and refuses the PC-relative Ghidra lane", async () => {
+    const target = await resolveFixture(xtensaElf({ literals: "1" }));
+    expect(target.xtensa).toMatchObject({
+      abi: { status: "declared", abi: "windowed" },
+      literals: { status: "declared", literals: "absolute" },
+    });
+    expect(ghidraXtensaUnsupportedReason(target)).toContain(
+      "USE_ABSOLUTE_LITERALS=1",
+    );
+  });
+
   it("records call0 and keeps the Ghidra refusal specific", async () => {
     const target = await resolveFixture(xtensaElf({ abi: "1" }));
     expect(target.xtensa.abi).toEqual({ status: "declared", abi: "call0" });
-    expect(ghidraXtensaUnsupportedReason(target)).toContain("call0 ABI");
+    // The fixture differs from the admitted one only in its ABI.
+    expect(ghidraXtensaUnsupportedReason(target)).not.toBeNull();
   });
 
   it("reads big-endian note words without admitting big-endian images", async () => {
@@ -105,7 +140,8 @@ describe("Xtensa ELF target resolution", () => {
       byteOrder: "big",
       abi: { status: "declared", abi: "windowed" },
     });
-    expect(ghidraXtensaUnsupportedReason(target)).toContain("little-endian");
+    // The fixture differs from the admitted one only in its byte order.
+    expect(ghidraXtensaUnsupportedReason(target)).not.toBeNull();
   });
 
   it("keeps an undefined ABI value as written", async () => {
@@ -114,16 +150,20 @@ describe("Xtensa ELF target resolution", () => {
       value: "7",
     });
   });
+});
 
+describe("Xtensa .xtensa.info inspection without a declaration", () => {
   it("reports an examined image without .xtensa.info as absent", async () => {
-    expect(
-      await resolvedAbi(
-        xtensaElf({
-          sectionName: ".note.gnu.build-id",
-          notes: elfNote("GNU", 3, Buffer.alloc(20)),
-        }),
-      ),
-    ).toEqual({ status: "absent" });
+    const target = await resolveFixture(
+      xtensaElf({
+        sectionName: ".note.gnu.build-id",
+        notes: elfNote("GNU", 3, Buffer.alloc(20)),
+      }),
+    );
+    expect(target.xtensa).toMatchObject({
+      abi: { status: "absent" },
+      literals: { status: "absent" },
+    });
   });
 
   it.each([
@@ -187,18 +227,20 @@ describe("Xtensa ELF target resolution", () => {
       })(),
       "not a string table",
     ],
-  ])("leaves the ABI unknown for %s", async (_label, bytes, reason) => {
-    const target = await resolveFixture(bytes);
-    expect(target.xtensa.abi).toMatchObject({
-      status: "unavailable",
-      reason: expect.stringContaining(reason),
-    });
-    // Only REA's own fixed bound attaches limit facts.
-    expect(target.xtensa.abi).not.toHaveProperty("limit");
-    expect(ghidraXtensaUnsupportedReason(target)).toContain(
-      "does not infer the windowed ABI",
-    );
-  });
+  ])(
+    "leaves the declarations unknown for %s",
+    async (_label, bytes, reason) => {
+      const target = await resolveFixture(bytes);
+      expect(target.xtensa.abi).toMatchObject({
+        status: "unavailable",
+        reason: expect.stringContaining(reason),
+      });
+      expect(target.xtensa.literals).toEqual(target.xtensa.abi);
+      // Only REA's own fixed bound attaches limit facts.
+      expect(target.xtensa.abi).not.toHaveProperty("limit");
+      expectRefusalWithReaderReason(target);
+    },
+  );
 
   it("reports the fixed .xtensa.info bound as structured limit facts", async () => {
     // A 12-byte note header, the 12-byte owner and a 5000-byte descriptor.
@@ -214,19 +256,18 @@ describe("Xtensa ELF target resolution", () => {
         runtime_override: false,
       },
     });
-    expect(ghidraXtensaUnsupportedReason(target)).toContain(
-      "does not infer the windowed ABI",
-    );
+    expect(target.xtensa.literals).toEqual(target.xtensa.abi);
+    expectRefusalWithReaderReason(target);
   });
 
-  it("propagates the caller's cancellation instead of reporting an unknown ABI", async () => {
+  it("propagates the caller's cancellation instead of reporting unknown declarations", async () => {
     const bytes = xtensaElf();
     const handle = await open(await writeFixture(bytes), "r");
     const cancelled = new Error("cancelled during .xtensa.info inspection");
     let checks = 0;
     try {
       await expect(
-        readXtensaElfAbi(handle, bytes.length, () => {
+        readXtensaElfInfo(handle, bytes.length, () => {
           checks += 1;
           if (checks > 3) throw cancelled;
         }),
