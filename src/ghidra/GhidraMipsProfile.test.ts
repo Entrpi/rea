@@ -721,7 +721,7 @@ describe("soft-float MIPS storage", () => {
       reason: "soft-float storage reported by a hard-float session",
       value: target(),
       storageReport: report,
-      operation: "health",
+      operation: "list_procedures",
     },
   ] as const)(
     "rejects $reason",
