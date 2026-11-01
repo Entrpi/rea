@@ -565,6 +565,11 @@ public final class ReaGhidraBridge extends HeadlessScript {
             .getString("REA DWARF calling convention", null);
         if (dwarfCallingConvention != null)
             result.add("dwarf_calling_convention", JsonParser.parseString(dwarfCallingConvention));
+        // Written by ReaGhidraPrepareElfLoad before auto-analysis; REA requires it
+        // exactly when the committed profile declares a RISC-V load preparation.
+        String loadPreparation = currentProgram.getOptions(ghidra.program.model.listing.Program.PROGRAM_INFO)
+            .getString("REA ELF load preparation", null);
+        if (loadPreparation != null) result.add("elf_load_preparation", JsonParser.parseString(loadPreparation));
         return result;
     }
 

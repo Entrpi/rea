@@ -14,7 +14,7 @@ const FLOAT_ABI_SOURCES = [
   "./riscv-isa-probe.S",
 ];
 
-/** One build per float ABI the lane verifies. */
+/** One build per float ABI the lane verifies, plus ESP-IDF's flash layout. */
 const BUILDS = {
   double: {
     sources: ["../c/riscv.c", "./riscv-probe.S"],
@@ -46,6 +46,25 @@ const BUILDS = {
     defines: ["REA_RISCV_ABI_UNMODELLED"],
     flags: 3,
   },
+  // ESP-IDF's ESP32-C6 base string and flash layout: the NOBITS
+  // .flash_rodata_dummy reserves .flash.text's addresses.
+  esp: {
+    sources: ["../c/riscv-esp-layout.c"],
+    march: () => "rv32imac_zicsr_zifencei",
+    mabi: () => "ilp32",
+    flags: 1,
+    entry: "rea_riscv_esp_entry",
+    linkerScript: "../esp/esp32c6-shared-window.ld",
+  },
+  // The same image with the reservation first in the section table.
+  "esp-reservation-first": {
+    sources: ["../c/riscv-esp-layout.c"],
+    march: () => "rv32imac_zicsr_zifencei",
+    mabi: () => "ilp32",
+    flags: 1,
+    entry: "rea_riscv_esp_entry",
+    linkerScript: "../esp/esp32c6-reservation-first.ld",
+  },
 };
 
 const readerOptions = {
@@ -69,15 +88,17 @@ const readRiscvElf = async (reader, path) => {
   };
   const sections = [
     ...stdout.matchAll(
-      /^\s*\[\s*\d+\]\s+(\S+)\s+(\S+)\s+([\da-f]+)\s+([\da-f]+)\s+([\da-f]+)\s+[\da-f]+\s+(\S*)\s+\d+\s+\d+\s+\d+\s*$/gmu,
+      /^\s*\[\s*(\d+)\]\s+(\S+)\s+(\S+)\s+([\da-f]+)\s+([\da-f]+)\s+([\da-f]+)\s+[\da-f]+\s+(\S*)\s+\d+\s+\d+\s+\d+\s*$/gmu,
     ),
-  ].map(([, name, type, address, offset, size, flags]) => ({
+  ].map(([, index, name, type, address, offset, size, flags]) => ({
+    index: Number(index),
     name,
     type,
     address: Number.parseInt(address, 16),
     offset: Number.parseInt(offset, 16),
     size: Number.parseInt(size, 16),
     allocated: flags.includes("A"),
+    executable: flags.includes("X"),
   }));
   assert.ok(sections.length > 0, "Missing readelf section table");
   // LLVM readelf prints each attribute as Tag, TagName and Value lines.
@@ -103,6 +124,49 @@ const readRiscvElf = async (reader, path) => {
   };
 };
 
+/** REA's section-overlap fact, recomputed from LLVM readelf's section table. */
+const sectionOverlapOf = (sections) => {
+  const hex = (value) => `0x${value.toString(16)}`;
+  const allocated = sections.filter(
+    (section) => section.allocated && section.size > 0,
+  );
+  const pairs = allocated
+    .filter((code) => code.executable && code.type === "PROGBITS")
+    .flatMap((code) =>
+      allocated
+        .filter(
+          (other) =>
+            other !== code &&
+            code.address < other.address + other.size &&
+            other.address < code.address + code.size,
+        )
+        .map((other) => [code, other]),
+    );
+  if (pairs.length === 0) return { status: "none" };
+  assert.equal(pairs.length, 1, "A fixture declares more than one overlap");
+  const [[code, reservation]] = pairs;
+  assert.equal(reservation.type, "NOBITS");
+  assert.equal(reservation.executable, false);
+  assert.equal(reservation.address, code.address);
+  assert.ok(reservation.size >= code.size);
+  return {
+    status: "code-reservation",
+    code: {
+      index: code.index,
+      name: code.name,
+      address: hex(code.address),
+      size: hex(code.size),
+      offset: hex(code.offset),
+    },
+    reservation: {
+      index: reservation.index,
+      name: reservation.name,
+      address: hex(reservation.address),
+      size: hex(reservation.size),
+    },
+  };
+};
+
 const sha256 = async (path) =>
   createHash("sha256")
     .update(await readFile(path))
@@ -110,7 +174,8 @@ const sha256 = async (path) =>
 
 /**
  * Build and independently inspect a source-owned ELF; never execute it. The
- * variant is a float ABI, or `unmodelled` for the refused single-float build.
+ * variant is a float ABI, `unmodelled` for the refused single-float build, or
+ * an ESP-IDF layout build (`esp`, `esp-reservation-first`).
  */
 export async function buildRiscvFixture(directory, bits, variant = "double") {
   assert.ok(bits === 32 || bits === 64);
@@ -151,9 +216,16 @@ export async function buildRiscvFixture(directory, bits, variant = "double") {
     "-fno-pic",
     "-O0",
     "-g",
-    "-Wl,-e,rea_riscv_entry",
+    `-Wl,-e,${build.entry ?? "rea_riscv_entry"}`,
     "-Wl,--build-id=none",
     ...(build.defines ?? []).map((name) => `-D${name}`),
+    ...(build.linkerScript === undefined
+      ? []
+      : [
+          `-Wl,-T,${fileURLToPath(new URL(build.linkerScript, import.meta.url))}`,
+          // ESP-IDF's reservation overlaps the code it reserves by design.
+          "-Wl,--no-check-sections",
+        ]),
     ...sources,
     ...compilations.map((compilation) => compilation.at(-1)),
     "-o",
@@ -185,6 +257,17 @@ export async function buildRiscvFixture(directory, bits, variant = "double") {
     assert.equal(symbols[name], undefined, `Ambiguous readelf symbol ${name}`);
     symbols[name] = `0x${BigInt(`0x${value}`).toString(16)}`;
   }
+  // Linker-script symbols, with the section index or ABS that readelf reports.
+  const linkerSymbols = {};
+  for (const [, value, section, name] of elf.stdout.matchAll(
+    /^\s*\d+:\s+([\da-f]+)\s+0\s+NOTYPE\s+GLOBAL\s+\S+\s+(ABS|\d+)\s+(_\w+)\s*$/gmu,
+  )) {
+    assert.equal(linkerSymbols[name], undefined, `Ambiguous symbol ${name}`);
+    linkerSymbols[name] = {
+      address: `0x${BigInt(`0x${value}`).toString(16)}`,
+      section: section === "ABS" ? section : Number(section),
+    };
+  }
   return {
     variant,
     path,
@@ -195,8 +278,10 @@ export async function buildRiscvFixture(directory, bits, variant = "double") {
       type: 2,
       flags: elf.flags,
       isa: elf.isa,
+      sectionOverlap: sectionOverlapOf(elf.sections),
     },
     symbols,
+    linkerSymbols,
     sections: elf.sections,
     toolchain: {
       compiler: { command: compiler, version: compilerVersion.stdout.trim() },

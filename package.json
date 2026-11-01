@@ -69,6 +69,7 @@
     "bridge/ghidra/ReaGhidraDwarfCallingConvention.java",
     "bridge/ghidra/ReaGhidraPrepareRaw.java",
     "bridge/ghidra/ReaGhidraPrepareDol.java",
+    "bridge/ghidra/ReaGhidraPrepareElfLoad.java",
     "bridge/android/ReaJadxBridge.java",
     "bridge/mitmproxy/capture.py",
     "scripts/rea.mjs",
