@@ -215,6 +215,8 @@ export const createGhidraProviderClient = (input: {
       }),
     );
   const softFloat = isGhidraMipsSoftFloatTarget(target);
+  // The soft-float report binds in both directions, so every MIPS session checks it.
+  const mips = target.kind === "executable" && target.architecture === "mips";
   if (
     softFloat !==
     (committedProfile.parameters.mips_soft_float_storage ===
@@ -229,6 +231,9 @@ export const createGhidraProviderClient = (input: {
       }),
     );
   const riscvCallingConvention = ghidraRiscvCallingConvention(target);
+  // The calling-convention report binds in both directions, so every RISC-V
+  // session checks it.
+  const riscv = target.kind === "executable" && target.architecture === "riscv";
   if (
     riscvCallingConvention !==
     committedProfile.parameters.riscv_calling_convention
@@ -945,9 +950,8 @@ export const createGhidraProviderClient = (input: {
         extensions.length > 0 ||
         seeds !== undefined ||
         disabledAnalyzers !== undefined ||
-        softFloat ||
-        riscvCallingConvention !== undefined ||
-        riscvLoadPreparation !== undefined ||
+        mips ||
+        riscv ||
         armDwarfCallingConvention !== undefined
       ) {
         const started = await startSession(operation, options);

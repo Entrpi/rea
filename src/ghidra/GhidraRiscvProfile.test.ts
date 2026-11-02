@@ -858,7 +858,7 @@ describe("RISC-V calling-convention handshake", () => {
       reason: "a report from a double-float session",
       value: target(),
       reported: report,
-      operation: "health",
+      operation: "list_procedures",
     },
     {
       reason: "an ilp32f refusal before any analysis call",
