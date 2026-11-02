@@ -231,8 +231,8 @@ export const createGhidraProviderClient = (input: {
       }),
     );
   const riscvCallingConvention = ghidraRiscvCallingConvention(target);
-  // The calling-convention report binds in both directions, so every RISC-V
-  // session checks it.
+  // The calling-convention and load-preparation reports bind in both
+  // directions, so every RISC-V session checks them.
   const riscv = target.kind === "executable" && target.architecture === "riscv";
   if (
     riscvCallingConvention !==

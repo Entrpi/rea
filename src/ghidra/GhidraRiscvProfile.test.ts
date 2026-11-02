@@ -1256,6 +1256,19 @@ describe("RISC-V load preparation handshake", () => {
     },
   );
 
+  it("closes a session without a preparation that reports one, before any analysis call", async () => {
+    const { counts, client } = await session(
+      target(),
+      undefined,
+      target(),
+      moved,
+    );
+    const failed = await client.execute("list_procedures", {});
+    expect(failed.ok).toBe(false);
+    if (!failed.ok) expect(failed.error._tag).toBe("ProviderAdapterError");
+    expect(counts).toEqual({ starts: 1, calls: 0, closes: 1 });
+  });
+
   it("refuses a profile whose preparation disagrees with the target", async () => {
     for (const [value, profileFor] of [
       [esp(), esp({ sectionOverlap: { status: "none" } })],
