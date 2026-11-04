@@ -271,20 +271,33 @@ the class the psABI gives it. The script refuses the policy when any signature
 passes a type the prototype misplaces:
 
 - a structure the new rule would split that the psABI passes in integer
-  registers, such as the three above;
+  registers, such as the three above, a C++ structure with a nonzero array of
+  empty classes, which GCC and Clang do not ignore when they flatten it, or a
+  structure with a flexible array member. Ghidra imports a trailing `[0]` array
+  the same way, so a structure with one is refused too, although Clang passes
+  it in a float register;
 - a type the psABI places in float registers where the prototype cannot:
   `_Float16`, a packed structure whose `float` is not 4-byte aligned, or an
   over-aligned structure of more than 8 bytes.
 
-The check treats typed functions and function-pointer types alike; Ghidra's
-decompiler computes the storage at an indirect call from the prototype. A
-refusal names up to eight signatures, and REA then refuses the session.
+A bit-field counts by its width, not its declared type, so a `float` beside
+`unsigned long long b : 1` takes a float and an integer register. The check
+treats typed functions and function-pointer types alike; Ghidra's decompiler
+computes the storage at an indirect call from the prototype. A refusal counts
+every misplaced signature and names up to eight, and REA then refuses the
+session.
 
 Not modelled:
 
 - Ghidra 12.1.4 imports `float _Complex` from DWARF as an untyped 8-byte
   `qword`, so the policy sees an integer and cannot recover the float-register
   pair. The stock double-float lanes share this.
+- A C++ class with a non-trivial copy constructor or destructor is passed
+  through a hidden pointer, but Ghidra 12.1.4 keeps only its fields, so
+  `struct N { float f; N(const N&); ~N(); }` shows as a `float` in `fa0`.
+  Ghidra's DWARF importer does not read `DW_AT_calling_convention`, and GCC 14.2
+  does not write it, so the policy cannot detect these signatures and does not
+  refuse them. A limitation states this.
 - With D hardware (`rv32imafd` with the ilp32f ABI) the psABI preserves only the
   low 32 bits of `fs0`–`fs11`; Ghidra's model preserves the whole 64-bit
   registers.
@@ -460,8 +473,11 @@ assembly sources:
   functions.
 - The single-float build with `REA_RISCV_ABI_UNMODELLED`, which adds a
   function that passes and returns a three-field structure, a `_Float16`
-  function, and a function-pointer type that passes the three-field
-  structure.
+  function, a function-pointer type that passes the three-field structure,
+  a function that passes a structure with a flexible array member, and, from
+  `riscv-float-abi-empty.cpp`, a function that passes a structure with an array
+  of one empty class. It also adds a function that passes a
+  `float` beside a one-bit field of a 64-bit type, which the policy admits.
 - An RV32 soft-float build of `riscv-esp-layout.c` with ESP32-C6's
   `-march=rv32imac_zicsr_zifencei -mabi=ilp32`, linked with
   `tests/conformance/esp/esp32c6-shared-window.ld`. As ESP-IDF does, it places
@@ -503,7 +519,8 @@ For the soft- and single-float builds the lane also checks:
 - Retained Evidence states the prototype outcome; the stripped builds have no
   function definitions.
 - The unmodelled build is admitted by its headers, then refused over MCP and
-  the CLI with the bridge's reason, which names its three signatures.
+  the CLI with the bridge's reason, which names its five refused signatures
+  and not the bit-field function.
 - An LLVM objdump reading finds the call from `rea_riscv_stop_caller` to
   `rea_riscv_stop`, which DWARF declares no-return, as one `auipc`+`jalr` pair,
   as in ESP-IDF's calls between flash and IRAM. In the typed soft-float build,
