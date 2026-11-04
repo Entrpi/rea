@@ -118,8 +118,8 @@ describe("raw-binary snapshots saved before base_address", () => {
     const { target } = f;
     const profile = await ghidraProfile(target);
     expect(snapshotMatchesTarget(snapshot.target, target)).toBe(true);
-    // Upstream's instruction-status (#7823), load-image observation (#8531)
-    // and procedure search (#8520) revisions keep every Ghidra snapshot saved
+    // Upstream's instruction-status (#7823), load-image observation (#8531),
+    // procedure search (#8520) and reference revisions keep every Ghidra snapshot saved
     // before them from replaying, and on this integration branch so does
     // Change 2's no-return revision. Apart from those parameters, the profile
     // is the one this snapshot recorded.
@@ -131,11 +131,15 @@ describe("raw-binary snapshots saved before base_address", () => {
       load_image_observations: observations,
       procedure_search: search,
       no_return_repair: repair,
+      function_references: functionReferences,
+      instruction_references: instructionReferences,
       ...parameters
     } = profile.parameters;
     const {
       load_image_observations: recordedObservations,
       no_return_repair: recordedRepair,
+      function_references: recordedFunctionReferences,
+      instruction_references: recordedInstructionReferences,
       ...recorded
     } = snapshot.binding.analysis_profile.parameters;
     expect(status).toBe("unlisted-address-without-decode-v1");
@@ -147,6 +151,14 @@ describe("raw-binary snapshots saved before base_address", () => {
     expect([recordedRepair, repair]).toEqual([
       "returning-imports-decoded-return-v2",
       "returning-imports-decoded-return-v3",
+    ]);
+    expect([recordedFunctionReferences, functionReferences]).toEqual([
+      "complete-body-and-entry-reference-manager-v2",
+      "complete-body-and-entry-reference-manager-v3",
+    ]);
+    expect([recordedInstructionReferences, instructionReferences]).toEqual([
+      "exact-address-incoming-without-synthetic-entry-v2",
+      "exact-address-incoming-without-synthetic-entry-v3",
     ]);
     expect(parameters).toEqual(recorded);
     // The saved image still parses, and its facts equal what this version

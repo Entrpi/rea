@@ -971,8 +971,8 @@ const canonical: GhidraRiscvLoadPreparationReport = {
 // here, such as Change 2's no_return_repair bump, move them from main's; the
 // overlay leaves them alone.
 const UNCHANGED_DIGESTS = {
-  ilp32: "e3efcae0c0f224174284328c4acf6036b00c75f8f7210a1075a7c6fe32f684bc",
-  double64: "4645517539759e21d5e8b8b269a0bf04665a6d96bedb0ea00b9682dab1890573",
+  ilp32: "9611c5ec60e288082755a8ad781ec02a8978b194a494a0c2c1564ff5a6ed3422",
+  double64: "b605f2576f172a3bb805c7a555a032e42d9e4ddcff484241bee93694089a22cc",
 } as const;
 
 describe("RISC-V load preparation admission", () => {
