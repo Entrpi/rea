@@ -254,7 +254,7 @@ it("promotes only complete production cleanup-only Evidence after CLI cleanup re
     const result = await runObjdump(service, path);
 
     expect(result).toMatchObject({
-      provider: { id: "gnu.objdump" },
+      provider: { id: "objdump.command" },
       normalized_result: { completion_status: "complete" },
     });
     expect(producedCleanupFailure?.cleanupOnly).toBe(true);
@@ -559,7 +559,16 @@ it.each(["incomplete", "interrupt", "control"] as const)(
         rawResult: { output: "registers" },
       },
     );
-    const sessions = new Map([["fixture-session", { id: "fixture-session" }]]);
+    const sessions = new Map([
+      [
+        "fixture-session",
+        {
+          id: "fixture-session",
+          launched: { process: { pid: 4242 } },
+          supervisor: { ref: vi.fn(), unref: vi.fn() },
+        },
+      ],
+    ]);
     vi.spyOn(RizinDebugSessionManager.prototype, "start").mockResolvedValue(
       ok({ session_id: "fixture-session", backend: null }),
     );
@@ -649,6 +658,7 @@ it.each(["incomplete", "interrupt", "control"] as const)(
           details: {
             cleanup: "incomplete",
             resources: ["fixture-session"],
+            diagnostics: { retained_debugger_pids: [4242] },
             partial_observation: {
               operation: "rizin_debug_command",
               parameters: { session_id: "fixture-session" },

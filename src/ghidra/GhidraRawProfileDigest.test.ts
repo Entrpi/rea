@@ -25,9 +25,9 @@ import { GhidraProvider } from "./GhidraProvider.js";
 // they also include Change 2's no_return_repair revision, so they differ from
 // main's.
 const RAW_DIGESTS = {
-  "6502": "e9c0e7164d010bd785133569e4698ad611cae1596a3181cc5c28bca6a9c9a720",
+  "6502": "4cdde67a88973466321e24d144620b9363bc6f3eed2526ccfdd52e81d204b251",
   "x86-disabled-analyzer":
-    "fbc90648778a6fa435735b426f05d8e2964519caec680b6420525442eeb1c69f",
+    "08bcaf0939ecefeba82c4b0b9cda6e7bdb975d3b8ad9b9e4aa9fdbd052958fd5",
 } as const;
 
 // Computed by upstream main at d3ab0faf5, which has neither a separate base nor
