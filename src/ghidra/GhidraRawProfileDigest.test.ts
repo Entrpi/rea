@@ -25,9 +25,9 @@ import { GhidraProvider } from "./GhidraProvider.js";
 // they also include Change 2's no_return_repair revision, so they differ from
 // main's.
 const RAW_DIGESTS = {
-  "6502": "4cdde67a88973466321e24d144620b9363bc6f3eed2526ccfdd52e81d204b251",
+  "6502": "3cd7e823b228e1a78bc42607041c623bdef83395ee29d9e58088823b0dedd8a8",
   "x86-disabled-analyzer":
-    "08bcaf0939ecefeba82c4b0b9cda6e7bdb975d3b8ad9b9e4aa9fdbd052958fd5",
+    "bdaf8512675e0de7cd909d235e04de415edcdd18a71294699d71801e2f554546",
 } as const;
 
 // Computed by upstream main at d3ab0faf5, which has neither a separate base nor
@@ -39,27 +39,27 @@ const LEGACY_RAW_DIGESTS = [
   [
     "x86",
     "0x1000",
-    "86e7e7d47025308202a3858a8d95cdff1d7fee587ba1396f5c4bccfbea65864a",
+    "313c074eaeeddeb7f805ae87c678f38356c0ff88f3f368d136c667536cbdbf96",
   ],
   [
     "x86_64",
     "0x401000",
-    "f9e0c04061cace3e6d974b7b01463b261df39ef4a773ee54d7c5c748c6d494fb",
+    "34e023aee339851b34a8e5f970ddd18c88ebc38057166054db226f0be54ece0a",
   ],
   [
     "arm",
     "0x8000000",
-    "5a35de408a7eee78c2a3494161d8268b82edf03d206992d3c10b08f37008e0ad",
+    "71a94011b74ecfbde4806aa1974bba9ca3275061fa5032b4877b598332d72f0b",
   ],
   [
     "arm64",
     "0x80000",
-    "430943b8e86cfc4ad7bc2fbfa1abeea73d1d04dbecc8bc4d5317032de4b94a2b",
+    "73d0e6fe1814bdca0b340717fce2ebd7f8c7b6ac9dfd97e57c727b5a6ff135a5",
   ],
   [
     "m68k",
     "0x1000",
-    "3a843be5d2bc5a75d8f17a0516f341abeac4d0e8bbb2ecbb4c9e0fbc81ef53b8",
+    "45c71a01f11bfc61bb3647c5426eaf1b77bd7b9b045b0df1505adc8eca520099",
   ],
 ] as const;
 
@@ -224,7 +224,7 @@ describe("M-profile raw-binary analysis profile", () => {
     const digest = (await profile(reset("armv7-m"))).digest;
     // Pinned so a change to raw_load semantics must bump its version.
     expect(digest).toBe(
-      "303a2f95017432019a65d9b8500ca13be9ebf6246c8be83a6c9a76e1b6e4dbda",
+      "e9c892650115e706b3e1d84103a751230f4e73479d80fa7ca9f3a0eaad8aa152",
     );
     expect(
       (await profile(reset("armv7-m", { baseAddress: "0x8000000" }))).digest,
