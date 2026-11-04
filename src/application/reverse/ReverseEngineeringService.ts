@@ -30,11 +30,11 @@ import {
   DEFAULT_REVERSE_COMMAND_TIMEOUT_MS,
   MAX_REVERSE_COMMAND_TIMEOUT_MS,
   objdumpInputSchema,
+  type ProviderToolIdentification,
   rizinInputSchema,
   type RizinInput,
 } from "../../domain/reverseEngineering.js";
 import type {
-  ProviderToolIdentification,
   ReverseEngineeringCommandPort,
   ReverseEngineeringProviderCommand,
 } from "./ReverseEngineeringCommandPort.js";
@@ -52,9 +52,16 @@ import type { ProviderProcessSupervisor } from "../../process/ProviderProcess.js
 import { boundedUtf8Text } from "../../process/boundedUtf8Text.js";
 import {
   lookupExecutable,
+  searchesDiffer,
   searchMovesPast,
 } from "../../process/ExecutableLookup.js";
-import { shareFileCall } from "../../process/SharedFileCall.js";
+import {
+  FileWork,
+  fileWorkDeadline,
+  type FileWorkOutcome,
+  FileWorkSaturatedError,
+  HOST_FILE_WORK,
+} from "../../process/FileWork.js";
 import { absoluteCallerPath } from "../../filesystem/callerPath.js";
 import { parseAnalysisInput } from "../AnalysisInput.js";
 
@@ -73,6 +80,8 @@ export interface ReverseEngineeringServiceOptions {
   readonly processes?: ReverseEngineeringProcesses;
   readonly digest?: typeof digestFile;
   readonly stat?: (path: string) => Promise<Stats>;
+  /** Defaults to the process's owner, which budgets libuv's pool. */
+  readonly fileWork?: FileWork;
 }
 
 /**
@@ -157,6 +166,10 @@ export class ReverseEngineeringService {
     AbortController,
     Promise<Result<Evidence, AnalysisError>>
   >();
+  /** Owns the file work that calls stop waiting for. */
+  readonly #fileWork: FileWork;
+  /** Calls that returned while file work they left behind was still running. */
+  readonly #awaitingFileWork = new Set<AbortController>();
   #closing = false;
   #closePromise: Promise<void> | undefined;
 
@@ -176,6 +189,7 @@ export class ReverseEngineeringService {
         : processes.run;
     this.#digest = options.digest ?? digestFile;
     this.#stat = options.stat ?? statPath;
+    this.#fileWork = options.fileWork ?? HOST_FILE_WORK;
   }
 
   /** Ask retained process owners to settle cleanup before admitting more work. */
@@ -221,7 +235,12 @@ export class ReverseEngineeringService {
     return failure === undefined ? ok(null) : err(failure);
   }
 
-  /** Retry cleanup for provider process groups retained after an incomplete stop. */
+  /**
+   * Retry cleanup for provider process groups retained after an incomplete
+   * stop. File work that calls left behind is not joined: it cannot be
+   * cancelled, a mount that never answers would hold close forever, and the
+   * runtime keeps the process alive until that work returns.
+   */
   close(): Promise<void> {
     this.#closing = true;
     this.#closePromise ??= this.#closeActiveOperationsAndCleanup().catch(
@@ -351,9 +370,10 @@ export class ReverseEngineeringService {
               max_concurrent_operations:
                 MAX_CONCURRENT_REVERSE_ENGINEERING_OPERATIONS,
               active_operations: this.#activeOperations.size,
+              operations_awaiting_file_work: this.#awaitingFileWork.size,
             },
             {
-              remediationAction: `Wait for an active objdump or rizin command to finish, then retry. This capacity of ${String(MAX_CONCURRENT_REVERSE_ENGINEERING_OPERATIONS)} operations has no runtime override, and command_timeout_ms does not raise it.`,
+              remediationAction: `Wait for an active objdump or rizin command to finish, then retry. A call that returned while a file check or hash it gave up on was still running, as on an unresponsive mount, keeps its place until that work returns. This capacity of ${String(MAX_CONCURRENT_REVERSE_ENGINEERING_OPERATIONS)} operations has no runtime override, and command_timeout_ms does not raise it.`,
             },
           ),
         ),
@@ -368,6 +388,9 @@ export class ReverseEngineeringService {
       signal === undefined || signal instanceof AbortSignal
         ? controller.signal
         : signal;
+    // A stalled mount can hold file work that the call gave up on past its
+    // result, so the call keeps its place until that work returns.
+    const fileWork = this.#fileWork.scope();
     const running = this.#observeProvider(
       operation,
       profile,
@@ -375,10 +398,20 @@ export class ReverseEngineeringService {
       parameters,
       operationSignal,
       timeoutMs,
+      fileWork,
     );
     const tracked = running.finally(() => {
       signal?.removeEventListener("abort", relayAbort);
-      this.#activeOperations.delete(controller);
+      const left = fileWork.left;
+      if (left === undefined) {
+        this.#activeOperations.delete(controller);
+        return;
+      }
+      this.#awaitingFileWork.add(controller);
+      void left.then(() => {
+        this.#awaitingFileWork.delete(controller);
+        this.#activeOperations.delete(controller);
+      });
     });
     this.#activeOperations.set(controller, tracked);
     return tracked;
@@ -391,8 +424,11 @@ export class ReverseEngineeringService {
     parameters: Readonly<Record<string, JsonValue>>,
     signal: AbortSignal | undefined,
     timeoutMs: number,
+    fileWork: FileWork,
   ): Promise<Result<Evidence, AnalysisError>> {
     const { executable: command, arguments: args } = profile;
+    const hash = (file: string): Promise<string> =>
+      this.#digest(file, { signal, timeoutMs, stat: this.#stat, fileWork });
     if (signal?.aborted)
       return err(
         new AnalysisCancelledError(operation, { cause: signal.reason }),
@@ -403,19 +439,20 @@ export class ReverseEngineeringService {
       path === undefined ? undefined : absoluteCallerPath(path);
     let digest: string | undefined;
     try {
-      if (absolutePath !== undefined)
-        digest = await this.#digest(
-          absolutePath,
-          signal,
-          this.#stat,
-          timeoutMs,
-        );
+      if (absolutePath !== undefined) digest = await hash(absolutePath);
     } catch (cause) {
       const code = commandFailureCode(cause);
       if (preflightCancelled(signal, cause, code))
         return err(
           new AnalysisCancelledError(operation, {
             cause: callerCancellationCause(signal, cause),
+          }),
+        );
+      if (cause instanceof FileWorkSaturatedError)
+        return err(
+          fileWorkSaturated(operation, cause, {
+            phase: "target_preflight",
+            artifact_path: cause.path,
           }),
         );
       if (code === "EACCES" || code === "EPERM") {
@@ -486,6 +523,8 @@ export class ReverseEngineeringService {
       environment,
       signal,
       timeoutMs,
+      fileWork,
+      hash,
     );
     // An error before Evidence exists keeps the executable the caller
     // selected and the target it already resolved and hashed.
@@ -723,20 +762,18 @@ export class ReverseEngineeringService {
     if (failure !== undefined && cleanupOwner !== undefined)
       failure = this.#registerCleanupFailure(failure, cleanupOwner);
     let digestAfter: string | null = null;
+    // A refusal says nothing about the artifact, so it stays apart from a failed read.
+    let digestAfterRefused: FileWorkSaturatedError | undefined;
     if (absolutePath === undefined) {
       digestAfter = null;
     } else if (cleanupIncomplete) {
       if (!cleanupOnlyFailure) completionStatus = "unknown";
     } else {
       try {
-        digestAfter = await this.#digest(
-          absolutePath,
-          signal,
-          this.#stat,
-          timeoutMs,
-        );
-      } catch {
+        digestAfter = await hash(absolutePath);
+      } catch (cause) {
         // Preserve the provider's collected observations if the artifact vanished or became unreadable.
+        if (cause instanceof FileWorkSaturatedError) digestAfterRefused = cause;
       }
     }
     if (signal?.aborted && failure === undefined) {
@@ -840,7 +877,9 @@ export class ReverseEngineeringService {
               ? "The post-run artifact digest was not captured because owned provider cleanup was incomplete at observation time; artifact changes during the command remain unquantified."
               : signal?.aborted
                 ? "The post-run artifact digest is unknown because cancellation interrupted the digest."
-                : "The post-run artifact digest is unknown because the artifact could not be read after the provider call.",
+                : digestAfterRefused !== undefined
+                  ? `The post-run artifact digest is unknown because ${String(digestAfterRefused.held)} file-system steps that an unresponsive mount has not returned hold REA's budget of ${String(digestAfterRefused.budget)}; the artifact was not read, so artifact changes during the command remain unquantified. Retry once the mount answers.`
+                  : POST_RUN_ARTIFACT_UNREADABLE,
           ]
         : []),
     ];
@@ -863,6 +902,14 @@ export class ReverseEngineeringService {
             : parameters),
           provider_executable: command,
           ...identification.parameters,
+          ...(digestAfterRefused === undefined
+            ? {}
+            : {
+                artifact_digest_after_refused: {
+                  file_steps_held: digestAfterRefused.held,
+                  max_held_file_steps: digestAfterRefused.budget,
+                },
+              }),
           command_arguments: [...args],
         },
         rawResult: result,
@@ -896,6 +943,8 @@ export class ReverseEngineeringService {
     environment: NodeJS.ProcessEnv,
     signal: AbortSignal | undefined,
     timeoutMs: number,
+    fileWork: FileWork,
+    hash: (file: string) => Promise<string>,
   ): Promise<Result<ProviderIdentification, AnalysisError>> {
     const probe = profile.versionProbe;
     // Without an identifying banner, a probed provider's name is assumed.
@@ -927,7 +976,7 @@ export class ReverseEngineeringService {
       profile.executable,
       () => process.cwd(),
       environment.PATH,
-      { signal, timeoutMs },
+      { signal, timeoutMs, fileWork },
     );
     if (lookup.status === "interrupted") {
       // The path being checked names the PATH location that stalled.
@@ -947,6 +996,13 @@ export class ReverseEngineeringService {
             }),
       );
     }
+    if (lookup.status === "saturated")
+      return err(
+        fileWorkSaturated(operation, lookup, {
+          phase: "executable_lookup",
+          executable_lookup_candidate: lookup.candidate,
+        }),
+      );
     // The command runs the path the host refused to inspect, so a launch
     // failure keeps where access must be granted.
     if (lookup.status === "denied")
@@ -957,18 +1013,53 @@ export class ReverseEngineeringService {
           { provider_executable_path: lookup.path },
         ),
       );
-    // The command launch reports an executable that cannot be selected.
-    if (lookup.status !== "found")
+    // The command launch reports an executable that cannot be selected. It
+    // runs as the caller spelled it, which can launch where the absolute
+    // spelling of an explicit selection is too long to inspect, and Evidence
+    // or a launch failure keeps where the lookup looked and where it stopped.
+    if (lookup.status !== "found") {
+      const missing = lookup.status === "missing" ? lookup : undefined;
+      const stopped = missing?.stoppedAt;
+      const cwdCode =
+        lookup.status === "no-working-directory"
+          ? commandFailureCode(lookup.cause)
+          : undefined;
+      const observed = {
+        ...(lookup.status === "no-working-directory"
+          ? {
+              executable_lookup_outcome: lookup.status,
+              ...(cwdCode === undefined
+                ? {}
+                : { executable_lookup_code: String(cwdCode) }),
+            }
+          : {}),
+        ...(missing?.selectedPath === undefined
+          ? {}
+          : { provider_executable_path: missing.selectedPath }),
+        ...(stopped === undefined
+          ? {}
+          : {
+              executable_lookup_candidate: stopped.candidate,
+              ...(stopped.code === undefined
+                ? {}
+                : { executable_lookup_code: stopped.code }),
+            }),
+      };
       return ok(
         unidentified(
           lookup.status === "no-working-directory"
             ? "the executable could not be located: its lookup needed the working directory, which could not be read"
-            : "the executable could not be located",
+            : stopped === undefined
+              ? "the executable could not be located"
+              : `the executable lookup stopped at ${stopped.candidate}${stopped.code === undefined ? "" : ` (${stopped.code})`}, where at least one native search stops, so the host's own search decides what runs`,
+          profile.executable,
+          Object.keys(observed).length === 0 ? undefined : observed,
         ),
       );
+    }
     let sha256: string;
     try {
-      sha256 = await this.#digest(lookup.path, signal, this.#stat, timeoutMs);
+      sha256 = await hash(lookup.path);
     } catch (cause) {
       const code = commandFailureCode(cause);
       // A hash that ends the call keeps the path the lookup found.
@@ -983,6 +1074,8 @@ export class ReverseEngineeringService {
             diagnostics,
           }),
         );
+      if (cause instanceof FileWorkSaturatedError)
+        return err(fileWorkSaturated(operation, cause, diagnostics));
       // Hashing past the deadline ends the call, as the lookup's deadline does.
       if (code === "ETIMEDOUT")
         return err(
@@ -1018,12 +1111,27 @@ export class ReverseEngineeringService {
     if (!outcome.ok) return err(outcome.error.retainDiagnostics(parameters));
     const completed = outcome.value;
     // A spawned PATH search moves past a file that fails to start this way,
-    // so the command runs as selected and the host decides what runs.
+    // so the command runs as selected and the host decides what runs, keeping
+    // that file as a candidate rather than as what ran. An explicitly selected
+    // path has no later candidate, so the command runs that path and keeps what
+    // the lookup and hash observed.
     if (completed.status === "not-started")
       return ok(
-        unidentified(
-          `${lookup.path}, which the lookup found, did not start (${completed.code}), as when a script's interpreter is missing or not executable; the command runs \`${profile.executable}\` as selected, so the host decides what runs`,
-        ),
+        lookup.selectedPath === undefined
+          ? unidentified(
+              `${lookup.path}, which the lookup found, did not start (${completed.code}), as when a script's interpreter is missing or not executable; the command runs \`${profile.executable}\` as selected, so the host decides what runs`,
+              profile.executable,
+              {
+                executable_lookup_candidate: lookup.path,
+                executable_lookup_code: completed.code,
+                executable_lookup_candidate_sha256: sha256,
+              },
+            )
+          : unidentified(
+              `${lookup.path} did not start (${completed.code}), as when a script's interpreter is missing or not executable`,
+              lookup.path,
+              parameters,
+            ),
       );
     if (completed.status !== "read" && completed.status !== "unrecognized")
       return ok(
@@ -1162,8 +1270,13 @@ export class ReverseEngineeringService {
           ),
         );
       // The file did not start, with an error a native PATH search moves
-      // past, as when a script's interpreter is missing or not executable.
-      if (typeof code === "string" && searchMovesPast(code))
+      // past, as when a script's interpreter is missing or not executable,
+      // or one at which native searches differ. ETIMEDOUT stays the probe's
+      // deadline, which both runners report with that code.
+      if (
+        typeof code === "string" &&
+        (searchMovesPast(code) || searchesDiffer(code))
+      )
         return ok({ status: "not-started", code });
       // Both runners report the call's deadline as ETIMEDOUT, even when the
       // stop signal also ended the process.
@@ -1480,114 +1593,122 @@ const reverseCommandTimeoutGuidance = (
   } The new value applies on the next call; no restart is required. The ${String(MAX_COMBINED_OUTPUT_BYTES)} byte (16 MiB) combined output cap has no runtime override. Allow execution, cleanup and delivery headroom in the outer MCP client deadline. Confirm outstanding work and cleanup before retrying.`,
 });
 
-/**
- * Opens that have not returned, by stream factory and path. Destroying a
- * stream cannot cancel its open, which a stalled mount can hold, with a libuv
- * worker, indefinitely; a later hash of the same path waits for that open
- * instead of starting another, so stalled opens stay bounded by the paths.
- */
-const unreturnedOpens = new WeakMap<object, Map<string, Promise<void>>>();
+/** The limitation for a post-run hash that read the artifact and failed. */
+export const POST_RUN_ARTIFACT_UNREADABLE =
+  "The post-run artifact digest is unknown because the artifact could not be read after the provider call.";
 
+/** Optional bounds and file access for one hash. */
+export interface FileDigestBounds {
+  readonly signal?: AbortSignal | undefined;
+  /** Milliseconds for the whole hash. */
+  readonly timeoutMs?: number | undefined;
+  readonly stat?: (path: string) => Promise<Stats>;
+  readonly open?: (path: string) => ReturnType<typeof createReadStream>;
+  /** Owns the file work the hash stops waiting for; by default it joins no budget. */
+  readonly fileWork?: FileWork;
+}
+
+/**
+ * Hash a regular file within one deadline. The hash completes once its stream
+ * has closed, so a close that a stalled mount holds reaches the deadline as a
+ * stalled open or read does. Destroying a stream cancels none of these, so a
+ * hash that stops waiting destroys its stream and leaves the stream's close
+ * with `bounds.fileWork`.
+ */
 export const digestFile = async (
   path: string,
-  signal?: AbortSignal,
-  stat: (path: string) => Promise<Stats> = statPath,
-  timeoutMs: number = DEFAULT_REVERSE_COMMAND_TIMEOUT_MS,
-  open: (
-    path: string,
-  ) => ReturnType<typeof createReadStream> = createReadStream,
+  bounds: FileDigestBounds = {},
 ): Promise<string> => {
-  const startedAt = performance.now();
-  const remaining = (): number =>
-    Math.max(0, Math.ceil(timeoutMs - (performance.now() - startedAt)));
-  const info = await statWithDeadline(path, signal, stat, timeoutMs);
-  if (!info.isFile())
-    throw Object.assign(new Error("Artifact digest requires a regular file"), {
-      code: "EINVAL",
-    });
-  const opens = unreturnedOpens.get(open) ?? new Map<string, Promise<void>>();
-  unreturnedOpens.set(open, opens);
-  for (
-    let earlier = opens.get(path);
-    earlier !== undefined;
-    earlier = opens.get(path)
-  ) {
-    const pending = earlier;
-    await settleWithDeadline(
-      () => pending,
+  const {
+    signal,
+    timeoutMs = DEFAULT_REVERSE_COMMAND_TIMEOUT_MS,
+    stat = statPath,
+    open = createReadStream,
+    fileWork = new FileWork(Number.POSITIVE_INFINITY),
+  } = bounds;
+  const deadline = fileWorkDeadline(signal, timeoutMs);
+  try {
+    const info = digestStep(
+      await fileWork.run(path, deadline, () => stat(path)),
+      path,
       signal,
-      remaining(),
-      "Artifact digest timed out",
     );
+    if (!info.isFile())
+      throw Object.assign(
+        new Error("Artifact digest requires a regular file"),
+        { code: "EINVAL" },
+      );
+    let stream: ReturnType<typeof open> | undefined;
+    const read = await fileWork.run(path, deadline, () =>
+      readDigest((stream = open(path))),
+    );
+    if (read.status === "interrupted") stream?.destroy();
+    return digestStep(read, path, signal);
+  } finally {
+    deadline.release();
   }
-  const remainingMs = remaining();
-  if (remainingMs === 0)
-    throw Object.assign(new Error("Artifact digest timed out"), {
-      code: "ETIMEDOUT",
-    });
-  return new Promise<string>((resolveDigest, rejectDigest) => {
+};
+
+/** The SHA-256 of a stream, once it has closed after its end. */
+const readDigest = (
+  stream: ReturnType<typeof createReadStream>,
+): Promise<string> =>
+  new Promise<string>((resolveDigest, rejectDigest) => {
     const hash = createHash("sha256");
-    const stream = open(path);
-    const returned = new Promise<void>((resolve) => {
-      stream.once("open", () => resolve());
-      stream.once("error", () => resolve());
-      stream.once("close", () => resolve());
-    });
-    opens.set(path, returned);
-    void returned.then(() => {
-      if (opens.get(path) === returned) opens.delete(path);
-    });
-    // A stream destroyed while its open is pending reports the error only
-    // after that open returns, which a stalled mount can delay indefinitely.
-    // The deadline and cancellation therefore end the wait themselves; the
-    // stream closes its file once the open returns.
-    const stop = (cause: Error): void => {
-      cleanup();
-      stream.destroy(cause);
-      rejectDigest(cause);
-    };
-    const timer = setTimeout(
-      () =>
-        stop(
-          Object.assign(new Error("Artifact digest timed out"), {
-            code: "ETIMEDOUT",
-          }),
-        ),
-      remainingMs,
-    );
-    const abort = (): void => {
-      stop(
-        new AnalysisCancelledError("artifact_digest", {
-          cause: signal?.reason,
-        }),
-      );
-    };
-    const cleanup = (): void => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-    };
-    if (signal?.aborted) {
-      cleanup();
-      stream.destroy();
-      rejectDigest(
-        new AnalysisCancelledError("artifact_digest", {
-          cause: signal.reason,
-        }),
-      );
-      return;
-    }
-    signal?.addEventListener("abort", abort, { once: true });
+    let digest: string | undefined;
     stream.on("data", (chunk: Buffer | string) => hash.update(chunk));
-    stream.once("error", (cause: Error) => {
-      cleanup();
-      rejectDigest(cause);
-    });
     stream.once("end", () => {
-      cleanup();
-      resolveDigest(hash.digest("hex"));
+      digest = hash.digest("hex");
+    });
+    stream.once("error", rejectDigest);
+    stream.once("close", () => {
+      if (digest !== undefined) resolveDigest(digest);
+      else
+        rejectDigest(
+          Object.assign(new Error("Artifact stream closed before its end"), {
+            code: "ERR_STREAM_PREMATURE_CLOSE",
+          }),
+        );
     });
   });
+
+/** The value of one hash step, or the error its failure or interruption reports. */
+const digestStep = <Value>(
+  outcome: FileWorkOutcome<Value>,
+  path: string,
+  signal: AbortSignal | undefined,
+): Value => {
+  if (outcome.status === "fulfilled") return outcome.value;
+  if (outcome.status === "rejected") throw outcome.cause;
+  if (outcome.status === "saturated")
+    throw new FileWorkSaturatedError(path, outcome.held, outcome.budget);
+  if (outcome.by === "cancellation")
+    throw new AnalysisCancelledError("artifact_digest", {
+      cause: signal?.reason,
+    });
+  throw Object.assign(new Error("Artifact digest timed out"), {
+    code: "ETIMEDOUT",
+  });
 };
+
+/** A call refused because stalled file steps hold the process's budget. */
+const fileWorkSaturated = (
+  operation: ReverseEngineeringOperation,
+  { held, budget }: { readonly held: number; readonly budget: number },
+  diagnostics: Readonly<Record<string, JsonValue>>,
+): AnalysisResourceConstraintError =>
+  new AnalysisResourceConstraintError(
+    operation,
+    "capacity",
+    `${String(held)} file-system steps that an unresponsive mount has not returned hold REA's budget of ${String(budget)}, so this call started no more.`,
+    { file_steps_held: held, max_held_file_steps: budget },
+    {
+      diagnostics,
+      remediationAction:
+        "Retry once the unresponsive mount answers. REA cannot cancel these steps, and the budget keeps file access working for its other tools.",
+      retryable: true,
+    },
+  );
 
 const PHYSICAL_FAILURE_CODES = new Set([
   "EACCES",
@@ -1638,78 +1759,3 @@ const commandFailureCode = (cause: unknown): string | number | undefined => {
     ? code
     : undefined;
 };
-
-/**
- * Wait for one step of a hash within its deadline and cancellation. A step that
- * a stalled mount holds keeps running after the wait ends.
- */
-const settleWithDeadline = <Value>(
-  start: () => Promise<Value>,
-  signal: AbortSignal | undefined,
-  timeoutMs: number,
-  timeoutMessage: string,
-): Promise<Value> => {
-  if (signal?.aborted)
-    return Promise.reject(
-      new AnalysisCancelledError("artifact_digest", { cause: signal.reason }),
-    );
-  return new Promise<Value>((resolveValue, rejectValue) => {
-    let settled = false;
-    const finish = (outcome: Result<Value, unknown>): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-      if (outcome.ok) resolveValue(outcome.value);
-      else rejectValue(outcome.error);
-    };
-    const abort = (): void =>
-      finish(
-        err(
-          new AnalysisCancelledError("artifact_digest", {
-            cause: signal?.reason,
-          }),
-        ),
-      );
-    const timer = setTimeout(
-      () =>
-        finish(
-          err(
-            Object.assign(new Error(timeoutMessage), {
-              code: "ETIMEDOUT",
-            }),
-          ),
-        ),
-      timeoutMs,
-    );
-    signal?.addEventListener("abort", abort, { once: true });
-    if (signal?.aborted) {
-      abort();
-      return;
-    }
-    // Promise handlers stay attached after timeout/cancellation so a delayed
-    // rejection is observed and cannot become an unhandled rejection.
-    try {
-      void start().then(
-        (value) => finish(ok(value)),
-        (cause: unknown) => finish(err(cause)),
-      );
-    } catch (cause) {
-      finish(err(cause));
-    }
-  });
-};
-
-// Later hashes of the path share a stat that a stalled mount holds.
-const statWithDeadline = (
-  path: string,
-  signal: AbortSignal | undefined,
-  stat: (path: string) => Promise<Stats>,
-  timeoutMs: number,
-): Promise<Stats> =>
-  settleWithDeadline(
-    () => shareFileCall(stat, path, () => stat(path)),
-    signal,
-    timeoutMs,
-    "Artifact stat timed out",
-  );

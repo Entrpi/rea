@@ -7,11 +7,16 @@ import {
   absoluteCallerPath,
   appendCallerPath,
 } from "../filesystem/callerPath.js";
-import { shareFileCall } from "./SharedFileCall.js";
+import { FileWork, fileWorkDeadline } from "./FileWork.js";
 
 /** Where a command resolves through an effective PATH, or why it does not. */
 export type ExecutableLookup =
-  | { readonly status: "found"; readonly path: string }
+  | {
+      readonly status: "found";
+      readonly path: string;
+      /** The absolute path that an explicitly selected command names. */
+      readonly selectedPath?: string;
+    }
   /** The host refused to inspect an explicitly selected path. */
   | {
       readonly status: "denied";
@@ -19,7 +24,20 @@ export type ExecutableLookup =
       readonly code: "EACCES" | "EPERM";
       readonly cause: unknown;
     }
-  | { readonly status: "missing"; readonly checked: readonly string[] }
+  | {
+      readonly status: "missing";
+      readonly checked: readonly string[];
+      /** The absolute path that an explicitly selected command names. */
+      readonly selectedPath?: string;
+      /**
+       * The candidate whose error ended the lookup, where at least one native
+       * search stops; absent when every candidate was checked.
+       */
+      readonly stoppedAt?: {
+        readonly candidate: string;
+        readonly code?: string;
+      };
+    }
   /** A relative command, or a match under a relative PATH entry, needed the working directory, which could not be read. */
   | { readonly status: "no-working-directory"; readonly cause: unknown }
   /** The caller's signal or deadline ended the lookup before it finished. */
@@ -28,6 +46,14 @@ export type ExecutableLookup =
       readonly by: "cancellation" | "deadline";
       /** The path being checked when the lookup stopped. */
       readonly candidate: string;
+    }
+  /** The file-work owner already held its budget of stalled steps. */
+  | {
+      readonly status: "saturated";
+      /** The path the lookup would have checked next. */
+      readonly candidate: string;
+      readonly held: number;
+      readonly budget: number;
     };
 
 /** Optional bounds for one lookup. */
@@ -37,6 +63,12 @@ export interface ExecutableLookupBounds {
   readonly timeoutMs?: number | undefined;
   readonly stat?: (path: string) => Promise<Stats>;
   readonly access?: (path: string, mode: number) => Promise<void>;
+  /**
+   * Owns the checks the lookup stops waiting for. By default it joins no
+   * budget: a lookup without a deadline could never leave a stalled check, so
+   * it must not take a share that other calls wait for.
+   */
+  readonly fileWork?: FileWork;
 }
 
 /**
@@ -57,8 +89,9 @@ export interface ExecutableLookupBounds {
  * `no-working-directory`, since its absolute path cannot be named. So
  * `workingDirectory` must name the process's working directory whenever it
  * can fail. A file-system call cannot itself be cancelled, so an interrupted
- * lookup stops waiting for it, and a later lookup of the same path waits for
- * that call instead of starting another.
+ * lookup leaves it with `bounds.fileWork`, whose later work on the same path
+ * waits for it instead of starting another. When that owner already holds its
+ * budget of stalled steps, the lookup stops with `saturated`.
  */
 export const lookupExecutable = async (
   command: string,
@@ -66,7 +99,13 @@ export const lookupExecutable = async (
   searchPath: string | undefined,
   bounds: ExecutableLookupBounds = {},
 ): Promise<ExecutableLookup> => {
-  const { signal, timeoutMs, stat = statPath, access = accessPath } = bounds;
+  const {
+    signal,
+    timeoutMs,
+    stat = statPath,
+    access = accessPath,
+    fileWork = new FileWork(Number.POSITIVE_INFINITY),
+  } = bounds;
   let cwd: string | undefined;
   const readCwd = (): string => (cwd ??= workingDirectory());
   // An empty PATH component selects the working directory. Windows resolves
@@ -85,9 +124,26 @@ export const lookupExecutable = async (
   const entries = explicit
     ? [command]
     : (searchPath ?? "/usr/bin:/bin").split(delimiter);
-  const interruption = lookupInterruption(signal, timeoutMs);
+  const deadline = fileWorkDeadline(signal, timeoutMs);
   try {
     const checked: string[] = [];
+    let selectedPath: string | undefined;
+    const missing = (stoppedAt?: {
+      readonly candidate: string;
+      readonly code: string | undefined;
+    }): ExecutableLookup => ({
+      status: "missing",
+      checked,
+      ...(selectedPath === undefined ? {} : { selectedPath }),
+      ...(stoppedAt === undefined
+        ? {}
+        : {
+            stoppedAt: {
+              candidate: stoppedAt.candidate,
+              ...(stoppedAt.code === undefined ? {} : { code: stoppedAt.code }),
+            },
+          }),
+    });
     for (const entry of entries) {
       const entryBytes = Buffer.byteLength(entry);
       if (!explicit && PATH_MAX !== undefined && entryBytes >= PATH_MAX) {
@@ -110,10 +166,12 @@ export const lookupExecutable = async (
         candidate = appendCallerPath(entry === "" ? "." : entry, command);
         unnamed = { cause };
       }
-      const metadata = await interruption.race(
-        shareFileCall(stat, candidate, () => stat(candidate)),
+      if (explicit) selectedPath = candidate;
+      const metadata = await fileWork.run(candidate, deadline, () =>
+        stat(candidate),
       );
-      if (metadata.status === "interrupted") return { ...metadata, candidate };
+      if (metadata.status === "interrupted" || metadata.status === "saturated")
+        return { ...metadata, candidate };
       if (metadata.status === "rejected") {
         const code = systemErrorCode(metadata.cause);
         if (explicit && (code === "EACCES" || code === "EPERM"))
@@ -125,76 +183,38 @@ export const lookupExecutable = async (
           };
         checked.push(`${candidate}${systemErrorSuffix(code)}`);
         if (searchMovesPast(code)) continue;
-        return { status: "missing", checked };
+        return missing({ candidate, code });
       }
       if (!metadata.value.isFile()) {
         checked.push(`${candidate} (not a regular file)`);
         continue;
       }
-      const executable = await interruption.race(
-        shareFileCall(access, candidate, () =>
-          access(candidate, fsConstants.X_OK),
-        ),
+      const executable = await fileWork.run(candidate, deadline, () =>
+        access(candidate, fsConstants.X_OK),
       );
-      if (executable.status === "interrupted")
+      if (
+        executable.status === "interrupted" ||
+        executable.status === "saturated"
+      )
         return { ...executable, candidate };
       // A launch by name would run a match under an unnamed working
       // directory, so the search stops there without a path to report.
       if (executable.status === "fulfilled")
         return unnamed === undefined
-          ? { status: "found", path: candidate }
+          ? {
+              status: "found",
+              path: candidate,
+              ...(selectedPath === undefined ? {} : { selectedPath }),
+            }
           : { status: "no-working-directory", cause: unnamed.cause };
       const code = systemErrorCode(executable.cause);
       checked.push(`${candidate}${systemErrorSuffix(code)}`);
-      if (!searchMovesPast(code)) return { status: "missing", checked };
+      if (!searchMovesPast(code)) return missing({ candidate, code });
     }
-    return { status: "missing", checked };
+    return missing();
   } finally {
-    interruption.release();
+    deadline.release();
   }
-};
-
-type Raced<Value> =
-  | { readonly status: "fulfilled"; readonly value: Value }
-  | { readonly status: "rejected"; readonly cause: unknown }
-  | {
-      readonly status: "interrupted";
-      readonly by: "cancellation" | "deadline";
-    };
-
-/** One deadline and abort listener shared by every file-system call of a lookup. */
-const lookupInterruption = (
-  signal: AbortSignal | undefined,
-  timeoutMs: number | undefined,
-): {
-  readonly race: <Value>(operation: Promise<Value>) => Promise<Raced<Value>>;
-  readonly release: () => void;
-} => {
-  let interrupt: ((by: "cancellation" | "deadline") => void) | undefined;
-  const interrupted = new Promise<"cancellation" | "deadline">((resolve) => {
-    interrupt = resolve;
-  });
-  const cancel = (): void => interrupt?.("cancellation");
-  const timer =
-    timeoutMs === undefined
-      ? undefined
-      : setTimeout(() => interrupt?.("deadline"), timeoutMs);
-  if (signal?.aborted === true) cancel();
-  else signal?.addEventListener("abort", cancel, { once: true });
-  return {
-    race: <Value>(operation: Promise<Value>) =>
-      Promise.race([
-        operation.then(
-          (value): Raced<Value> => ({ status: "fulfilled", value }),
-          (cause: unknown): Raced<Value> => ({ status: "rejected", cause }),
-        ),
-        interrupted.then((by): Raced<Value> => ({ status: "interrupted", by })),
-      ]),
-    release: () => {
-      if (timer !== undefined) clearTimeout(timer);
-      signal?.removeEventListener("abort", cancel);
-    },
-  };
 };
 
 /**
@@ -205,6 +225,14 @@ const lookupInterruption = (
  */
 export const searchMovesPast = (code: string | undefined): boolean =>
   code === "ENOENT" || code === "ENOTDIR" || code === "EACCES";
+
+/**
+ * Launch errors at which native PATH searches differ: glibc's execvp moves
+ * past a stale NFS handle and a missing device, while musl's stops there. A
+ * launch by name lets the host's search decide.
+ */
+export const searchesDiffer = (code: string | undefined): boolean =>
+  code === "ESTALE" || code === "ENODEV";
 
 /**
  * The PATH entry length, in bytes, from which the host's native search skips

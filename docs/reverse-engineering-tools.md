@@ -152,17 +152,50 @@ symbolic link loop, a stale network file handle or an I/O error, at least one
 of the searches of glibc, musl, Android and libuv stops, so the lookup stops
 there. The
 command then runs by name, with the version unknown, and the host's own search
-decides what runs. A found file that does not start with `ENOENT` or `EACCES`,
+decides what runs. A limitation names the file where the lookup stopped and its
+error, and Evidence or the launch failure keeps them as
+`executable_lookup_candidate` and `executable_lookup_code`. A found file that does not start with `ENOENT` or `EACCES`,
 as when a script's interpreter is missing or not executable, is one a native
-search moves past. The command then also runs as selected, with the version
-unknown, and a limitation names that file. When the host refuses to inspect an
+search moves past. At `ESTALE` or `ENODEV`, glibc's search moves past it and
+musl's stops, so the host decides. The command then also runs as selected,
+with the version unknown, and a limitation names that file. Evidence or the
+launch failure keeps it as `executable_lookup_candidate`, with its error as
+`executable_lookup_code` and its digest as `executable_lookup_candidate_sha256`,
+without claiming that it ran. An explicitly selected path has no
+later candidate, so the command runs that path, and Evidence or the launch
+failure keeps its path and SHA-256. When the host refuses to inspect an
 explicitly selected path (`EACCES` or `EPERM`), the command runs that path with
-the version unknown, and Evidence or the launch failure keeps it as
-`provider_executable_path`. A lookup or hash that stops waiting for a stalled
-`stat` or `access` leaves that call running; a later lookup or hash of the same
-path waits for it instead of starting another. A hash also ends at the deadline
-or on cancellation while the file's open is still pending, and a later hash of
-the same path waits for that open to return before it opens the file again.
+the version unknown. When the lookup does not accept an explicitly selected
+path, for example because it lacks execute permission or its absolute spelling
+is too long, the command runs the selection as written. Either way, Evidence
+or the launch failure keeps the resolved path as `provider_executable_path`. A
+lookup or hash can stop waiting, at the deadline or on cancellation, for a
+`stat`, an `access`, or a file's open, read or close that a stalled mount
+holds, but it cannot cancel that work. A later lookup or hash of the same path
+waits for the work left behind instead of starting more; work that nobody gave
+up on never makes another call wait. A hash completes only after its file
+closes, so a stalled close also reaches the deadline. A call that returns while
+work it left behind is still running keeps its place among the eight
+concurrent objdump and rizin operations until that work returns; a call that
+only waited for another call's work does not. The capacity error counts such
+calls as `operations_awaiting_file_work`. Each stalled step holds a thread of
+Node's file pool, so these steps share a budget of half that pool: 2 of the
+default 4 threads, or 1 when `UV_THREADPOOL_SIZE` is 2 or 3. A step reserves the
+budget before it starts, so steps that stall together stay within it, and two
+long hashes can make another call's file steps wait within its deadline. Once
+stalled steps fill the budget, a call that needs a new file step is refused with
+a retryable capacity error (`file_steps_held`, `max_held_file_steps`) and starts
+nothing, which keeps file access working for REA's other tools. A retry on a
+path that already has stalled work waits and takes no thread. A post-run hash
+that the budget refuses keeps the command's Evidence, with
+`artifact_digest_after_refused` and a limitation saying the artifact was not
+read. Process capture's
+executable lookup has no deadline, so it could not give up a share of the budget
+and stays outside it. Closing the service does not wait for that work, which a
+mount that never answers would hold forever. The process cannot exit until that
+work returns, even through `process.exit()`, because Node joins its pool threads
+at exit. A CLI command therefore prints its result and then stays alive until
+the mount answers.
 
 Captured stdout and stderr are retained up to a 16 MiB combined limit; `output_truncated` marks output beyond that limit. One-shot commands use the `command_timeout_ms` budget described above. That 16 MiB cap has no runtime override. A typed failure's `captured_output` marks a stream that held invalid UTF-8 with `stdout_invalid_utf8` or `stderr_invalid_utf8`.
 

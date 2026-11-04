@@ -21,6 +21,7 @@ import {
   VERSION_PROBE_FAILURE_REASONS,
 } from "../../../src/application/reverse/ReverseEngineeringService.js";
 import { lookupExecutable } from "../../../src/process/ExecutableLookup.js";
+import { FileWork } from "../../../src/process/FileWork.js";
 import { RIZIN_VERSION_PROBE } from "../../../src/rizin/RizinCommand.js";
 import { OwnedCommandFailure } from "../../../src/process/OwnedCommand.js";
 import type { ProviderProcessSupervisor } from "../../../src/process/ProviderProcess.js";
@@ -434,6 +435,7 @@ posix(
     expect(stopped).toEqual({
       status: "missing",
       checked: [`${join(looped, "rizin")} (ELOOP)`],
+      stoppedAt: { candidate: join(looped, "rizin"), code: "ELOOP" },
     });
     await expect(
       lookupExecutable("rizin", cwd, `${unexecutable}${delimiter}${directory}`),
@@ -453,7 +455,11 @@ posix(
           },
         },
       ),
-    ).resolves.toEqual({ status: "missing", checked: [`${failing} (EIO)`] });
+    ).resolves.toEqual({
+      status: "missing",
+      checked: [`${failing} (EIO)`],
+      stoppedAt: { candidate: failing, code: "EIO" },
+    });
     // Native searches differ at a stale NFS handle, so the lookup stops and
     // a launch by name lets the host's search decide.
     await expect(
@@ -471,7 +477,11 @@ posix(
           },
         },
       ),
-    ).resolves.toEqual({ status: "missing", checked: [`${failing} (ESTALE)`] });
+    ).resolves.toEqual({
+      status: "missing",
+      checked: [`${failing} (ESTALE)`],
+      stoppedAt: { candidate: failing, code: "ESTALE" },
+    });
   },
 );
 
@@ -494,6 +504,10 @@ posix(
         : {
             status: "missing",
             checked: [`${longEntry}/rizin (ENAMETOOLONG)`],
+            stoppedAt: {
+              candidate: `${longEntry}/rizin`,
+              code: "ENAMETOOLONG",
+            },
           },
     );
     // Within PATH_MAX, a 300-byte component fails as a launch by name does.
@@ -507,6 +521,10 @@ posix(
     ).resolves.toEqual({
       status: "missing",
       checked: [`${longComponent}/rizin (ENAMETOOLONG)`],
+      stoppedAt: {
+        candidate: `${longComponent}/rizin`,
+        code: "ENAMETOOLONG",
+      },
     });
   },
 );
@@ -517,6 +535,7 @@ posix.each(["cancellation", "deadline"] as const)(
     const { executable, path } = await rizinExecutableFixture();
     const lookupStarted = gate();
     const release = gate();
+    let stalled: Promise<unknown> | undefined;
     const run = versionProbeRunner(() => "rizin 0.9.1 @ linux-x86-64");
     const service = new TestReverseEngineeringService({
       run,
@@ -524,12 +543,12 @@ posix.each(["cancellation", "deadline"] as const)(
       lookup: (command, directory, searchPath, bounds) =>
         lookupExecutable(command, directory, searchPath, {
           ...bounds,
-          stat: async (target) => {
-            if (target === executable) {
-              lookupStarted.open();
-              await release.opened;
-            }
-            return stat(target);
+          stat: (target) => {
+            if (target !== executable) return stat(target);
+            lookupStarted.open();
+            const check = release.opened.then(() => stat(target));
+            stalled = check;
+            return check;
           },
         }),
       environment: { REA_RIZIN_COMMAND: "rizin", PATH: dirname(executable) },
@@ -575,14 +594,15 @@ posix.each(["cancellation", "deadline"] as const)(
     } finally {
       release.open();
       caller.abort("test cleanup");
-      await Promise.allSettled(pending);
+      await Promise.allSettled([...pending, stalled]);
+      await new Promise((resolve) => setImmediate(resolve));
       await service.close();
     }
   },
 );
 
 posix(
-  "shares a stalled PATH check with later lookups instead of starting another",
+  "makes later lookups wait for a stalled PATH check instead of starting another",
   async () => {
     const { executable, path } = await rizinExecutableFixture();
     const release = gate();
@@ -696,15 +716,23 @@ posix.each([
       expect(result.value.parameters).toMatchObject({
         provider_executable: "rizin",
         provider_identity: "assumed",
+        executable_lookup_candidate: join(broken, "rizin"),
+        executable_lookup_code: code,
+        executable_lookup_candidate_sha256: await sha256Of(
+          join(broken, "rizin"),
+        ),
       });
       expect(result.value.parameters).not.toHaveProperty(
         "provider_executable_path",
       );
-      expect(result.value.limitations).toContainEqual(
-        expect.stringContaining(
-          `${join(broken, "rizin")}, which the lookup found, did not start (${code})`,
+      // A limitation names the skipped file and its launch error.
+      expect(
+        result.value.limitations.some(
+          (limitation) =>
+            limitation.includes(join(broken, "rizin")) &&
+            limitation.includes(code),
         ),
-      );
+      ).toBe(true);
     } finally {
       await service.close();
     }
@@ -712,9 +740,211 @@ posix.each([
 );
 
 posix(
-  "keeps the resolved path of a relative selection the host refuses to inspect when its launch fails",
+  "ends the call without running anything when the lookup meets a held file-step budget",
   async () => {
     const { executable, path } = await rizinExecutableFixture();
+    // No budget is left for the lookup itself.
+    await expect(
+      lookupExecutable("rizin", () => process.cwd(), dirname(executable), {
+        fileWork: new FileWork(0),
+      }),
+    ).resolves.toEqual({
+      status: "saturated",
+      candidate: executable,
+      held: 0,
+      budget: 0,
+    });
+    const run = versionProbeRunner(() => "rizin 0.9.1 @ linux-x86-64");
+    const service = new TestReverseEngineeringService({
+      run,
+      // The target's hash has its budget; the lookup does not.
+      lookup: (command, directory, searchPath, bounds) =>
+        lookupExecutable(command, directory, searchPath, {
+          ...bounds,
+          fileWork: new FileWork(0),
+        }),
+      environment: { REA_RIZIN_COMMAND: "rizin", PATH: dirname(executable) },
+    });
+    const result = await service.executeRizinCommand({ path, command: "iI" });
+    if (result.ok) throw new Error("Expected the budget to end the call");
+    expect(result.error).toMatchObject({
+      _tag: "AnalysisResourceConstraintError",
+      resource: "capacity",
+      retryable: true,
+      reportedLimits: { file_steps_held: 0, max_held_file_steps: 0 },
+    });
+    expect(result.error.diagnostics).toMatchObject({
+      phase: "executable_lookup",
+      executable_lookup_candidate: executable,
+      provider_executable: "rizin",
+    });
+    expect(run).not.toHaveBeenCalled();
+  },
+);
+
+posix(
+  "keeps where a stopped PATH search stopped when the command runs by name",
+  async () => {
+    const { executable, path } = await rizinExecutableFixture();
+    const looped = dirname((await rizinExecutableFixture()).executable);
+    await rm(join(looped, "rizin"));
+    await symlink("rizin", join(looped, "rizin"));
+    const run = versionProbeRunner(() => "rizin 0.9.1 @ linux-x86-64");
+    const service = new TestReverseEngineeringService({
+      run,
+      lookup: lookupExecutable,
+      environment: {
+        REA_RIZIN_COMMAND: "rizin",
+        PATH: `${looped}${delimiter}${dirname(executable)}`,
+      },
+    });
+    const result = await service.executeRizinCommand({ path, command: "iI" });
+    if (!result.ok) throw result.error;
+    // Nothing was probed; the host's search decides what runs by name.
+    expect(run.mock.calls.map(([command]) => command)).toEqual(["rizin"]);
+    expect(result.value.provider.version).toBeNull();
+    expect(result.value.parameters).toMatchObject({
+      executable_lookup_candidate: join(looped, "rizin"),
+      executable_lookup_code: "ELOOP",
+    });
+    expect(
+      result.value.limitations.some(
+        (limitation) =>
+          limitation.includes(join(looped, "rizin")) &&
+          limitation.includes("ELOOP"),
+      ),
+    ).toBe(true);
+  },
+);
+
+posix.each(["ESTALE", "ENODEV"] as const)(
+  "runs the command by name when the file the lookup found does not start with %s, where native searches differ",
+  async (code) => {
+    const { executable, path } = await rizinExecutableFixture();
+    const run = vi.fn(
+      async (
+        _command: string,
+        args: readonly string[],
+        _options?: ExecFileOutputOptions,
+      ) => {
+        if (args[0] === "-v")
+          throw Object.assign(new Error(`spawn ${code}`), { code });
+        return { stdout: "host-selected output", stderr: "" };
+      },
+    );
+    const service = new TestReverseEngineeringService({
+      run,
+      lookup: lookupExecutable,
+      environment: { REA_RIZIN_COMMAND: "rizin", PATH: dirname(executable) },
+    });
+    const result = await service.executeRizinCommand({ path, command: "iI" });
+    if (!result.ok) throw result.error;
+    // The probe ran the file the lookup found; the command ran by name, so
+    // the host's search decides what answers.
+    expect(run.mock.calls.map(([command]) => command)).toEqual([
+      executable,
+      "rizin",
+    ]);
+    expect(result.value.provider.version).toBeNull();
+    // A limitation names the skipped file and its launch error.
+    expect(
+      result.value.limitations.some(
+        (limitation) =>
+          limitation.includes(executable) && limitation.includes(code),
+      ),
+    ).toBe(true);
+  },
+);
+
+posix(
+  "keeps the file the lookup found as a candidate when the command by name cannot launch either",
+  async () => {
+    const { executable, path } = await rizinExecutableFixture();
+    // The found script does not start, and neither does the launch by name.
+    const run = vi.fn(
+      async (
+        _command: string,
+        _args: readonly string[],
+        _options?: ExecFileOutputOptions,
+      ): Promise<never> => {
+        throw Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" });
+      },
+    );
+    const service = new TestReverseEngineeringService({
+      run,
+      lookup: lookupExecutable,
+      environment: { REA_RIZIN_COMMAND: "rizin", PATH: dirname(executable) },
+    });
+    const result = await service.executeRizinCommand({ path, command: "iI" });
+    if (result.ok) throw new Error("Expected the launch to fail");
+    expect(run.mock.calls.map(([command]) => command)).toEqual([
+      executable,
+      "rizin",
+    ]);
+    expect(result.error.diagnostics).toMatchObject({
+      provider_executable: "rizin",
+      executable_lookup_candidate: executable,
+      executable_lookup_code: "ENOENT",
+      executable_lookup_candidate_sha256: await sha256Of(executable),
+    });
+    // No candidate is claimed as the file that ran.
+    expect(result.error.diagnostics).not.toHaveProperty(
+      "provider_executable_path",
+    );
+  },
+);
+
+posix.each(["ENOENT", "EACCES"] as const)(
+  "keeps the resolved path and digest of a relative selection that does not start with %s",
+  async (code) => {
+    const { executable, path } = await rizinExecutableFixture();
+    // The selected script does not start, as when its interpreter is missing
+    // or not executable; an explicit selection has no later candidate.
+    const run = vi.fn(
+      async (
+        _command: string,
+        _args: readonly string[],
+        _options?: ExecFileOutputOptions,
+      ): Promise<never> => {
+        throw Object.assign(new Error(`spawn ${code}`), { code });
+      },
+    );
+    const service = new TestReverseEngineeringService({
+      run,
+      lookup: (command, _directory, searchPath, bounds) =>
+        lookupExecutable(
+          command,
+          () => dirname(executable),
+          searchPath,
+          bounds,
+        ),
+      environment: { REA_RIZIN_COMMAND: "./rizin" },
+    });
+    const result = await service.executeRizinCommand({ path, command: "iI" });
+    if (result.ok) throw new Error("Expected the launch to fail");
+    expect(result.error.diagnostics).toMatchObject({
+      provider_executable: "./rizin",
+      provider_executable_path: executable,
+      provider_executable_sha256: await sha256Of(executable),
+      provider_identity: "assumed",
+    });
+    // The probe and the command both ran the resolved path.
+    expect(run.mock.calls.map(([command]) => command)).toEqual([
+      executable,
+      executable,
+    ]);
+  },
+);
+
+posix.each([
+  ["the host refuses to inspect", "stat"],
+  ["lacks execute permission", "mode"],
+  ["names by an absolute path too long to inspect", "length"],
+] as const)(
+  "keeps the resolved path of a relative selection that %s when its launch fails",
+  async (_description, refusal) => {
+    const { executable, path } = await rizinExecutableFixture();
+    if (refusal === "mode") await chmod(executable, 0o644);
     const run = vi.fn(
       async (
         _command: string,
@@ -727,14 +957,19 @@ posix(
     const service = new TestReverseEngineeringService({
       run,
       // The relative selection resolves in the fixture's directory, where
-      // the host refuses to inspect it.
+      // the host refuses to inspect it, it lacks execute permission, or its
+      // absolute spelling exceeds the host's path limit.
       lookup: (command, _directory, searchPath, bounds) =>
         lookupExecutable(command, () => dirname(executable), searchPath, {
           ...bounds,
           stat: async (target) => {
-            if (target === executable)
+            if (refusal === "stat" && target === executable)
               throw Object.assign(new Error("permission denied"), {
                 code: "EACCES",
+              });
+            if (refusal === "length" && target === executable)
+              throw Object.assign(new Error("name too long"), {
+                code: "ENAMETOOLONG",
               });
             return stat(target);
           },
@@ -749,7 +984,12 @@ posix(
       provider_identity: "assumed",
     });
     expect(run).toHaveBeenCalledTimes(1);
-    expect(run.mock.calls[0]?.[0]).toBe(executable);
+    // A path the host refused to inspect launches as resolved; one the
+    // lookup did not accept launches as spelled, which a relative path can
+    // where its absolute spelling is too long.
+    expect(run.mock.calls[0]?.[0]).toBe(
+      refusal === "stat" ? executable : "./rizin",
+    );
   },
 );
 
@@ -948,18 +1188,19 @@ posix.each(["deadline", "cancellation"] as const)(
     const { executable, path } = await rizinExecutableFixture();
     const digestStarted = gate();
     const release = gate();
+    let stalled: Promise<unknown> | undefined;
     const run = versionProbeRunner(() => "rizin 0.9.1 @ linux-x86-64");
     const service = new TestReverseEngineeringService({
       run,
       lookup: lookupExecutable,
       environment: { REA_RIZIN_COMMAND: "rizin", PATH: dirname(executable) },
       // Only the executable's digest stalls, past the call's deadline.
-      stat: async (target) => {
-        if (target === executable) {
-          digestStarted.open();
-          await release.opened;
-        }
-        return stat(target);
+      stat: (target) => {
+        if (target !== executable) return stat(target);
+        digestStarted.open();
+        const check = release.opened.then(() => stat(target));
+        stalled = check;
+        return check;
       },
     });
     const caller = new AbortController();
@@ -1000,7 +1241,9 @@ posix.each(["deadline", "cancellation"] as const)(
     } finally {
       release.open();
       caller.abort("test cleanup");
-      await Promise.allSettled(pending);
+      // The service holds the stalled stat until it returns.
+      await Promise.allSettled([...pending, stalled]);
+      await new Promise((resolve) => setImmediate(resolve));
       await service.close();
     }
   },
@@ -1035,7 +1278,7 @@ posix(
       "provider_executable_sha256",
     );
     expect(result.value.limitations).toContain(
-      "The executable version and supported formats are reported as unknown because the executable could not be read (EACCES).",
+      "The executable implementation, version and supported formats are unknown because the executable could not be read (EACCES).",
     );
     // Without a digest or banner there is no timing to qualify.
     expect(result.value.limitations).not.toContain(

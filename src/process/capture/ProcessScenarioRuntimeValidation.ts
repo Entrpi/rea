@@ -101,8 +101,8 @@ export const resolveExecutable = async (
       `working directory could not be read: ${workingDirectory}`,
       lookup.cause,
     );
-  // An unbounded lookup cannot be interrupted.
-  if (lookup.status === "interrupted")
+  // A lookup without bounds or a budget can be neither interrupted nor refused.
+  if (lookup.status === "interrupted" || lookup.status === "saturated")
     throw invalidScenarioPath(
       "executable",
       `executable lookup was interrupted: ${command}`,
