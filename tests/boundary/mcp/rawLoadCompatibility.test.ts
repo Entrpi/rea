@@ -119,10 +119,11 @@ describe("raw-binary snapshots saved before base_address", () => {
     const profile = await ghidraProfile(target);
     expect(snapshotMatchesTarget(snapshot.target, target)).toBe(true);
     // Upstream's instruction-status (#7823), load-image observation (#8531),
-    // procedure search (#8520) and reference revisions keep every Ghidra snapshot saved
-    // before them from replaying, and on this integration branch so does
-    // Change 2's no-return revision. Apart from those parameters, the profile
-    // is the one this snapshot recorded.
+    // procedure search (#8520), reference, byte-search (#8840) and data-type
+    // (#8602) revisions keep every Ghidra snapshot saved before them from replaying,
+    // and on this integration branch so does Change 2's no-return revision.
+    // Apart from those parameters, the profile is the one this snapshot
+    // recorded.
     const mismatch = snapshotBindingMismatch(snapshot, target, profile);
     expect(mismatch).not.toHaveProperty("target");
     expect(mismatch).toHaveProperty("profile_digest");
@@ -133,6 +134,8 @@ describe("raw-binary snapshots saved before base_address", () => {
       no_return_repair: repair,
       function_references: functionReferences,
       instruction_references: instructionReferences,
+      byte_search_boundary: byteSearch,
+      data_type_observations: dataTypes,
       ...parameters
     } = profile.parameters;
     const {
@@ -144,6 +147,8 @@ describe("raw-binary snapshots saved before base_address", () => {
     } = snapshot.binding.analysis_profile.parameters;
     expect(status).toBe("unlisted-address-without-decode-v1");
     expect(search).toBe("primary-and-exact-entry-symbol-names-v1");
+    expect(byteSearch).toBe("contiguous-eligible-initialized-blocks-v1");
+    expect(dataTypes).toBe("bit-field-base-and-lookup-v1");
     expect([recordedObservations, observations]).toEqual([
       "source-mappings-entry-context-v2",
       "source-mappings-entry-context-relocation-symbol-v3",

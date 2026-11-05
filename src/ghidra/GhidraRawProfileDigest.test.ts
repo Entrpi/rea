@@ -25,9 +25,9 @@ import { GhidraProvider } from "./GhidraProvider.js";
 // results. On embedded-integration they also include Change 2's
 // no_return_repair revision, so they differ from main's.
 const RAW_DIGESTS = {
-  "6502": "3cd7e823b228e1a78bc42607041c623bdef83395ee29d9e58088823b0dedd8a8",
+  "6502": "75b2d9004483bbf2ebe051b306bc5dbc974aa7ecb823b132eae5a603988c02d2",
   "x86-disabled-analyzer":
-    "bdaf8512675e0de7cd909d235e04de415edcdd18a71294699d71801e2f554546",
+    "5838c4d952bed9704d4c6f9ef497f3f1fd72bf29fa1ab72afc110d87445ab9e3",
 } as const;
 
 // Computed by upstream main at d3ab0faf5, which has neither a separate base nor
@@ -39,27 +39,27 @@ const LEGACY_RAW_DIGESTS = [
   [
     "x86",
     "0x1000",
-    "313c074eaeeddeb7f805ae87c678f38356c0ff88f3f368d136c667536cbdbf96",
+    "3c46e5efb955a1cdb44f8b074311ef1eea57e210a83ec60df4cca2fe0d8fd5c8",
   ],
   [
     "x86_64",
     "0x401000",
-    "34e023aee339851b34a8e5f970ddd18c88ebc38057166054db226f0be54ece0a",
+    "17b13466e486b040b99a328712a13578b42ca5ab4fed3b4d4c6bc21b1f23757a",
   ],
   [
     "arm",
     "0x8000000",
-    "71a94011b74ecfbde4806aa1974bba9ca3275061fa5032b4877b598332d72f0b",
+    "e7eddb297cdbfe99518418df68a15374aaa6b32dde794f73ec9c2f19af7195e5",
   ],
   [
     "arm64",
     "0x80000",
-    "73d0e6fe1814bdca0b340717fce2ebd7f8c7b6ac9dfd97e57c727b5a6ff135a5",
+    "84717b0a9deb65f0f7184e8443a0b933a10c533c2cc7c235891fa815e48e5ec3",
   ],
   [
     "m68k",
     "0x1000",
-    "45c71a01f11bfc61bb3647c5426eaf1b77bd7b9b045b0df1505adc8eca520099",
+    "072e7bbe2571cb76c349d8234b5fac20b3f2fc39756a457bf05f416d08f51c0e",
   ],
 ] as const;
 
@@ -226,7 +226,7 @@ describe("M-profile raw-binary analysis profile", () => {
     const digest = (await profile(reset("armv7-m"))).digest;
     // Pinned so a change to raw_load semantics must bump its version.
     expect(digest).toBe(
-      "e9c892650115e706b3e1d84103a751230f4e73479d80fa7ca9f3a0eaad8aa152",
+      "96fb59da08bcf59ab8f2077068167012957f585811fdece614adcbc726bfe101",
     );
     expect(
       (await profile(reset("armv7-m", { baseAddress: "0x8000000" }))).digest,
