@@ -11,4 +11,5 @@ export const GHIDRA_BRIDGE_SOURCES = Object.freeze({
   noReturnFix: "ReaGhidraNoReturnFix.java",
   mipsSoftFloat: "ReaGhidraMipsSoftFloat.java",
   dwarfCallingConvention: "ReaGhidraDwarfCallingConvention.java",
+  riscvCallingConvention: "ReaGhidraRiscvCallingConvention.java",
 } as const);
