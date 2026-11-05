@@ -28,7 +28,7 @@ of four lanes:
   `Tag_RISCV_arch`.
 - ELF32 images that declare `EF_RISCV_FLOAT_ABI_SINGLE` (ilp32f) use REA's
   [ilp32f calling-convention policy](#ilp32f). They must declare an RV32I base,
-  the F extension and only decoded extensions.
+  the F extension, only decoded extensions, and not the D extension.
 
 These are header declarations, not proof that every instruction conforms to
 that ISA.
@@ -44,6 +44,7 @@ guessing a compatible profile:
 | Little-endian ELF32 `ET_EXEC`, single-float ABI, F and decoded extensions             | admitted, `RISCV:LE:32:default` + `gcc` with the `__rea_ilp32f` prototype, lane `elf32-exec-le-single-float-generic-v1` |
 | ELF32 soft- or single-float ABI without `Tag_RISCV_arch`, or with any other extension | refused; the reason names the extensions outside the decoded set                                                        |
 | ELF32 single-float ABI without the F extension                                        | refused; the ABI needs F                                                                                                |
+| ELF32 single-float ABI with the D extension                                           | refused; Ghidra's model preserves more of `fs0`–`fs11` than the ABI does                                                |
 | ELF32 single-float image whose signatures `__rea_ilp32f` cannot express               | refused after analysis; the reason names the signatures ([ilp32f](#ilp32f))                                             |
 | ELF64 soft- or single-float ABI (lp64, lp64f), or the quad-float ABI                  | refused; no verified calling-convention policy                                                                          |
 | Big-endian                                                                            | refused; Ghidra 12.1.4 ships no big-endian RISC-V language                                                              |
@@ -252,6 +253,11 @@ Policy `ilp32f-prototype-v1`, prototype `__rea_ilp32f`. ABI_FLEN and XLEN are
 | Variadic arguments                                                                     | The integer convention, as in ilp32                                                              | The default variadic rule, unchanged                                                                                                                                                                                                                         |
 | Preserved registers                                                                    | `s0`–`s11`, `sp`, and `fs0`–`fs11` for values of 32 bits or fewer                                | The default preserved list, including `fs0`–`fs11`                                                                                                                                                                                                           |
 
+With the D extension the psABI preserves only the low 32 bits of `fs0`–`fs11`,
+and Ghidra's model preserves the whole 64-bit registers, so the decompiler could
+carry a wider value across a call. Admission refuses a `Tag_RISCV_arch` that
+declares `d` or `zcd` with this ABI.
+
 The psABI flattens nested structures and arrays and counts each named
 bit-field, `_Bool`, `char` and enumeration as an integer field; LLVM treats a
 pointer as neither a float nor an integer. Measured on Ghidra 12.1.4 against
@@ -273,12 +279,20 @@ passes a type the prototype misplaces:
 - a structure the new rule would split that the psABI passes in integer
   registers, such as the three above, a C++ structure with a nonzero array of
   empty classes, which GCC and Clang do not ignore when they flatten it, or a
-  structure with a flexible array member. Ghidra imports a trailing `[0]` array
-  the same way, so a structure with one is refused too, although Clang passes
-  it in a float register;
+  structure with a flexible array member, wherever it starts. Ghidra imports a
+  trailing `[0]` array the same way, so a structure with one is refused too,
+  although Clang passes it in a float register;
+- a GNU vector of floats, which Ghidra imports as an array. It uses the integer
+  convention, and C passes no array by value, so a parameter or return that
+  Ghidra shows as an array is treated as a vector;
 - a type the psABI places in float registers where the prototype cannot:
   `_Float16`, a packed structure whose `float` is not 4-byte aligned, or an
-  over-aligned structure of more than 8 bytes.
+  over-aligned structure of more than 8 bytes;
+- a value of up to 8 bytes that holds an untyped `byte`, `word`, `dword` or
+  `qword`. Ghidra's DWARF import uses these for an encoding it does not map, so
+  the policy cannot know the value's class. `float _Complex`, which takes two
+  float registers, arrives as a `qword`. The stock double-float lanes show it as
+  an integer.
 
 A bit-field counts by its width, not its declared type, so a `float` beside
 `unsigned long long b : 1` takes a float and an integer register. The check
@@ -289,18 +303,18 @@ session.
 
 Not modelled:
 
-- Ghidra 12.1.4 imports `float _Complex` from DWARF as an untyped 8-byte
-  `qword`, so the policy sees an integer and cannot recover the float-register
-  pair. The stock double-float lanes share this.
+- Ghidra 12.1.4 keeps no vector marker on an array, so a GNU vector inside a
+  structure looks like `float[2]` and shows in `fa0` and `fa1`. GCC 14.2 and
+  Clang 19 use integer registers. A limitation states this.
+- Ghidra 12.1.4 resolves `_Atomic(float)` to `float`, so the policy places it as
+  a `float`. That matches GCC 14.2, but Clang 19 uses integer registers, alone
+  and in a structure. A limitation states this.
 - A C++ class with a non-trivial copy constructor or destructor is passed
   through a hidden pointer, but Ghidra 12.1.4 keeps only its fields, so
   `struct N { float f; N(const N&); ~N(); }` shows as a `float` in `fa0`.
   Ghidra's DWARF importer does not read `DW_AT_calling_convention`, and GCC 14.2
   does not write it, so the policy cannot detect these signatures and does not
   refuse them. A limitation states this.
-- With D hardware (`rv32imafd` with the ilp32f ABI) the psABI preserves only the
-  low 32 bits of `fs0`–`fs11`; Ghidra's model preserves the whole 64-bit
-  registers.
 - Ghidra recovers the arguments of a variadic call from the registers the
   caller writes, as for [ilp32](#ilp32).
 
@@ -482,10 +496,12 @@ assembly sources:
 - The single-float build with `REA_RISCV_ABI_UNMODELLED`, which adds a
   function that passes and returns a three-field structure, a `_Float16`
   function, a function-pointer type that passes the three-field structure,
-  a function that passes a structure with a flexible array member, and, from
-  `riscv-float-abi-empty.cpp`, a function that passes a structure with an array
-  of one empty class. It also adds a function that passes a
-  `float` beside a one-bit field of a 64-bit type, which the policy admits.
+  functions that pass a structure with a flexible array member, at the end of
+  the structure and inside its padding, a function that passes a GNU vector, a
+  function that passes `float _Complex` alone and in a structure, and, from `riscv-float-abi-empty.cpp`, a function that passes a structure with an
+  array of one empty class. It also adds functions that pass a structure of one
+  `float[2]` and a `float` beside a one-bit field of a 64-bit type, which the
+  policy admits.
 - An RV32 soft-float build of `riscv-esp-layout.c` with ESP32-C6's
   `-march=rv32imac_zicsr_zifencei -mabi=ilp32`, linked with
   `tests/conformance/esp/esp32c6-shared-window.ld`. As ESP-IDF does, it places
@@ -529,8 +545,8 @@ For the soft- and single-float builds the lane also checks:
 - Retained Evidence states the prototype outcome; the stripped builds have no
   function definitions.
 - The unmodelled build is admitted by its headers, then refused over MCP and
-  the CLI with the bridge's reason, which names its five refused signatures
-  and not the bit-field function.
+  the CLI with the bridge's reason, which names its refused signatures and not
+  the `float[2]` or bit-field functions.
 - An LLVM objdump reading finds the call from `rea_riscv_stop_caller` to
   `rea_riscv_stop`, which DWARF declares no-return, as one `auipc`+`jalr` pair,
   as in ESP-IDF's calls between flash and IRAM. In the typed soft-float build,
@@ -567,10 +583,11 @@ space `ram.1`. A copy of the RV32 double-float build
 with a truncated section table is refused when REA opens it.
 
 Header-mutated copies check admission. The RV32 double-float image relabelled as
-soft-float (`e_flags` `0x1`) or single-float (`0x3`), refused before these
-lanes, is admitted through them over CLI and MCP. The soft-float image
-relabelled as single-float lacks F and is refused; RV64 soft- and single-float
-and unsupported high bits are refused with their reasons. Failures retain the
+soft-float (`e_flags` `0x1`), refused before that lane, is admitted through it
+over CLI and MCP. Relabelled as single-float (`0x3`) it declares D and is
+refused. The soft-float image relabelled as single-float lacks F and is refused;
+RV64 soft- and single-float and unsupported high bits are refused with their
+reasons. Failures retain the
 diagnostic workspace; successful runs remove it and report the observed process
 lineage.
 
