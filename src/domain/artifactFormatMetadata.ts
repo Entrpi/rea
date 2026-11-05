@@ -63,6 +63,24 @@ export const unityFsEntryMetadataSchema = z.strictObject({
   flags: uint32,
 });
 
+/** Parsed source fields owned by the wxapkg adapter, independent of member bytes. */
+export const wxapkgMetadataSchema = z.strictObject({
+  kind: z.literal("wxapkg"),
+  info: uint32.nullable(),
+  index_length: uint32.nullable(),
+  data_length: uint32.nullable(),
+  file_count: uint32.nullable(),
+  directory_status: z.enum(["available", "encrypted"]),
+});
+export type WxapkgMetadata = z.infer<typeof wxapkgMetadataSchema>;
+
+export const wxapkgEntryMetadataSchema = z.strictObject({
+  kind: z.literal("wxapkg-entry"),
+  index: uint32,
+  source_path: z.string(),
+  declared_offset: offset,
+});
+
 /** Source cookie fields and derived directory counts without Python execution. */
 export const pyInstallerMetadataSchema = z.strictObject({
   kind: z.literal("pyinstaller"),
@@ -351,6 +369,7 @@ export const fitImageMetadataSchema = z.strictObject({
   signature_algorithms: z.array(z.string()),
 });
 export type FitImageMetadata = z.infer<typeof fitImageMetadataSchema>;
+
 export const uint8 = z.number().int().min(0).max(0xff);
 const uint16 = z.number().int().min(0).max(0xffff);
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/u);
@@ -764,6 +783,8 @@ export const artifactFormatMetadataSchema = z.discriminatedUnion("kind", [
   godotPckEntryMetadataSchema,
   unityFsMetadataSchema,
   unityFsEntryMetadataSchema,
+  wxapkgMetadataSchema,
+  wxapkgEntryMetadataSchema,
   pyInstallerMetadataSchema,
   pyInstallerEntryMetadataSchema,
   dotnetBundleEntryMetadataSchema,
@@ -836,6 +857,14 @@ const declarationsByKind: {
       flags: metadata.flags,
     }),
   },
+  wxapkg: {
+    notCompared:
+      "Its fields come from the package's own bytes, which content comparison covers.",
+  },
+  "wxapkg-entry": {
+    notCompared:
+      "index is layout. source_path keeps the declared name, including a producer root prefix the occurrence path strips.",
+  },
   pyinstaller: {
     notCompared:
       "Its fields come from the archive's own bytes, which content comparison covers.",
@@ -906,6 +935,25 @@ const declarationsByKind: {
     notCompared:
       "Its fields come from the block's own bytes, which content comparison covers, and image_digest_matches follows the image's content.",
   },
+  uf2: {
+    notCompared:
+      "Its counts come from the file's own blocks, which content comparison covers, and family_name_registry names REA's label registry.",
+  },
+  "uf2-region": {
+    notCompared:
+      "Its familyID and addresses are in its path, family_name is REA's label for the familyID, and its block counts and positions are layout; content comparison covers its bytes.",
+  },
+  dfuse: {
+    notCompared:
+      "Its fields come from the file's own prefix, target headers and suffix, which content comparison covers.",
+  },
+  /** The device memory an element targets, which its path and bytes do not show. */
+  "dfuse-element": {
+    declaration: (metadata) => ({
+      alternate_setting: metadata.alternate_setting,
+      target_name: metadata.target_name,
+    }),
+  },
   "esp-flash-image": {
     notCompared:
       "Its fields come from the dump's bytes and from the caller's flash_offset and partition_table_offset, which are target identity; each partition's range, compared by content, reflects them.",
@@ -925,25 +973,6 @@ const declarationsByKind: {
       encrypted: metadata.encrypted,
       readonly: metadata.readonly,
       unknown_flags: metadata.unknown_flags,
-    }),
-  },
-  uf2: {
-    notCompared:
-      "Its counts come from the file's own blocks, which content comparison covers, and family_name_registry names REA's label registry.",
-  },
-  "uf2-region": {
-    notCompared:
-      "Its familyID and addresses are in its path, family_name is REA's label for the familyID, and its block counts and positions are layout; content comparison covers its bytes.",
-  },
-  dfuse: {
-    notCompared:
-      "Its fields come from the file's own prefix, target headers and suffix, which content comparison covers.",
-  },
-  /** The device memory an element targets, which its path and bytes do not show. */
-  "dfuse-element": {
-    declaration: (metadata) => ({
-      alternate_setting: metadata.alternate_setting,
-      target_name: metadata.target_name,
     }),
   },
   fit: {

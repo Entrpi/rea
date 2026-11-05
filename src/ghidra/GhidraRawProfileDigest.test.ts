@@ -20,10 +20,10 @@ import { ghidraProfileInstallationHost as host } from "./GhidraInstallation.fixt
 import { GhidraProvider } from "./GhidraProvider.js";
 
 // Digests commit to the current shared policy, including the instruction
-// status, load-image relocation-symbol and procedure search revisions that
-// prevent reuse of snapshots with earlier results. On embedded-integration
-// they also include Change 2's no_return_repair revision, so they differ from
-// main's.
+// status, load-image relocation-symbol, procedure search, byte-search and
+// bit-field base-type revisions that prevent reuse of snapshots with earlier
+// results. On embedded-integration they also include Change 2's
+// no_return_repair revision, so they differ from main's.
 const RAW_DIGESTS = {
   "6502": "3cd7e823b228e1a78bc42607041c623bdef83395ee29d9e58088823b0dedd8a8",
   "x86-disabled-analyzer":
@@ -101,6 +101,8 @@ describe("raw-binary analysis profile digest", () => {
       load_image_observations:
         "source-mappings-entry-context-relocation-symbol-v3",
       instruction_status: "unlisted-address-without-decode-v1",
+      byte_search_boundary: "contiguous-eligible-initialized-blocks-v1",
+      data_type_observations: "bit-field-base-and-lookup-v1",
       analyzer_preset: "ghidra-default",
     });
   });
