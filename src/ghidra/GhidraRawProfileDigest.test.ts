@@ -30,7 +30,7 @@ const RAW_DIGESTS = {
     "5838c4d952bed9704d4c6f9ef497f3f1fd72bf29fa1ab72afc110d87445ab9e3",
 } as const;
 
-// Computed by upstream main at d3ab0faf5, which has neither a separate base nor
+// Computed by upstream main at 71f680d7c, which has neither a separate base nor
 // a variant, and recomputed on embedded-integration, where Change 2's
 // no_return_repair revision changes every Ghidra profile. A raw load whose base
 // is its caller-selected entry keeps these profile digests, so it stays
