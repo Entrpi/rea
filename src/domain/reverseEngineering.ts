@@ -106,11 +106,13 @@ export const rizinInputSchema = z
       .min(1)
       .max(64)
       .exactOptional()
-      .describe("Rizin asm.bits, passed as -b, such as 16 for Thumb."),
+      .describe(
+        "Rizin asm.bits, passed as -b, such as 16 for Thumb. Omitted, Rizin's default applies.",
+      ),
     asm_cpu: rizinNameSchema
       .exactOptional()
       .describe(
-        "Rizin asm.cpu, passed as -e asm.cpu=, such as cortexm; e asm.cpu=? lists them.",
+        "Rizin asm.cpu, passed as -e asm.cpu=, such as cortexm; e asm.cpu=? lists those of the selected arch.",
       ),
     base_address: z
       .string()
@@ -119,7 +121,7 @@ export const rizinInputSchema = z
       })
       .exactOptional()
       .describe(
-        "Address of file offset 0. REA passes -n and -m, so Rizin maps the file there as a raw image and reads no format headers.",
+        "Address of file offset 0. REA passes -n and -m, so Rizin maps the file there as a raw image, reads no format headers, and keeps its default decoder unless asm_arch and asm_bits select one.",
       ),
     ...commandTimeoutMsField,
   })

@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { expect, it } from "vitest";
 
-import { toolContract } from "../../../src/contracts/toolContracts.js";
+import { REVERSE_ENGINEERING_TOOL_CONTRACTS } from "../../../src/contracts/reverseEngineeringToolContracts.js";
 import { rizinCommandLimitations } from "../../../src/rizin/RizinCommand.js";
 import { createProviderEnvironmentMcpHarness } from "../../support/reverseDebuggerMcpTestHelpers.js";
 
@@ -20,6 +20,8 @@ const banner = rizin === undefined ? "no Rizin on PATH" : versionBanner(rizin);
 const CORTEX_M_IMAGE = Buffer.from([
   0x00, 0x20, 0x00, 0x20, 0x09, 0x01, 0x00, 0x08, 0x70, 0x47, 0x00, 0xbf,
 ]);
+// Thumb `msr primask, r0`, which only an M-profile decoder knows.
+const MSR_PRIMASK = Buffer.from([0x80, 0xf3, 0x10, 0x88]);
 // 6502 `nop; rts`; no host decodes 6502 by default.
 const MOS_6502_IMAGE = Buffer.from([0xea, 0x60]);
 // Raw images that Rizin's loaders claim unless REA passes -n. Rizin 0.9.1's
@@ -36,6 +38,12 @@ BIOS_LIKE_IMAGE.set([0x11, 0x22, 0x33, 0x44], 0);
 BIOS_LIKE_IMAGE[0xfff0] = 0xea;
 BIOS_LIKE_IMAGE[0xffff] = 0x5a;
 
+const rizinContract = REVERSE_ENGINEERING_TOOL_CONTRACTS.find(
+  (contract) => contract.name === "execute_rizin_command",
+);
+if (rizinContract === undefined)
+  throw new Error("execute_rizin_command contract is missing");
+
 const hex = (value: number): string => `0x${value.toString(16)}`;
 
 const runRizin = async (
@@ -43,22 +51,21 @@ const runRizin = async (
   image: Buffer,
 ) => {
   const directory = await mkdtemp(join(tmpdir(), "rea-rizin-decoder-"));
-  const path = join(directory, "image.bin");
-  await writeFile(path, image);
+  // The harness owns the directory, so it must exist before setup can fail.
   const { client } = await createProviderEnvironmentMcpHarness({
     directory,
     clientName: "real-rizin-decoder-inputs",
     serverOptions: { environment: { REA_RIZIN_COMMAND: rizin! } },
   });
+  const path = join(directory, "image.bin");
+  await writeFile(path, image);
   const toolArguments = { path, ...input };
   const response = await client.callTool({
     name: "execute_rizin_command",
     arguments: toolArguments,
   });
   expect(response.isError, JSON.stringify(response.content)).not.toBe(true);
-  const evidence = toolContract("execute_rizin_command").outputSchema.parse(
-    response.structuredContent,
-  );
+  const evidence = rizinContract.outputSchema.parse(response.structuredContent);
   expect(evidence.normalized_result.exit_code).toBe(0);
   expect(evidence.limitations).toEqual(
     expect.arrayContaining([
@@ -107,6 +114,42 @@ it.skipIf(rizin === undefined)(
       "ff",
       "bx lr",
     ]);
+  },
+);
+
+it.skipIf(rizin === undefined)(
+  `applies asm_cpu to the decoder, and echoes one Rizin lacks (${banner})`,
+  async () => {
+    const thumb = { asm_arch: "arm", asm_bits: 16, base_address: "0x0" };
+    const plain = await runRizin({ command: "pi 1", ...thumb }, MSR_PRIMASK);
+    expect(plain.lines).toEqual(["invalid"]);
+
+    const selected = await runRizin(
+      { command: "pi 1", ...thumb, asm_cpu: "cortexm" },
+      MSR_PRIMASK,
+    );
+    expect(selected.lines).toEqual(["msr primask, r0"]);
+
+    const unknown = await runRizin(
+      { command: "e asm.cpu; pi 1", ...thumb, asm_cpu: "rea-no-such-cpu" },
+      MSR_PRIMASK,
+    );
+    expect(unknown.lines).toEqual(["rea-no-such-cpu", "invalid"]);
+  },
+);
+
+it.skipIf(rizin === undefined)(
+  `states what a call with only base_address leaves unconfirmed (${banner})`,
+  async () => {
+    const { lines } = await runRizin(
+      { command: "omlj; om-*; omlj", base_address: "0x8000" },
+      CORTEX_M_IMAGE,
+    );
+    expect(mapsOf(lines[0])).toEqual([
+      expect.objectContaining({ delta: 0, from: 0x8000 }),
+    ]);
+    // The command removed the map, so the map is not a fact of the result.
+    expect(mapsOf(lines[1])).toEqual([]);
   },
 );
 
