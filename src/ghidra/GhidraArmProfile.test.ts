@@ -46,7 +46,7 @@ import {
   ghidraVariantProcessorLabels,
 } from "./GhidraRawBinaryLanguage.js";
 
-// Computed by upstream main at 07dfd1261, which has no ARM ELF lane, and
+// Computed by upstream main at 71f680d7c, which has no ARM ELF lane, and
 // recomputed on embedded-integration, where Change 2's no_return_repair
 // revision changes every Ghidra profile: for an ARM ELF without and with
 // REA_GHIDRA_LANGUAGE_ID=ARM:LE:32:Cortex. Targets outside the lane, and a
