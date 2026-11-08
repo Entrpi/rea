@@ -52,9 +52,9 @@ import {
 // REA_GHIDRA_LANGUAGE_ID=ARM:LE:32:Cortex. Targets outside the lane, and a
 // caller-selected language, keep these digests and so their snapshots.
 const AUTO_DIGEST =
-  "9659906b12f5eefb7cb0b71ff4babe51e426cc226310e31c13a48e24fc1994fa";
+  "3ba0ec19143189cda5f79e7ad4f51612f4afd40d276ccbed49ace3707951b280";
 const CORTEX_OVERRIDE_DIGEST =
-  "5b8df669368f648fef756d0d0772f16b44f7a8baf90acc470c7832485f6e8bb3";
+  "1e28dfdad4eea0cde2dac2152a2051331304c7a4e9b83d9c63e8c1f796463bbf";
 
 // Abbreviated from Ghidra 12.1.4 Processors/ARM/data/languages/ARM.ldefs.
 const ARM_LDEFS = `<?xml version="1.0" encoding="UTF-8"?>
