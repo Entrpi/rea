@@ -326,7 +326,7 @@ processors with a second loaded space, such as Z80 and 8085 (`io`), RISC-V
 their declared size, such as x86 real mode and M16C.
 
 `npm run verify:ghidra:provider-language` checks this lane against real Ghidra
-12.1.4; see [testing](testing.md).
+12.1.4; see [testing](../development/testing.md).
 
 ### Identity of a provider language
 
