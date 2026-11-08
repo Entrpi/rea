@@ -118,12 +118,13 @@ describe("raw-binary snapshots saved before base_address", () => {
     const { target } = f;
     const profile = await ghidraProfile(target);
     expect(snapshotMatchesTarget(snapshot.target, target)).toBe(true);
-    // Upstream's instruction-status (#7823), load-image observation (#8531),
-    // procedure search (#8520), reference, byte-search (#8840) and data-type
-    // (#8602) revisions keep every Ghidra snapshot saved before them from replaying,
-    // and on this integration branch so does Change 2's no-return revision.
-    // Apart from those parameters, the profile is the one this snapshot
-    // recorded.
+    // Upstream's instruction-status (#7823, #8777), load-image observation
+    // (#8531), procedure search (#8520), reference, byte-search (#8840,
+    // #8608), data-type (#8602), inventory-search (#8376) and value-flow
+    // (#8651) revisions keep every Ghidra snapshot saved before them from
+    // replaying, and on this integration branch so does Change 2's no-return
+    // revision. Apart from those parameters, the profile is the one this
+    // snapshot recorded.
     const mismatch = snapshotBindingMismatch(snapshot, target, profile);
     expect(mismatch).not.toHaveProperty("target");
     expect(mismatch).toHaveProperty("profile_digest");
@@ -135,7 +136,10 @@ describe("raw-binary snapshots saved before base_address", () => {
       function_references: functionReferences,
       instruction_references: instructionReferences,
       byte_search_boundary: byteSearch,
+      byte_search_coverage: byteSearchCoverage,
       data_type_observations: dataTypes,
+      inventory_search_projection: inventorySearch,
+      value_flow_effect_scope: valueFlow,
       ...parameters
     } = profile.parameters;
     const {
@@ -145,10 +149,13 @@ describe("raw-binary snapshots saved before base_address", () => {
       instruction_references: recordedInstructionReferences,
       ...recorded
     } = snapshot.binding.analysis_profile.parameters;
-    expect(status).toBe("unlisted-address-without-decode-v1");
+    expect(status).toBe("unlisted-and-containing-code-data-v3");
     expect(search).toBe("primary-and-exact-entry-symbol-names-v1");
     expect(byteSearch).toBe("contiguous-eligible-initialized-blocks-v1");
     expect(dataTypes).toBe("bit-field-base-and-lookup-v1");
+    expect(inventorySearch).toBe("provider-inventory-facts-v1");
+    expect(byteSearchCoverage).toBe("separate-loaded-overlays-v1");
+    expect(valueFlow).toBe("pcode-load-store-explicit-v1");
     expect([recordedObservations, observations]).toEqual([
       "source-mappings-entry-context-v2",
       "source-mappings-entry-context-relocation-symbol-v3",
