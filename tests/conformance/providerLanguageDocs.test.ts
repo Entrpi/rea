@@ -6,7 +6,8 @@ import { expect, it } from "vitest";
 import { PROVIDER_LANGUAGE_PAIRING } from "../../src/domain/rawBinary.js";
 import { GHIDRA_LANGUAGE_DEFINITION_FILES } from "../../src/ghidra/GhidraLanguageCatalog.js";
 
-const rawBinaryGuide = () => readFile(resolve("docs/raw-binary.md"), "utf8");
+const rawBinaryGuide = () =>
+  readFile(resolve("docs/providers/raw-binary.md"), "utf8");
 
 it("documents every language definition file that identity covers", async () => {
   const content = await rawBinaryGuide();

@@ -294,7 +294,6 @@ const registerRiscvAdmissionAndCapabilityCases = () => {
     const resolved = await ghidra({
       REA_GHIDRA_LANGUAGE_ID: "RISCV:LE:32:AndeStar_v5",
     }).resolveAnalysisProfile(target({ elfClass: 32 }));
-    expect(resolved.ok).toBe(false);
     if (resolved.ok) throw new Error("expected a refusal");
     expect(resolved.error.message).toContain("generic little-endian RISC-V");
     expect(resolved.error).toMatchObject({
@@ -419,9 +418,9 @@ describe("RISC-V lane and calling-convention tables", () => {
         expect(GHIDRA_RISCV32_DECODED_EXTENSIONS.has(extension)).toBe(true);
   });
 
-  it("keeps the decision record in docs/ghidra-riscv.md in step with the tables", async () => {
+  it("keeps the decision record in docs/providers/ghidra-riscv.md in step with the tables", async () => {
     const docs = await readFile(
-      new URL("../../docs/ghidra-riscv.md", import.meta.url),
+      new URL("../../docs/providers/ghidra-riscv.md", import.meta.url),
       "utf8",
     );
     for (const lane of GHIDRA_RISCV_LANES)
@@ -1069,7 +1068,7 @@ describe("RISC-V load preparation admission", () => {
         target({ sectionOverlap: overlapping }),
         ilp32(C3_ARCH, { sectionOverlap: overlapping }),
       ],
-      "Sections `.text` (executable, 0x1000, 0x100 bytes) and section [2] (NOBITS, 0x1080, 0x100 bytes) share addresses, so Ghidra 12.1.4's ELF loader would put one of them in an overlay address space. This lane prepares only one NOBITS section that starts at an executable PROGBITS section's address and covers it, with no other section overlapping either; see docs/ghidra-riscv.md.",
+      "Sections `.text` (executable, 0x1000, 0x100 bytes) and section [2] (NOBITS, 0x1080, 0x100 bytes) share addresses, so Ghidra 12.1.4's ELF loader would put one of them in an overlay address space. This lane prepares only one NOBITS section that starts at an executable PROGBITS section's address and covers it, with no other section overlapping either; see docs/providers/ghidra-riscv.md.",
     ],
   ] as const)(
     "refuses a section table that is %s in every lane",

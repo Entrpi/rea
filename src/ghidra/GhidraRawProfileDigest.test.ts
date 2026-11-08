@@ -21,7 +21,7 @@ import { GhidraProvider } from "./GhidraProvider.js";
 
 // Digests commit to the current shared policy, including the instruction
 // status, load-image relocation-symbol, procedure search, byte-search and
-// bit-field base-type revisions that prevent reuse of snapshots with earlier
+// bit-field base-type and inventory-search revisions that prevent reuse of snapshots with earlier
 // results. On embedded-integration they also include Change 2's
 // no_return_repair revision, so they differ from main's.
 const RAW_DIGESTS = {
@@ -100,9 +100,14 @@ describe("raw-binary analysis profile digest", () => {
       load_image_evidence: "independent-raw-mapping-context-v4",
       load_image_observations:
         "source-mappings-entry-context-relocation-symbol-v3",
-      instruction_status: "unlisted-address-without-decode-v1",
+      instruction_status: "unlisted-and-containing-code-data-v3",
+      inventory_search_projection: "provider-inventory-facts-v1",
+      value_flow_effect_scope: "pcode-load-store-explicit-v1",
       byte_search_boundary: "contiguous-eligible-initialized-blocks-v1",
+      byte_search_coverage: "separate-loaded-overlays-v1",
       data_type_observations: "bit-field-base-and-lookup-v1",
+      instruction_references:
+        "exact-address-incoming-without-synthetic-entry-v3",
       analyzer_preset: "ghidra-default",
     });
   });
@@ -122,6 +127,9 @@ describe("raw-binary analysis profile digest", () => {
       RAW_DIGESTS["x86-disabled-analyzer"],
     );
     expect(resolved.value.profile?.parameters).toMatchObject({
+      inventory_search_projection: "provider-inventory-facts-v1",
+      value_flow_effect_scope: "pcode-load-store-explicit-v1",
+      byte_search_coverage: "separate-loaded-overlays-v1",
       analysis_options: {
         disabled_analyzers: ["Aggressive Instruction Finder"],
       },

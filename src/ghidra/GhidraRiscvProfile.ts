@@ -26,7 +26,7 @@ export type GhidraRiscvCallingConvention =
  * The ABI and prototype of each policy REA applies after analysis.
  * `ReaGhidraRiscvCallingConvention.java` derives each prototype from the
  * pinned language's default `riscv32-fp.cspec` model, which is ilp32d;
- * docs/ghidra-riscv.md states the rules of each ABI.
+ * docs/providers/ghidra-riscv.md states the rules of each ABI.
  */
 export const GHIDRA_RISCV_CALLING_CONVENTIONS: Readonly<
   Record<
@@ -227,7 +227,7 @@ const ghidraRiscvIsaRefusal = (
       ", ",
     )}. Ghidra 12.1.4's generic RV32 language implements only ${[
       ...GHIDRA_RISCV32_DECODED_EXTENSIONS,
-    ].join(", ")} with p-code; see docs/ghidra-riscv.md.`;
+    ].join(", ")} with p-code; see docs/providers/ghidra-riscv.md.`;
   const missing = (lane.requiredExtensions ?? []).filter(
     (extension) => !isa.extensions.includes(extension),
   );
@@ -246,7 +246,7 @@ const ghidraRiscvIsaRefusal = (
     ? null
     : `Tag_RISCV_arch declares ${isa.arch} with ${excluded.join(", ")}: ${
         exclusion.reason
-      }; see docs/ghidra-riscv.md.`;
+      }; see docs/providers/ghidra-riscv.md.`;
 };
 
 const sectionLabel = (extent: ElfSectionExtent): string =>
@@ -274,7 +274,7 @@ const ghidraRiscvSectionOverlapRefusal = (
     return `This RISC-V lane requires a readable section table: ${overlap.reason}.`;
   if (overlap.status !== "unsupported") return null;
   const [first, second] = overlap.witnesses;
-  return `Sections ${witnessLabel(first)} and ${witnessLabel(second)} share addresses, so Ghidra 12.1.4's ELF loader would put one of them in an overlay address space. This lane prepares only one NOBITS section that starts at an executable PROGBITS section's address and covers it, with no other section overlapping either; see docs/ghidra-riscv.md.`;
+  return `Sections ${witnessLabel(first)} and ${witnessLabel(second)} share addresses, so Ghidra 12.1.4's ELF loader would put one of them in an overlay address space. This lane prepares only one NOBITS section that starts at an executable PROGBITS section's address and covers it, with no other section overlapping either; see docs/providers/ghidra-riscv.md.`;
 };
 
 /**
@@ -475,7 +475,7 @@ export const ghidraRiscvCallingConventionFailure = (
       ? "The Ghidra session reported a RISC-V calling-convention policy that the profile did not commit."
       : `The Ghidra session did not report the committed RISC-V calling-convention policy ${expected}.`
     : report !== undefined && "refused" in report
-      ? `RISC-V calling-convention policy ${report.policy} refused this image, so REA does not serve its analysis: ${report.refused} See docs/ghidra-riscv.md.`
+      ? `RISC-V calling-convention policy ${report.policy} refused this image, so REA does not serve its analysis: ${report.refused} See docs/providers/ghidra-riscv.md.`
       : undefined;
 
 /**
@@ -501,7 +501,7 @@ export const ghidraRiscvCallingConventionLimitations = (
   if (expected === undefined) return [];
   const { abi, prototype } = GHIDRA_RISCV_CALLING_CONVENTIONS[expected];
   return [
-    `RISC-V ${abi}: Ghidra's generic RV32 compiler specification models ilp32d. After analysis REA installs a program-specific \`${prototype}\` prototype, derived from the default prototype by policy ${expected} (docs/ghidra-riscv.md), and assigns it with dynamic storage to every function, external function and function definition. Thunks follow their targets.`,
+    `RISC-V ${abi}: Ghidra's generic RV32 compiler specification models ilp32d. After analysis REA installs a program-specific \`${prototype}\` prototype, derived from the default prototype by policy ${expected} (docs/providers/ghidra-riscv.md), and assigns it with dynamic storage to every function, external function and function definition. Thunks follow their targets.`,
     ...(report === undefined || "refused" in report
       ? []
       : [
@@ -605,7 +605,7 @@ export const ghidraRiscvLoadPreparationLimitations = (
   const code = sectionLabel(expected.code);
   const reservation = sectionLabel(expected.reservation);
   return [
-    `RISC-V ELF load layout: NOBITS section ${reservation} reserves the addresses of executable section ${code} (${expected.code.address}, ${expected.code.size} bytes). When the reservation follows the code in the section table, Ghidra 12.1.4's ELF loader puts the code in an overlay address space, which its DWARF import, call-frame entries and default-space references do not reach; see docs/ghidra-riscv.md.`,
+    `RISC-V ELF load layout: NOBITS section ${reservation} reserves the addresses of executable section ${code} (${expected.code.address}, ${expected.code.size} bytes). When the reservation follows the code in the section table, Ghidra 12.1.4's ELF loader puts the code in an overlay address space, which its DWARF import, call-frame entries and default-space references do not reach; see docs/providers/ghidra-riscv.md.`,
     report === undefined || "refused" in report
       ? `Before analysis REA moves ${code} out of such an overlay into the default address space, with the same file bytes and offsets, and keeps ${reservation} as an uninitialized overlay.`
       : report.outcome === "moved"

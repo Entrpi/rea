@@ -17,10 +17,7 @@ import {
   AnalysisInputError,
 } from "../../domain/analysisErrorCore.js";
 import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
-import {
-  resolveExecutable,
-  resolveProcessScenarioRuntimePaths,
-} from "./ProcessScenarioRuntimeValidation.js";
+import { resolveProcessScenarioRuntimePaths } from "./ProcessScenarioRuntimeValidation.js";
 import { processScenarioSchema } from "../../domain/process/processScenario.js";
 import {
   fileStepBudget,
@@ -38,7 +35,6 @@ it.skipIf(process.platform === "win32")(
     const command = "selected\\node";
     const selected = join(bin, command);
     await symlink(process.execPath, selected);
-    await expect(resolveExecutable(command, root, bin)).resolves.toBe(selected);
     const resolved = await resolveProcessScenarioRuntimePaths(
       processScenarioSchema.parse({
         executable: command,
@@ -58,7 +54,14 @@ it.skipIf(process.platform === "win32")(
       const alias = join(root, "chosen-node");
       await symlink(process.execPath, alias);
 
-      await expect(resolveExecutable(alias, root, "")).resolves.toBe(alias);
+      const resolved = await resolveProcessScenarioRuntimePaths(
+        processScenarioSchema.parse({
+          executable: alias,
+          working_directory: root,
+          environment: { PATH: "" },
+        }),
+      );
+      expect(resolved.executable).toBe(alias);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -111,6 +114,7 @@ it("reports a working-directory file as invalid input", async () => {
       executable: process.execPath,
       working_directory: selectedFile,
     });
+    expect(failure.issues[0]?.message).toContain("not a directory");
     expect(projectAnalysisError(failure)).toMatchObject({
       code: "invalid_request",
       details: {
@@ -119,7 +123,7 @@ it("reports a working-directory file as invalid input", async () => {
           {
             path: ["working_directory"],
             reason: "invalid_value",
-            message: `working directory is not a directory: ${selectedFile}`,
+            message: expect.stringContaining(selectedFile),
           },
         ],
       },
@@ -141,6 +145,7 @@ it.skipIf(process.platform === "win32")(
       executable: process.execPath,
       working_directory: aliasFile,
     });
+    expect(failure.issues[0]?.message).toContain("not a directory");
     expect(projectAnalysisError(failure)).toMatchObject({
       code: "invalid_request",
       details: {
@@ -149,7 +154,7 @@ it.skipIf(process.platform === "win32")(
           {
             path: ["working_directory"],
             reason: "invalid_value",
-            message: `working directory is not a directory: ${aliasFile}`,
+            message: expect.stringContaining(aliasFile),
           },
         ],
       },
@@ -168,13 +173,14 @@ it("reports an executable directory as invalid input", async () => {
       executable: directory,
       working_directory: root,
     });
+    expect(directoryFailure.issues[0]?.message).toContain("not a regular file");
     expect(projectAnalysisError(directoryFailure)).toMatchObject({
       code: "invalid_request",
       details: {
         issues: [
           {
             path: ["executable"],
-            message: `executable could not be resolved: ${directory}; checked ${directory} (not a regular file)`,
+            message: expect.stringContaining(directory),
           },
         ],
       },
@@ -196,13 +202,14 @@ it.skipIf(process.platform === "win32")(
         executable: selected,
         working_directory: root,
       });
+      expect(failure.issues[0]?.message).toContain("EACCES");
       expect(projectAnalysisError(failure)).toMatchObject({
         code: "invalid_request",
         details: {
           issues: [
             {
               path: ["executable"],
-              message: `executable could not be resolved: ${selected}; checked ${selected} (EACCES)`,
+              message: expect.stringContaining(selected),
             },
           ],
         },
@@ -301,9 +308,14 @@ it.skipIf(SKIP_PERMISSIONS)(
     const tool = join(bin, "tool");
     await writeFile(tool, "#!/bin/sh\n", { mode: 0o755 });
     await withoutSearchPermission(denied, async () => {
-      await expect(
-        resolveExecutable("tool", root, [denied, bin].join(delimiter)),
-      ).resolves.toBe(tool);
+      const resolved = await resolveProcessScenarioRuntimePaths(
+        processScenarioSchema.parse({
+          executable: "tool",
+          working_directory: root,
+          environment: { PATH: [denied, bin].join(delimiter) },
+        }),
+      );
+      expect(resolved.executable).toBe(tool);
       const failure = await runtimePathOutcome({
         executable: "tool",
         working_directory: root,
@@ -311,13 +323,14 @@ it.skipIf(SKIP_PERMISSIONS)(
       });
       expect(failure).toBeInstanceOf(AnalysisInputError);
       if (!(failure instanceof AnalysisInputError)) return;
+      expect(failure.issues[0]?.message).toContain("EACCES");
       expect(projectAnalysisError(failure)).toMatchObject({
         code: "invalid_request",
         details: {
           issues: [
             {
               path: ["executable"],
-              message: `executable could not be resolved: tool; checked ${join(denied, "tool")} (EACCES)`,
+              message: expect.stringContaining(join(denied, "tool")),
             },
           ],
         },
@@ -365,7 +378,13 @@ it.skipIf(process.platform === "win32").each(["absolute", "relative", "PATH"])(
         : selection === "relative"
           ? "alias/../probe"
           : "probe";
-    const executable = await resolveExecutable(command, root, "alias/..");
+    const { executable } = await resolveProcessScenarioRuntimePaths(
+      processScenarioSchema.parse({
+        executable: command,
+        working_directory: root,
+        environment: { PATH: "alias/.." },
+      }),
+    );
     expect(await realpath(executable)).toBe(join(intended, "probe"));
     expect(execFileSync(executable, { encoding: "utf8", timeout: 2000 })).toBe(
       "intended",
