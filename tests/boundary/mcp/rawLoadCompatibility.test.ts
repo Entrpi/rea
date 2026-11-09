@@ -120,11 +120,11 @@ describe("raw-binary snapshots saved before base_address", () => {
     expect(snapshotMatchesTarget(snapshot.target, target)).toBe(true);
     // Upstream's instruction-status (#7823, #8777), load-image observation
     // (#8531), procedure search (#8520), reference, byte-search (#8840,
-    // #8608), data-type (#8602), inventory-search (#8376) and value-flow
-    // (#8651) revisions keep every Ghidra snapshot saved before them from
-    // replaying, and on this integration branch so does Change 2's no-return
-    // revision. Apart from those parameters, the profile is the one this
-    // snapshot recorded.
+    // #8608), data-type (#8602), inventory-search (#8376), value-flow (#8651)
+    // and call-coverage (#8340) revisions keep every Ghidra snapshot saved
+    // before them from replaying, and on this integration branch so does
+    // Change 2's no-return revision. Apart from those parameters, the profile
+    // is the one this snapshot recorded.
     const mismatch = snapshotBindingMismatch(snapshot, target, profile);
     expect(mismatch).not.toHaveProperty("target");
     expect(mismatch).toHaveProperty("profile_digest");
@@ -140,9 +140,11 @@ describe("raw-binary snapshots saved before base_address", () => {
       data_type_observations: dataTypes,
       inventory_search_projection: inventorySearch,
       value_flow_effect_scope: valueFlow,
+      call_relationship_coverage: callCoverage,
       ...parameters
     } = profile.parameters;
     const {
+      call_relationship_coverage: recordedCallCoverage,
       load_image_observations: recordedObservations,
       no_return_repair: recordedRepair,
       function_references: recordedFunctionReferences,
@@ -156,6 +158,10 @@ describe("raw-binary snapshots saved before base_address", () => {
     expect(inventorySearch).toBe("provider-inventory-facts-v1");
     expect(byteSearchCoverage).toBe("separate-loaded-overlays-v1");
     expect(valueFlow).toBe("pcode-load-store-explicit-v1");
+    expect([recordedCallCoverage, callCoverage]).toEqual([
+      "function-body-call-coverage-v5",
+      "observed-call-inventory-and-discovery-v7",
+    ]);
     expect([recordedObservations, observations]).toEqual([
       "source-mappings-entry-context-v2",
       "source-mappings-entry-context-relocation-symbol-v3",
