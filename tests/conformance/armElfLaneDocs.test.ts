@@ -25,7 +25,10 @@ const tableRows = (content: string, first: RegExp) =>
     );
 
 it("documents every M-profile architecture with its lane", async () => {
-  const content = await readFile(resolve("docs/providers/ghidra-arm.md"), "utf8");
+  const content = await readFile(
+    resolve("docs/providers/ghidra-arm.md"),
+    "utf8",
+  );
   expect(tableRows(content, /^\|\s*\d+\s*\|/u)).toEqual(
     ARM_ELF_M_PROFILE_ARCHITECTURES.map(({ cpuArch, label, variant }) => [
       String(cpuArch),
@@ -38,7 +41,10 @@ it("documents every M-profile architecture with its lane", async () => {
 });
 
 it("documents every float ABI reading and its DWARF prototype", async () => {
-  const content = await readFile(resolve("docs/providers/ghidra-arm.md"), "utf8");
+  const content = await readFile(
+    resolve("docs/providers/ghidra-arm.md"),
+    "utf8",
+  );
   const prototypes: Partial<
     Record<string, { readonly callingConvention: string }>
   > = GHIDRA_ARM_ELF_DWARF_PROTOTYPES;
