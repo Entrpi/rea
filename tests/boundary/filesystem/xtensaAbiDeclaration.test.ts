@@ -4,7 +4,11 @@ import { describe, expect, it } from "vitest";
 import { parseBinaryTarget } from "../../../src/application/BinaryTargetResolver.js";
 import { readXtensaElfInfo } from "../../../src/application/XtensaElfMetadata.js";
 import type { XtensaAbiDeclaration } from "../../../src/domain/binaryTargetTypes.js";
-import { ghidraXtensaUnsupportedReason } from "../../../src/ghidra/GhidraXtensaProfile.js";
+import {
+  ghidraXtensaProfileParameters,
+  ghidraXtensaUnsupportedReason,
+  isGhidraXtensaCall0Target,
+} from "../../../src/ghidra/GhidraXtensaProfile.js";
 import {
   elfNote,
   elfNoteFixture,
@@ -127,11 +131,18 @@ describe("Xtensa ELF target resolution", () => {
     );
   });
 
-  it("records call0 and keeps the Ghidra refusal specific", async () => {
+  it("records call0 and admits the Ghidra call0 lane", async () => {
     const target = await resolveFixture(xtensaElf({ abi: "1" }));
     expect(target.xtensa.abi).toEqual({ status: "declared", abi: "call0" });
-    // The fixture differs from the admitted one only in its ABI.
-    expect(ghidraXtensaUnsupportedReason(target)).not.toBeNull();
+    expect(ghidraXtensaUnsupportedReason(target)).toBeNull();
+    expect(isGhidraXtensaCall0Target(target)).toBe(true);
+    expect(ghidraXtensaProfileParameters(target)).toMatchObject({
+      xtensa_elf: { abi: "call0" },
+      xtensa_support_lane: "elf32-le-exec-call0-generic-v1",
+      xtensa_call0_prototype: "call0-prototype-v1",
+    });
+    const windowed = await resolveFixture(xtensaElf());
+    expect(isGhidraXtensaCall0Target(windowed)).toBe(false);
   });
 
   it("reads big-endian note words without admitting big-endian images", async () => {

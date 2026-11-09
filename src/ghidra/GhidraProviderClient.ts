@@ -121,8 +121,12 @@ import {
   ghidraRiscvLoadPreparationParameters,
 } from "./GhidraRiscvProfile.js";
 import {
+  GHIDRA_XTENSA_CALL0_PROTOTYPE,
+  ghidraXtensaCall0Failure,
+  ghidraXtensaCall0Limitations,
   ghidraXtensaLimitations,
   ghidraXtensaProfileMismatchReason,
+  isGhidraXtensaCall0Target,
 } from "./GhidraXtensaProfile.js";
 import { ghidraPePdbLimitations } from "./GhidraPeProfile.js";
 import { unverifiedGhidraBuildLimitation } from "./GhidraReleasePolicy.js";
@@ -368,6 +372,21 @@ export const createGhidraProviderClient = (input: {
         },
       }),
     );
+  const call0 = isGhidraXtensaCall0Target(target);
+  // The call0 report binds in both directions.
+  if (
+    call0 !==
+    (committedProfile.parameters.xtensa_call0_prototype ===
+      GHIDRA_XTENSA_CALL0_PROTOTYPE)
+  )
+    return err(
+      new ProviderAdapterError("ghidra", "open_binary", {
+        diagnostics: {
+          reason:
+            "Resolve the Xtensa call0 prototype policy into the analysis profile before opening the session.",
+        },
+      }),
+    );
   const riscvCallingConvention = ghidraRiscvCallingConvention(target);
   if (
     riscvCallingConvention !==
@@ -605,6 +624,7 @@ export const createGhidraProviderClient = (input: {
   const softFloatLimitations: string[] = [
     ...ghidraMipsSoftFloatLimitations(softFloat),
   ];
+  const call0Limitations: string[] = [...ghidraXtensaCall0Limitations(call0)];
   // Replaced by the reported preparation and prototype outcomes once the
   // handshake is checked.
   const riscvPolicyLimitations: string[] = [
@@ -706,6 +726,7 @@ export const createGhidraProviderClient = (input: {
         ? { pspExtension: pspExtension.data }
         : {}),
       ...(softFloat ? { mipsSoftFloat: true as const } : {}),
+      ...(call0 ? { xtensaCall0: true as const } : {}),
       ...(riscvCallingConvention === undefined
         ? {}
         : { riscvCallingConvention }),
@@ -862,7 +883,8 @@ export const createGhidraProviderClient = (input: {
         ghidraArmDwarfCallingConventionFailure(
           armDwarfCallingConvention,
           info.dwarf_calling_convention,
-        );
+        ) ??
+        ghidraXtensaCall0Failure(call0, info.xtensa_call0_prototype);
       extensionFailure =
         ghidraExtensionFailure(
           extensions,
@@ -895,6 +917,12 @@ export const createGhidraProviderClient = (input: {
             softFloat,
             info.mips_soft_float_storage,
           ),
+        );
+      if (extensionFailure === undefined)
+        call0Limitations.splice(
+          0,
+          call0Limitations.length,
+          ...ghidraXtensaCall0Limitations(call0, info.xtensa_call0_prototype),
         );
       if (extensionFailure === undefined)
         riscvPolicyLimitations.splice(
@@ -974,6 +1002,7 @@ export const createGhidraProviderClient = (input: {
       ...softFloatLimitations,
       ...riscvPolicyLimitations,
       ...armDwarfLimitations,
+      ...call0Limitations,
       ...ghidraExtensionLimitations(extensions),
       ...seedLimitations,
       ...disabledAnalyzerLimitations,

@@ -1,7 +1,8 @@
 # Xtensa ELF analysis through Ghidra
 
 This lane extends native ELF analysis to `EM_XTENSA` targets, such as the
-`build/<app>.elf` that ESP-IDF links for ESP32, ESP32-S2 and ESP32-S3. It does not
+`build/<app>.elf` that ESP-IDF links for ESP32, ESP32-S2 and ESP32-S3, and call0
+ELF files such as ESP8266 builds; see [Call0 images](#call0-images). It does not
 execute Xtensa code, read flash images or partition tables, or rehost firmware.
 It addresses [#3483](https://github.com/morluto/rea/issues/3483) and follows the
 lane shape of [RISC-V](ghidra-riscv.md) and [PowerPC](../ghidra-ppc.md).
@@ -36,11 +37,11 @@ guessing a compatible profile:
 | `ET_REL`, `ET_DYN`, other `e_type`                                                            | refused; the reason names relocatable, shared, or the numeric `e_type`                                                                                                |
 | `e_flags` bits outside `EF_XTENSA_MACH` (0xf), `XT_INSN` (0x100), `XT_LIT` (0x200)            | refused with the offending bits named                                                                                                                                 |
 | Non-zero `EF_XTENSA_MACH`                                                                     | refused; binutils defines only `E_XTENSA_MACH` (0) and rejects other values                                                                                           |
-| `ABI=1` (call0), as ESP8266 builds declare                                                    | refused; call0 needs its own calling-convention selection and verification                                                                                            |
+| The same with `ABI=1` (call0), as ESP8266 builds declare                                      | admitted, the same language; REA assigns `__call0` after analysis                                                                                                     |
 | Another `ABI=` value                                                                          | refused with the declared value                                                                                                                                       |
 | `USE_ABSOLUTE_LITERALS=1` (L32R literals addressed from `LITBASE`)                            | refused; Ghidra 12.1.4 decodes L32R as PC-relative                                                                                                                    |
 | Another `USE_ABSOLUTE_LITERALS=` value                                                        | refused with the declared value                                                                                                                                       |
-| No `.xtensa.info`, or no `ABI=` or `USE_ABSOLUTE_LITERALS=` key                               | refused; neither the windowed ABI nor PC-relative literals are inferred                                                                                               |
+| No `.xtensa.info`, or no `ABI=` or `USE_ABSOLUTE_LITERALS=` key                               | refused; neither an ABI nor PC-relative literals are inferred                                                                                                         |
 | Unreadable or malformed `.xtensa.info`                                                        | refused with the reason, for example no section table, a compressed section, a malformed note or an `sh_addralign` other than up to 4 or 8, which GNU readelf rejects |
 
 ESP-IDF builds for ESP32, ESP32-S2 and ESP32-S3 declare `e_flags` 0x300 and
@@ -54,7 +55,8 @@ release has no runtime override, and runtime analysis settings do not raise it.
 In the Ghidra 12.1.4 sources, `xtensa.ldefs` defines `Xtensa:LE:32:default` and
 `Xtensa:BE:32:default`, each with one compiler specification whose id is
 `default`; there is no `gcc` id. The default prototype in `xtensa.cspec` models
-windowed calls, and `xtensa.opinion` maps ELF machine 94 to this processor. Header
+windowed calls; the specification also defines a `__call0` prototype. `xtensa.opinion`
+maps ELF machine 94 to this processor. Header
 selection should therefore choose the same language, but REA does not rely on
 that. It pins `Xtensa:LE:32:default`
 with `default`, records `language_selection: provider-pinned-v1`, and checks that
@@ -67,12 +69,51 @@ not changed. A selection that matches the pin is recorded as `configured-v1`. A
 selection that names only `Xtensa:LE:32:default` keeps the `default` compiler
 specification, so the import and the post-import check still commit to it.
 
+## Call0 images
+
+Under the call0 ABI, a callee preserves `a12`-`a15` and may change `a8`-`a11`.
+Ghidra 12.1.4's default Xtensa prototype, `__stdcall`, lists `a0`, `a1`,
+`a8`-`a11` and `t2`-`t7` as preserved instead, matching its window fixups, which
+save registers in `t2`-`t7`. `xtensa.cspec` defines the call0 model as
+`__call0`, with the same parameter and return registers, but a program cannot
+make it the default: the Decompiler option "Prototype Evaluation" selects only
+the model of the function being decompiled
+(`ProgramCompilerSpec.getPrototypeEvaluationModel`).
+
+For an image whose `.xtensa.info` declares `ABI=1`, REA therefore runs a script
+after analysis that assigns `__call0` to every function, external function and
+function definition, including the signatures Ghidra's DWARF analyzer marks
+`__stdcall`. A call to such a function then has the call0 register effects. The
+profile commits `xtensa_call0_prototype: call0-prototype-v1`, and the bridge
+reports how many functions and function definitions use `__call0`; REA delivers
+that count as a limitation. A session that does not report the prototype for a
+call0 image, or reports it for a windowed image, fails before any analysis
+result is returned. As for windowed images, the pinned language refuses a
+caller-supplied existing Ghidra project.
+
+Measured by REA: when a call0 caller keeps a value in `a12` across a call,
+Ghidra 12.1.4 with the default prototype computes it into a variable before the
+call. With `__call0` it folds the value into the expression that uses it, for
+example `return iVar1 + param_1 + 5;` for the lane's fixture. Both forms compute
+the same value; the fold shows that the decompiler treats `a12` as preserved.
+
+Measured by REA: a call to an address with no function in the program keeps the
+default prototype, even after REA assigns `__call0`. The lane's fixture calls
+the mask-ROM address `0x40002000` through `callx0`, as ESP8266 code calls ROM
+routines, and the value it keeps in `a12` is computed before that call. Derived
+from the Ghidra 12.1.4 sources, not reproduced by REA: the same applies to a call
+through an untyped function pointer, because Ghidra has no program option for the
+model of a call it cannot resolve to a function or function definition.
+Auto-analysis also runs with the default prototype, before REA assigns
+`__call0`.
+
 ## Evidence
 
-The lane identity is `elf32-le-exec-windowed-generic-v1`, and `xtensa_elf` retains
-`elf_class`, `byte_order`, `type`, the raw `flags` and the declared `abi`. These
-fields report what the image declares. They are not evidence of the core
-configuration, the compiler, or instruction conformance.
+The lane identity is `elf32-le-exec-windowed-generic-v1`, or
+`elf32-le-exec-call0-generic-v1` with `xtensa_call0_prototype` for call0 images,
+and `xtensa_elf` retains `elf_class`, `byte_order`, `type`, the raw `flags` and
+the declared `abi`. These fields report what the image declares. They are not
+evidence of the core configuration, the compiler, or instruction conformance.
 
 ## Ghidra limitations
 
@@ -141,16 +182,40 @@ executes target code. It checks:
 - decompiled code that passes the literal through `call8` and returns the
   callee's result;
 - CLI/MCP parity with output-schema validation, and snapshot save and reopen;
-- header-mutated refusals (unknown flag bits, machine field, `ET_DYN`, call0,
+- header-mutated refusals (unknown flag bits, machine field, `ET_DYN`, `ABI=2`,
   absolute literals);
 - unchanged source bytes and owned cleanup.
+
+A second annotated fixture holds call0 code at ESP8266 IRAM addresses and
+declares `ABI=1`. The lane checks its `.xtensa.info` ABI against `readelf`, the
+call0 lane and committed prototype in every result and in a saved and reopened
+snapshot, the reported prototype count, `l32r`, `call0`, `callx0` and `ret.n`
+decoding, and the `__call0` calling convention that `analyze_function` reports.
+In decompiled code the first caller must keep its `a12` value across `call0` to
+the leaf and add it to the callee's result. The second caller makes the same
+call through `callx0` to the mask-ROM address, where the program has no
+function, and its `a12` value must still be computed before the call. The same
+bytes declared `ABI=0` are the control: with the default prototype, both callers
+must compute that value before the call.
 
 With `REA_XTENSA_CC` set to an Espressif compiler such as
 `xtensa-esp32-elf-gcc`, the lane also builds `tests/conformance/c/xtensa.c`. It
 checks that the callee's compiled code loads the constant `0x1234567` with an
 `l32r` from a literal holding it. In decompiled code it checks that the caller
 passes the global and 5 through `call8` and returns the result, and that the
-callee returns `value * factor` plus the constant.
+callee returns `value * factor` plus the constant. The same compiler with
+`-mabi=call0` also builds `tests/conformance/c/xtensa-call0.c`, and
+`REA_XTENSA_LX106_CC` builds it with an ESP8266 compiler such as
+`xtensa-lx106-elf-gcc`. For each build the lane checks
+that `readelf` and REA read `ABI=1`, that the caller passes `value ^ 0x5a` and 5
+and adds `value ^ 0x5a` to the result without a copy made before the call, and
+that `analyze_function` reports `__call0`.
+
+The call0 lane ran on Linux x64 with Ghidra 12.1.4, JDK 21 and GNU readelf 2.44,
+with `xtensa-esp32-elf-gcc` 14.2.0 (crosstool-NG esp-14.2.0_20251107) and
+Debian's `xtensa-lx106-elf-gcc` 13.3.0 with binutils 2.44. These freestanding
+fixtures are the only call0 code it examines: no ESP8266 SDK or Arduino build
+and no firmware from a device.
 
 REA also measured Ghidra 12.1.4 on ESP-IDF 5.5.2 `hello_world` builds (Espressif
 GCC 14.2.0, default `-Og`), with Ghidra's DWARF analyzer disabled so that

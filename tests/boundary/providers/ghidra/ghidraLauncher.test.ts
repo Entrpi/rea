@@ -456,6 +456,7 @@ describe("Ghidra GameCube DOL loader", () => {
     ["DOS MZ", { dosMz: true }],
     ["DOS COM", { dosCom: true }],
     ["MIPS soft-float", { mipsSoftFloat: true }],
+    ["Xtensa call0", { xtensaCall0: true }],
     [
       "RISC-V calling convention",
       { riscvCallingConvention: "ilp32-prototype-v1" },
@@ -539,6 +540,9 @@ describe("Ghidra headless launcher", () => {
     expect(arguments_).toContain("-readOnly");
     expect(arguments_).toContain("-deleteProject");
   });
+});
+
+describe("Ghidra post-analysis calling-convention scripts", () => {
   it("remaps soft-float storage after the no-return fix and before the bridge", () => {
     const base = {
       platform: "linux" as const,
@@ -731,6 +735,50 @@ describe("Ghidra RISC-V load preparation arguments", () => {
         },
       }),
     ).toThrow(expect.objectContaining({ code: "gamecube_dol_combined" }));
+  });
+  it("assigns the call0 prototype after the no-return fix and before the bridge", () => {
+    const base = {
+      platform: "linux" as const,
+      projectRoot: "/tmp/project",
+      targetPath: "/tmp/target",
+      bridgeScriptPath: "/package/bridge/ReaGhidraBridge.java",
+      descriptorPath: "/tmp/session.json",
+      ghidraLogPath: "/tmp/ghidra.log",
+      scriptLogPath: "/tmp/script.log",
+    };
+    const call0 = "/package/bridge/ReaGhidraXtensaCall0.java";
+    expect(ghidraHeadlessArguments(base)).not.toContain(call0);
+    const arguments_ = ghidraHeadlessArguments({ ...base, xtensaCall0: true });
+    expect(arguments_[arguments_.indexOf(call0) - 1]).toBe("-postScript");
+    expect(
+      arguments_.indexOf("/package/bridge/ReaGhidraNoReturnFix.java"),
+    ).toBeLessThan(arguments_.indexOf(call0));
+    expect(arguments_.indexOf(call0)).toBeLessThan(
+      arguments_.indexOf("/package/bridge/ReaGhidraBridge.java"),
+    );
+    for (const conflict of [
+      { psp: true as const },
+      { dosMz: true as const },
+      { dosCom: true as const },
+      { mipsSoftFloat: true as const },
+      { riscvCallingConvention: "ilp32-prototype-v1" as const },
+      {
+        rawBinary: {
+          languageId: "x86:LE:32:default",
+          compilerSpecId: "default",
+          baseAddr: "0x1000",
+          entryPoint: "0x1000",
+        },
+      },
+    ])
+      expect(() =>
+        ghidraHeadlessArguments({ ...base, xtensaCall0: true, ...conflict }),
+      ).toThrow(
+        expect.objectContaining({
+          _tag: "GhidraAdmissionError",
+          code: "xtensa_call0_scope",
+        }),
+      );
   });
 });
 
@@ -1001,6 +1049,7 @@ describe("Ghidra existing project", () => {
       { riscvLoadPreparation: ESP_PREPARATION },
       "existing_project_riscv_load_preparation",
     ],
+    [{ xtensaCall0: true as const }, "existing_project_xtensa_call0"],
     [{ seedPath: "/tmp/runtime/seeds/seeds.tsv" }, "existing_project_analysis"],
     [
       { disabledAnalyzers: ["Decompiler Parameter ID"] },

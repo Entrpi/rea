@@ -292,6 +292,8 @@ export interface GhidraHeadlessLauncherOptions {
   readonly pspExtension?: GhidraPspExtension;
   /** Remap typed float storage for the soft-float o32 ABI after analysis. */
   readonly mipsSoftFloat?: true;
+  /** Assign the call0 prototype to every function after analysis. */
+  readonly xtensaCall0?: true;
   /** Apply this committed RISC-V calling-convention policy after analysis. */
   readonly riscvCallingConvention?: GhidraRiscvCallingConvention;
   /** Prepare the memory map for this committed RISC-V section overlap before analysis. */
@@ -489,6 +491,9 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
         ...(this.options.mipsSoftFloat === undefined
           ? {}
           : { mipsSoftFloat: this.options.mipsSoftFloat }),
+        ...(this.options.xtensaCall0 === undefined
+          ? {}
+          : { xtensaCall0: this.options.xtensaCall0 }),
         ...(this.options.riscvCallingConvention === undefined
           ? {}
           : {
@@ -857,6 +862,7 @@ export interface GhidraHeadlessArgumentOptions {
   readonly scriptLogPath: string;
   readonly psp?: true;
   readonly mipsSoftFloat?: true;
+  readonly xtensaCall0?: true;
   readonly riscvCallingConvention?: GhidraRiscvCallingConvention;
   readonly riscvLoadPreparation?: GhidraRiscvLoadPreparation;
   readonly dosMz?: true;
@@ -888,6 +894,7 @@ type ExistingProjectOptions = Pick<
   | "rawBinary"
   | "languageOverride"
   | "mipsSoftFloat"
+  | "xtensaCall0"
   | "riscvCallingConvention"
   | "riscvLoadPreparation"
   | "seedPath"
@@ -925,6 +932,8 @@ const validateExistingProjectOptions = (
       );
     if (options.riscvLoadPreparation !== undefined)
       throw new GhidraAdmissionError("existing_project_riscv_load_preparation");
+    if (options.xtensaCall0 === true)
+      throw new GhidraAdmissionError("existing_project_xtensa_call0");
     if (
       options.seedPath !== undefined ||
       options.analysisSeeds !== undefined ||
@@ -955,6 +964,7 @@ export const ghidraHeadlessArguments = (
       options.dosMz === true ||
       options.dosCom === true ||
       options.mipsSoftFloat === true ||
+      options.xtensaCall0 === true ||
       options.riscvCallingConvention !== undefined ||
       options.riscvLoadPreparation !== undefined ||
       rawBinary !== undefined ||
@@ -996,6 +1006,16 @@ export const ghidraHeadlessArguments = (
       rawBinary !== undefined)
   )
     throw new GhidraAdmissionError("riscv_load_preparation_scope");
+  if (
+    options.xtensaCall0 === true &&
+    (options.psp === true ||
+      options.dosMz === true ||
+      options.dosCom === true ||
+      options.mipsSoftFloat === true ||
+      options.riscvCallingConvention !== undefined ||
+      rawBinary !== undefined)
+  )
+    throw new GhidraAdmissionError("xtensa_call0_scope");
   if (
     override !== undefined &&
     (options.dosMz === true || options.dosCom === true)
@@ -1193,6 +1213,12 @@ export const ghidraHeadlessArguments = (
       ? [
           "-postScript",
           scriptPath.join(bridgeDirectory, GHIDRA_BRIDGE_SOURCES.mipsSoftFloat),
+        ]
+      : []),
+    ...(options.xtensaCall0 === true
+      ? [
+          "-postScript",
+          scriptPath.join(bridgeDirectory, GHIDRA_BRIDGE_SOURCES.xtensaCall0),
         ]
       : []),
     ...(options.riscvCallingConvention === undefined
