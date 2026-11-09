@@ -20,15 +20,15 @@ import { GhidraProvider } from "./GhidraProvider.js";
 
 // Digests commit to the current shared policy, including the instruction
 // status, load-image relocation-symbol, procedure search, byte-search and
-// bit-field base-type revisions that prevent reuse of snapshots with earlier
+// bit-field base-type and inventory-search revisions that prevent reuse of snapshots with earlier
 // results.
 const RAW_DIGESTS = {
-  "6502": "6f904539c00521b04f76a3bfd1ca88275e080b5751f9e2305de66c20d0bd2fa0",
+  "6502": "540037ef007380e737a606cd14c402a9bdf055132cf44fb73d29ab1ec9f84af6",
   "x86-disabled-analyzer":
-    "5a534d959baf34abdafaea64ae9fcb9126553802d42ffa5e4bc0426de5f0af8c",
+    "8498e58d5a1147cdfe7dad2b486b4b4087efc76944ee1902c9af9d0c0da56237",
 } as const;
 
-// Computed by upstream main at 71f680d7c, which has neither a separate base nor
+// Computed by upstream main at 5044e2017, which has neither a separate base nor
 // a variant. A raw load whose base is its caller-selected entry keeps these
 // profile digests, so it stays reusable wherever main's raw sessions and
 // snapshots are.
@@ -36,27 +36,27 @@ const LEGACY_RAW_DIGESTS = [
   [
     "x86",
     "0x1000",
-    "fb92951c7ef1337ce07e33d070b30d29c10f7d74b7ec2d8cbe9c77e51e3fcf12",
+    "2b4d13720e118636004ccb1ba8c065c7c4c82299c46e8c6d83a0620f700f3d98",
   ],
   [
     "x86_64",
     "0x401000",
-    "93f3cd4e35fa875982e565b643cc1f14ebb0bfbbaa8a5f8c58fa432e9bc5b73f",
+    "8c05fcbfbadfef2942878b79dfe683c8e9a94abd5732599e90762f93dd4c1568",
   ],
   [
     "arm",
     "0x8000000",
-    "d977ee1fb22266d8c59e34a16a335a0f811204bed9995044d3708174fc5a8003",
+    "9261c9064cdc6bec4004ba09000716c219d338fd995e6bd58fdbc776bf3fb02a",
   ],
   [
     "arm64",
     "0x80000",
-    "0c409824199efbc80c7f6a6bc2e2320545702182954cf63b86504432d13d38bf",
+    "990deba2fe5ea63b38b395fa181ae84656807856f56cb9ab1cd8517d423e5df5",
   ],
   [
     "m68k",
     "0x1000",
-    "102eeda52d7bdc6e11fda9ea095bc6b2fd170f96585bb83ff43572fcb9af1e5a",
+    "973d3992d7052b28bcfb3215319045da77ef182da76ddee476ef64a319cd30d4",
   ],
 ] as const;
 
@@ -97,9 +97,14 @@ describe("raw-binary analysis profile digest", () => {
       load_image_evidence: "independent-raw-mapping-context-v4",
       load_image_observations:
         "source-mappings-entry-context-relocation-symbol-v3",
-      instruction_status: "unlisted-address-without-decode-v1",
+      instruction_status: "unlisted-and-containing-code-data-v3",
+      inventory_search_projection: "provider-inventory-facts-v1",
+      value_flow_effect_scope: "pcode-load-store-explicit-v1",
       byte_search_boundary: "contiguous-eligible-initialized-blocks-v1",
+      byte_search_coverage: "separate-loaded-overlays-v1",
       data_type_observations: "bit-field-base-and-lookup-v1",
+      instruction_references:
+        "exact-address-incoming-without-synthetic-entry-v3",
       analyzer_preset: "ghidra-default",
     });
   });
@@ -119,6 +124,9 @@ describe("raw-binary analysis profile digest", () => {
       RAW_DIGESTS["x86-disabled-analyzer"],
     );
     expect(resolved.value.profile?.parameters).toMatchObject({
+      inventory_search_projection: "provider-inventory-facts-v1",
+      value_flow_effect_scope: "pcode-load-store-explicit-v1",
+      byte_search_coverage: "separate-loaded-overlays-v1",
       analysis_options: {
         disabled_analyzers: ["Aggressive Instruction Finder"],
       },
@@ -223,7 +231,7 @@ describe("M-profile raw-binary analysis profile", () => {
     const digest = (await profile(reset("armv7-m"))).digest;
     // Pinned so a change to raw_load semantics must bump its version.
     expect(digest).toBe(
-      "25e6a22d9e6adb6587df15a3c086c0663e67595c82bce32f4a77e8f70d325c7b",
+      "0813b7e620f8b9ec081455cd7db0f36e8ad68eaf00d211913c29ee3150048bc3",
     );
     expect(
       (await profile(reset("armv7-m", { baseAddress: "0x8000000" }))).digest,

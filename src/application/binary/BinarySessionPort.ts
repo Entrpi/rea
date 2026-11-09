@@ -1,5 +1,6 @@
 import type { EspFlashSelection } from "../../domain/firmware/espFlashLocation.js";
 import type { InvestigationRecordPort } from "../investigation/InvestigationRecordPort.js";
+import type { RecoveryAdmission } from "../investigation/InvestigationRetention.js";
 import type { ResetInvestigationReceipt } from "../../domain/investigationLifecycle.js";
 import type { BinaryTarget } from "../../domain/binaryTargetTypes.js";
 import type { NativeLoadSelection } from "../../domain/rawBinary.js";
@@ -15,6 +16,7 @@ import type { EvidenceIntegrityError } from "../../domain/evidenceErrors.js";
 import type { AnalysisSnapshotLoader } from "./BinarySessionOpen.js";
 import type { WorkflowSnapshotRecordInput } from "./BinarySessionRecords.js";
 import type { ResolvedAppBundleResourceRoot } from "../AppBundleExecutable.js";
+import type { binaryTargetSummary } from "./BinaryTargetSummary.js";
 
 import type {
   AnalysisExecution,
@@ -37,17 +39,23 @@ export type OpenSelectionReceipt =
     }
   | { readonly kind: "none" };
 
+/** A failure retains its original error and both selection receipts. */
 export type BinaryOpenResult =
   | { readonly ok: true; readonly value: BinaryTarget }
   | {
       readonly ok: false;
       readonly error: AnalysisError;
       readonly selection: OpenSelectionReceipt;
+      readonly targetAtCompletion: ReturnType<
+        typeof binaryTargetSummary
+      > | null;
+      readonly providerIdAtCompletion: string | null;
     };
 
 /** Target lifecycle used by CLI and MCP without exposing a concrete provider. */
 export interface BinarySessionPort
   extends AnalysisOperationPort, InvestigationRecordPort {
+  readonly admitRecoveryObservation: RecoveryAdmission;
   /** Execute only against a positively ready, already-created provider client. */
   executeIfProviderReady(
     operation: AnalysisOperation,
@@ -129,6 +137,7 @@ export interface BinarySessionPort
   status(options?: {
     readonly signal?: AbortSignal;
     readonly detail?: BinarySessionDetail;
+    readonly refreshCandidates?: boolean;
   }): Promise<JsonValue>;
   activeTarget(): BinaryTarget | undefined;
   /** Read a snapshot with failed descriptors retained for session cleanup retry. */
