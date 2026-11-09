@@ -56,11 +56,16 @@ const allZero = (bytes: Uint8Array): boolean =>
 
 const UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
-/** A NUL-terminated C string in a fixed array, or null when not UTF-8. */
-const cString = (bytes: Uint8Array): string | null => {
+/** The bytes of a NUL-terminated C string in a fixed array. */
+export const cStringBytes = (bytes: Uint8Array): Uint8Array => {
   const end = bytes.indexOf(0);
+  return end < 0 ? bytes : bytes.subarray(0, end);
+};
+
+/** A NUL-terminated C string in a fixed array, or null when not UTF-8. */
+export const cString = (bytes: Uint8Array): string | null => {
   try {
-    return UTF8.decode(end < 0 ? bytes : bytes.subarray(0, end));
+    return UTF8.decode(cStringBytes(bytes));
   } catch {
     return null;
   }
@@ -108,8 +113,8 @@ export const decodeEspDescriptor = (
       app_elf_sha256: held(176) ? hex(bytes.subarray(144, 176)) : null,
       min_efuse_blk_rev_full: held(178) ? u16(bytes, 176) : null,
       max_efuse_blk_rev_full: held(180) ? u16(bytes, 178) : null,
-      mmu_page_size: held(181) ? (bytes[180] ?? 0) : null,
-      spi_flash_mode: held(182) ? (bytes[181] ?? 0) : null,
+      mmu_page_size: bytes[180] ?? null,
+      spi_flash_mode: bytes[181] ?? null,
     };
   }
   if (

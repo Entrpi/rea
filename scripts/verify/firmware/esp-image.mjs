@@ -19,6 +19,7 @@ import {
   imageInfo,
   inspect,
   options,
+  refusal,
   source,
   spell,
   tool,
@@ -394,12 +395,12 @@ await withVerifierCleanup(async () => {
   const unnamed = /REA reads an ESP8266 image only when the caller names/u;
   const v3Oracle = await imageInfo(path("esp8266-v3.bin"), "esp8266");
   assert.ok((v3Oracle.segments[0]?.address ?? 0) >= 0x4020_0000);
-  assert.match((await inspect(path("esp8266-v3.bin"))).refused ?? "", unnamed);
+  assert.match(await refusal(path("esp8266-v3.bin")), unnamed);
 
   // ESP8266 v1: esptool falls back to ESP8266; REA refuses it by name.
   const esp8266Image = path("esp8266-0x00000.bin");
   assert.equal((await imageInfo(esp8266Image)).detected, "ESP8266");
-  assert.match((await inspect(esp8266Image)).refused ?? "", unnamed);
+  assert.match(await refusal(esp8266Image), unnamed);
 
   // Named, REA reads both as esptool --chip esp8266 does. The version 3
   // image's appended SHA-256 is not part of the version 1 layout.

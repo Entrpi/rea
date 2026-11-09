@@ -10,9 +10,13 @@ export const executableFormatHintSchema = z.enum([
   "dos-com",
   "raw-binary",
   "gamecube-dol",
+  "esp-flash-image",
   "esp8266-image",
 ]);
-/** Explicit interpretation for formats whose bytes do not identify them. */
+/**
+ * Explicit interpretation for formats with no identifying header, or, for
+ * esp-flash-image, a dump read with caller inputs.
+ */
 export type ExecutableFormatHint = z.infer<typeof executableFormatHintSchema>;
 
 /**
