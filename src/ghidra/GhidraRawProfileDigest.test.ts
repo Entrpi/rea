@@ -9,11 +9,12 @@ import { GhidraProvider } from "./GhidraProvider.js";
 // Digests commit to the current shared policy, including the instruction
 // status, load-image relocation-symbol, procedure search, byte-search and
 // bit-field base-type and inventory-search revisions that prevent reuse of snapshots with earlier
-// results.
+// results. This branch's no_return_repair revision also changes them, so they
+// differ from main's.
 const RAW_DIGESTS = {
-  "6502": "540037ef007380e737a606cd14c402a9bdf055132cf44fb73d29ab1ec9f84af6",
+  "6502": "63514828258d47178388803493a409ecd23a9326d53d354247035ac5a212d4c2",
   "x86-disabled-analyzer":
-    "8498e58d5a1147cdfe7dad2b486b4b4087efc76944ee1902c9af9d0c0da56237",
+    "a97063fbf3af30bfde7cb725ea2de6551d652b92c1d05d8d29f24182aa9d98b2",
 } as const;
 
 const configFor = (environment: NodeJS.ProcessEnv) => {
