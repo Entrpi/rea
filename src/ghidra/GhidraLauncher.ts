@@ -1,5 +1,7 @@
 import { GhidraAdmissionError } from "./GhidraAdmissionError.js";
 import { copyExistingGhidraProject } from "./GhidraProjectSnapshot.js";
+import { hashGhidraPackedProgram } from "./GhidraCheckpoint.js";
+import { constants as fsConstants } from "node:fs";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { GHIDRA_BRIDGE_SOURCES } from "./GhidraBridgeSources.js";
 import {
@@ -7,12 +9,13 @@ import {
   type GhidraSeedCommitment,
 } from "./GhidraAnalysisSeeds.js";
 import type { GhidraLanguageOverride } from "../config/ghidraLanguageOverride.js";
+import type { GhidraRiscvCallingConvention } from "./GhidraRiscvProfile.js";
 import {
   GHIDRA_LANGUAGE_DEFINITION_FILES,
   type GhidraLanguageDefinitionCommitment,
 } from "./GhidraLanguageCatalog.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
-import { mkdir, readFile, realpath } from "node:fs/promises";
+import { copyFile, mkdir, readFile, realpath } from "node:fs/promises";
 import { basename, dirname, join, posix, win32 } from "node:path";
 
 import { writeGhidraRuntimeFile } from "./GhidraRuntimeFile.js";
@@ -72,6 +75,7 @@ export interface GhidraLaunchSession {
   readonly targetSha256: string;
   readonly providerVersion: string;
   readonly profileDigest: string;
+  readonly packedProgram?: import("./GhidraCheckpoint.js").GhidraPackedProgram;
 }
 
 /** Process plus private log coordinates returned by a Ghidra launcher. */
@@ -281,6 +285,8 @@ export interface GhidraHeadlessLauncherOptions {
   readonly pspExtension?: GhidraPspExtension;
   /** Remap typed float storage for the soft-float o32 ABI after analysis. */
   readonly mipsSoftFloat?: true;
+  /** Apply this committed RISC-V calling-convention policy after analysis. */
+  readonly riscvCallingConvention?: GhidraRiscvCallingConvention;
   /** Spawn seam for provider-boundary lifecycle tests. */
   readonly spawnProcess?: typeof spawnOwnedProviderProcess;
   /** LaunchSupport probe seam for Java-free launcher fixtures. */
@@ -361,6 +367,29 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
         platform,
         this.options.configurationDirectoryName,
       );
+      let packedProgramPath: string | undefined;
+      if (session.packedProgram !== undefined) {
+        if (options.resourceScope === undefined)
+          throw new GhidraLaunchError(
+            "Checkpoint restore requires its owning resource scope.",
+          );
+        packedProgramPath = join(session.runtimeRoot, "restored-program.gzf");
+        await copyFile(
+          session.packedProgram.path,
+          packedProgramPath,
+          fsConstants.COPYFILE_EXCL,
+        );
+        if (
+          (await hashGhidraPackedProgram(
+            packedProgramPath,
+            options.resourceScope,
+            options.signal,
+          )) !== session.packedProgram.sha256
+        )
+          throw new GhidraLaunchError(
+            "Ghidra checkpoint changed before its private import; reopen the target.",
+          );
+      }
       // Copy-first: open the caller's project only through the owned copy so
       // Ghidra never touches the original project files.
       if (existingProject !== undefined)
@@ -451,9 +480,15 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
         ...(this.options.mipsSoftFloat === undefined
           ? {}
           : { mipsSoftFloat: this.options.mipsSoftFloat }),
+        ...(this.options.riscvCallingConvention === undefined
+          ? {}
+          : {
+              riscvCallingConvention: this.options.riscvCallingConvention,
+            }),
         projectRoot: paths.projectRoot,
         targetPath: session.targetPath,
         ...(existingProject === undefined ? {} : { existingProject }),
+        ...(packedProgramPath === undefined ? {} : { packedProgramPath }),
         bridgeScriptPath: this.options.bridgeScriptPath,
         descriptorPath: paths.descriptorPath,
         ghidraLogPath: paths.ghidraLogPath,
@@ -792,6 +827,7 @@ export interface GhidraHeadlessArgumentOptions {
   readonly platform?: NodeJS.Platform;
   readonly projectRoot: string;
   readonly targetPath: string;
+  readonly packedProgramPath?: string;
   /** Open this pre-imported program with -process instead of importing. */
   readonly existingProject?: Pick<
     GhidraExistingProject,
@@ -803,6 +839,7 @@ export interface GhidraHeadlessArgumentOptions {
   readonly scriptLogPath: string;
   readonly psp?: true;
   readonly mipsSoftFloat?: true;
+  readonly riscvCallingConvention?: GhidraRiscvCallingConvention;
   readonly dosMz?: true;
   readonly dosCom?: true;
   readonly rawBinary?: GhidraRawBinaryImport;
@@ -828,6 +865,7 @@ type ExistingProjectOptions = Pick<
   | "rawBinary"
   | "languageOverride"
   | "mipsSoftFloat"
+  | "riscvCallingConvention"
   | "seedPath"
   | "disabledAnalyzers"
 > & { readonly analysisSeeds?: GhidraSeedCommitment };
@@ -856,6 +894,10 @@ const validateExistingProjectOptions = (
       throw new GhidraAdmissionError("existing_project_language_override");
     if (options.mipsSoftFloat === true)
       throw new GhidraAdmissionError("existing_project_mips_soft_float");
+    if (options.riscvCallingConvention !== undefined)
+      throw new GhidraAdmissionError(
+        "existing_project_riscv_calling_convention",
+      );
     if (
       options.seedPath !== undefined ||
       options.analysisSeeds !== undefined ||
@@ -885,6 +927,7 @@ export const ghidraHeadlessArguments = (
       options.dosMz === true ||
       options.dosCom === true ||
       options.mipsSoftFloat === true ||
+      options.riscvCallingConvention !== undefined ||
       rawBinary !== undefined ||
       override !== undefined)
   )
@@ -907,6 +950,15 @@ export const ghidraHeadlessArguments = (
   )
     throw new GhidraAdmissionError("mips_soft_float_scope");
   if (
+    options.riscvCallingConvention !== undefined &&
+    (options.psp === true ||
+      options.mipsSoftFloat === true ||
+      options.dosMz === true ||
+      options.dosCom === true ||
+      rawBinary !== undefined)
+  )
+    throw new GhidraAdmissionError("riscv_calling_convention_scope");
+  if (
     override !== undefined &&
     (options.dosMz === true || options.dosCom === true)
   )
@@ -924,7 +976,7 @@ export const ghidraHeadlessArguments = (
     ...(existing === undefined
       ? [
           "-import",
-          options.targetPath,
+          options.packedProgramPath ?? options.targetPath,
           ...(gamecubeDol !== undefined
             ? [
                 // One BinaryLoader block at file offset 0; the pre-script rebuilds the DOL section map.
@@ -995,7 +1047,11 @@ export const ghidraHeadlessArguments = (
     // An existing project opens with -noanalysis: its auto-analysis was paid
     // when the project was imported, outside this session's startup deadline.
     ...(existing === undefined
-      ? ["-readOnly", "-deleteProject"]
+      ? [
+          ...(options.packedProgramPath === undefined ? [] : ["-noanalysis"]),
+          "-readOnly",
+          "-deleteProject",
+        ]
       : ["-noanalysis", "-readOnly"]),
     "-log",
     options.ghidraLogPath,
@@ -1066,6 +1122,16 @@ export const ghidraHeadlessArguments = (
           scriptPath.join(bridgeDirectory, GHIDRA_BRIDGE_SOURCES.mipsSoftFloat),
         ]
       : []),
+    ...(options.riscvCallingConvention === undefined
+      ? []
+      : [
+          "-postScript",
+          scriptPath.join(
+            bridgeDirectory,
+            GHIDRA_BRIDGE_SOURCES.riscvCallingConvention,
+          ),
+          options.riscvCallingConvention,
+        ]),
     "-postScript",
     // Ghidra checks the caller's cwd before scriptPath for a basename. Select
     // the packaged source explicitly so unrelated entries cannot shadow it.

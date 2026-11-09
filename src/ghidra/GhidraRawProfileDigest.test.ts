@@ -19,15 +19,17 @@ import { silentLogger } from "../logger.js";
 import { ghidraProfileInstallationHost as host } from "./GhidraInstallation.fixture.js";
 import { GhidraProvider } from "./GhidraProvider.js";
 
-// Digests commit to the current shared policy, including the instruction status
-// revision that prevents reuse of snapshots with the previous ambiguous result.
+// Digests commit to the current shared policy, including the instruction
+// status, load-image relocation-symbol, procedure search, byte-search and
+// bit-field base-type and inventory-search revisions that prevent reuse of snapshots with earlier
+// results.
 const RAW_DIGESTS = {
-  "6502": "8e33776d1cc5c5d77d32923d5978c05ec2d989d00920dd458cc2dafb4c9c0cad",
+  "6502": "540037ef007380e737a606cd14c402a9bdf055132cf44fb73d29ab1ec9f84af6",
   "x86-disabled-analyzer":
-    "d17bddc8ac110c891d30fb989fc7906df421bd9bea5df4aac05a950f50c7bdaf",
+    "8498e58d5a1147cdfe7dad2b486b4b4087efc76944ee1902c9af9d0c0da56237",
 } as const;
 
-// Computed by upstream main at 07dfd1261, which has neither a separate base nor
+// Computed by upstream main at 5044e2017, which has neither a separate base nor
 // a variant. A raw load whose base is its caller-selected entry keeps these
 // profile digests, so it stays reusable wherever main's raw sessions and
 // snapshots are.
@@ -35,27 +37,27 @@ const LEGACY_RAW_DIGESTS = [
   [
     "x86",
     "0x1000",
-    "1efa8bf6ae3bd0db5789c3bde41150c1765d11a5dd01171dfcc8e13c9e0156c5",
+    "2b4d13720e118636004ccb1ba8c065c7c4c82299c46e8c6d83a0620f700f3d98",
   ],
   [
     "x86_64",
     "0x401000",
-    "b9b8398e6735a2c038d375193bbc546dae535415d8a33a46fd1f093e28534eef",
+    "8c05fcbfbadfef2942878b79dfe683c8e9a94abd5732599e90762f93dd4c1568",
   ],
   [
     "arm",
     "0x8000000",
-    "454105d882ed5c647e47e1c6f4aa2f30be36a17c7c048b783e10c5498c20fc2a",
+    "9261c9064cdc6bec4004ba09000716c219d338fd995e6bd58fdbc776bf3fb02a",
   ],
   [
     "arm64",
     "0x80000",
-    "fd1482d39496d4bdacdce7f91fc7fb5d1c653e492a771db3ca887e3c1f29f618",
+    "990deba2fe5ea63b38b395fa181ae84656807856f56cb9ab1cd8517d423e5df5",
   ],
   [
     "m68k",
     "0x1000",
-    "afe1d0b29de91b03169900e59565c4caae78097c02e1768d76c17c6230b0b919",
+    "973d3992d7052b28bcfb3215319045da77ef182da76ddee476ef64a319cd30d4",
   ],
 ] as const;
 
@@ -94,7 +96,16 @@ describe("raw-binary analysis profile digest", () => {
       language_id: "6502:LE:16:default",
       language_selection: "caller-supplied-v1",
       load_image_evidence: "independent-raw-mapping-context-v4",
-      instruction_status: "unlisted-address-without-decode-v1",
+      load_image_observations:
+        "source-mappings-entry-context-relocation-symbol-v3",
+      instruction_status: "unlisted-and-containing-code-data-v3",
+      inventory_search_projection: "provider-inventory-facts-v1",
+      value_flow_effect_scope: "pcode-load-store-explicit-v1",
+      byte_search_boundary: "contiguous-eligible-initialized-blocks-v1",
+      byte_search_coverage: "separate-loaded-overlays-v1",
+      data_type_observations: "bit-field-base-and-lookup-v1",
+      instruction_references:
+        "exact-address-incoming-without-synthetic-entry-v3",
       analyzer_preset: "ghidra-default",
     });
   });
@@ -114,6 +125,9 @@ describe("raw-binary analysis profile digest", () => {
       RAW_DIGESTS["x86-disabled-analyzer"],
     );
     expect(resolved.value.profile?.parameters).toMatchObject({
+      inventory_search_projection: "provider-inventory-facts-v1",
+      value_flow_effect_scope: "pcode-load-store-explicit-v1",
+      byte_search_coverage: "separate-loaded-overlays-v1",
       analysis_options: {
         disabled_analyzers: ["Aggressive Instruction Finder"],
       },
@@ -218,7 +232,7 @@ describe("M-profile raw-binary analysis profile", () => {
     const digest = (await profile(reset("armv7-m"))).digest;
     // Pinned so a change to raw_load semantics must bump its version.
     expect(digest).toBe(
-      "6c9ab13284488b310460e9b0b85cab0c5d4fc0e6d95b0164c411c783c4a763b7",
+      "0813b7e620f8b9ec081455cd7db0f36e8ad68eaf00d211913c29ee3150048bc3",
     );
     expect(
       (await profile(reset("armv7-m", { baseAddress: "0x8000000" }))).digest,
