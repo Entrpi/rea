@@ -529,7 +529,7 @@ try {
   const call0Cli = parseEvidence(
     JSON.parse(
       (
-        await execute(
+        await commands.exec(
           process.execPath,
           [
             entrypoint,
