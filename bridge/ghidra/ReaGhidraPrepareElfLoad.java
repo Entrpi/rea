@@ -21,10 +21,11 @@ import ghidra.program.model.symbol.SymbolTable;
 import ghidra.program.model.symbol.SymbolType;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Give an executable section that a NOBITS reservation shares addresses with the default address
- * space before auto-analysis (docs/ghidra-riscv.md). Ghidra 12.1.4's ELF loader resolves the
+ * space before auto-analysis (docs/providers/ghidra-riscv.md). Ghidra 12.1.4's ELF loader resolves the
  * overlap in favour of the later section, so ESP-IDF's .flash_rodata_dummy keeps the default space
  * and .flash.text lands in an overlay, which DWARF import, call-frame entries and default-space
  * references never reach. REA's TypeScript admission commits both sections, and the script refuses
@@ -160,7 +161,7 @@ public final class ReaGhidraPrepareElfLoad extends HeadlessScript {
         // Removing a block keeps the references into its range, entry points included.
         memory.removeBlock(reservation, monitor);
         MemoryBlock canonical = memory.createInitializedBlock(
-            codeName + ".rea", space.getAddress(code.getStart().getOffset()), file, fileOffset, size, false
+            unusedBlockName(codeName, codeName, reservationName), space.getAddress(code.getStart().getOffset()), file, fileOffset, size, false
         );
         canonical.setPermissions(code.isRead(), code.isWrite(), code.isExecute());
         canonical.setVolatile(code.isVolatile());
@@ -207,7 +208,7 @@ public final class ReaGhidraPrepareElfLoad extends HeadlessScript {
         MemoryBlock displaced = memory.convertToUninitialized(code);
         if (reservationSize > size) {
             MemoryBlock rest = memory.createUninitializedBlock(
-                reservationName + ".rea", displaced.getEnd().add(1), reservationSize - size, false
+                unusedBlockName(reservationName, codeName, reservationName), displaced.getEnd().add(1), reservationSize - size, false
             );
             displaced = memory.join(displaced, rest);
         }
@@ -220,7 +221,7 @@ public final class ReaGhidraPrepareElfLoad extends HeadlessScript {
         canonical.setName(codeName);
         AddressSpace overlay = displaced.getStart().getAddressSpace();
         // The reservation holds no code, so its labels mark no entry points. An entry mark the
-        // loader gave one of them stays at its default-space address (docs/ghidra-riscv.md).
+        // loader gave one of them stays at its default-space address (docs/providers/ghidra-riscv.md).
         for (Label label : labels) {
             symbols.createLabel(overlay.getAddress(label.offset()), label.name(), label.namespace(), label.source());
         }
@@ -322,6 +323,22 @@ public final class ReaGhidraPrepareElfLoad extends HeadlessScript {
         String text = failure.getClass().getSimpleName() +
             (failure.getMessage() == null ? "" : ": " + failure.getMessage());
         return text.length() <= FAILURE_DETAIL_MAX ? text : text.substring(0, FAILURE_DETAIL_MAX);
+    }
+
+    /**
+     * A name for a block that exists only during the move. Block names are unique in a program
+     * but carry no meaning here, so a section already named `<name>.rea` must not refuse the image.
+     * The final names stay free too: the reservation's block is gone when the code's temporary is
+     * named, and both blocks take their final names back after it.
+     */
+    private String unusedBlockName(String base, String... finalNames) {
+        Memory memory = currentProgram.getMemory();
+        Set<String> reserved = Set.copyOf(List.of(finalNames));
+        String name = base + ".rea";
+        for (int index = 1; memory.getBlock(name) != null || reserved.contains(name); index++) {
+            name = base + ".rea." + index;
+        }
+        return name;
     }
 
     private static AddressSet range(MemoryBlock block) {

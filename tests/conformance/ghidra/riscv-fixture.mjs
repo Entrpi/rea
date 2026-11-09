@@ -74,6 +74,16 @@ const BUILDS = {
     entry: "rea_riscv_esp_entry",
     linkerScript: "../esp/esp32c6-reservation-named-ram.ld",
   },
+  // The same image with the reservation and a disjoint section named like the
+  // preparation's temporary blocks.
+  "esp-edge-names": {
+    sources: ["../c/riscv-esp-layout.c"],
+    march: () => "rv32imac_zicsr_zifencei",
+    mabi: () => "ilp32",
+    flags: 1,
+    entry: "rea_riscv_esp_entry",
+    linkerScript: "../esp/esp32c6-edge-names.ld",
+  },
 };
 
 const readerOptions = {
