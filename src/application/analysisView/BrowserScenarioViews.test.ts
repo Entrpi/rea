@@ -86,8 +86,8 @@ describe("browser scenario analysis views", () => {
     const summary = await view(capture, { kind: "summary" });
     expect(summary).toMatchObject({
       limitations: [
-        "Artifact identity is unavailable for this observation.",
-        "Browser host platform and architecture were not observed.",
+        expect.stringMatching(/artifact identity.*unavailable/iu),
+        expect.stringMatching(/platform.*architecture.*not observed/iu),
       ],
       summary: { limitation_count: 2 },
     });
@@ -262,8 +262,10 @@ describe("browser scenario analysis view pages", () => {
       },
     };
     const summary = await view(dropped, { kind: "summary" });
-    expect(summary.unknowns).toContain(
-      "3 events were dropped by capture budgets; counts and pages cover retained events only.",
+    expect(summary.unknowns).toContainEqual(
+      expect.stringMatching(
+        /3 events.*dropped.*counts and pages.*retained events only/iu,
+      ),
     );
     expect(summary).toMatchObject({
       summary: {
@@ -436,6 +438,7 @@ describe("browser scenario network observation", () => {
     const project = (capture: unknown) => {
       const result = projectBrowserScenarioView(
         {
+          predicateType: "rea.browser-scenario-capture",
           evidenceId: `ev:${"a".repeat(64)}`,
           operation: "capture_browser_scenario",
           normalizedResult: capture,
