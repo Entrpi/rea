@@ -89,6 +89,32 @@ export interface MipsElfMetadata extends ElfFamilyMetadata {
     | { readonly status: "unavailable"; readonly reason: string };
 }
 
+/** Raw ELF facts; family recognition does not establish ISA or ABI support. */
+export interface RiscvElfMetadata extends ElfFamilyMetadata {
+  /** Undefined until `.riscv.attributes` is inspected. */
+  readonly isa?: RiscvIsaDeclaration;
+}
+
+/** The ISA an image declares in `.riscv.attributes`; not proof of every instruction. */
+export type RiscvIsaDeclaration =
+  | {
+      readonly status: "declared";
+      /** `Tag_RISCV_arch` exactly as declared. */
+      readonly arch: string;
+      readonly xlen: 32 | 64;
+      readonly base: "i" | "e";
+      /** Extension names in declaration order, without versions. */
+      readonly extensions: readonly string[];
+    }
+  /** Every section header was examined and none declares `Tag_RISCV_arch`. */
+  | { readonly status: "absent" }
+  | {
+      readonly status: "unavailable";
+      readonly reason: string;
+      /** The declared string, when one was read but not understood. */
+      readonly arch?: string;
+    };
+
 /** Declared fields of the 24-byte MIPS ABI flags record, not inferred semantics. */
 export interface MipsAbiFlags {
   readonly version: number;
@@ -112,22 +138,49 @@ export interface MipsGnuAttributes {
   readonly msa: number | null;
 }
 
-/** Raw ELF facts; Xtensa `e_flags` carry no ABI, which `.xtensa.info` declares. */
-export interface XtensaElfMetadata extends ElfFamilyMetadata {
-  /** Undefined until `.xtensa.info` is inspected. */
-  readonly abi?: XtensaAbiDeclaration;
+/**
+ * Raw ELF facts; Xtensa `e_flags` carry no ABI or literal addressing, which
+ * `.xtensa.info` declares. Both declarations are undefined until that section
+ * is inspected.
+ */
+export interface XtensaElfMetadata
+  extends ElfFamilyMetadata, Partial<XtensaInfoDeclarations> {}
+
+/**
+ * What the `.xtensa.info` note that GNU as and ld write declares. A note REA
+ * cannot read leaves both unknown.
+ */
+export interface XtensaInfoDeclarations {
+  readonly abi: XtensaAbiDeclaration;
+  readonly literals: XtensaLiteralDeclaration;
 }
 
 /**
- * The `ABI=` declaration in the `.xtensa.info` note that GNU as and ld write.
- * Values outside binutils' windowed (0) and call0 (1) are kept as written.
+ * The `ABI=` declaration. Values outside binutils' windowed (0) and call0 (1)
+ * are kept as written.
  */
 export type XtensaAbiDeclaration =
   | { readonly status: "declared"; readonly abi: "windowed" | "call0" }
+  | XtensaInfoUndeclared;
+
+/**
+ * The `USE_ABSOLUTE_LITERALS=` declaration: binutils writes 0 for PC-relative
+ * L32R literals and 1 for a configuration whose L32R literals are addressed
+ * from `LITBASE` (the Extended L32R option). Other values are kept as written.
+ */
+export type XtensaLiteralDeclaration =
+  | {
+      readonly status: "declared";
+      readonly literals: "pc-relative" | "absolute";
+    }
+  | XtensaInfoUndeclared;
+
+/** A `.xtensa.info` key without a value binutils defines. */
+export type XtensaInfoUndeclared =
   | { readonly status: "unrecognized"; readonly value: string }
-  /** Examined: no `.xtensa.info` section, or a note without an `ABI=` key. */
+  /** Examined: no `.xtensa.info` section, or a note without the key. */
   | { readonly status: "absent" }
-  /** The declaration is unreadable or malformed; the ABI remains unknown. */
+  /** The declaration is unreadable or malformed; its value remains unknown. */
   | {
       readonly status: "unavailable";
       readonly reason: string;
@@ -147,6 +200,12 @@ export interface XtensaInfoBound {
 export interface UniversalMachOSlice {
   readonly offset: number;
   readonly size: number;
+}
+
+/** FAT-table identity; CPU family alone cannot identify a universal slice. */
+export interface UniversalMachOSliceIdentity extends UniversalMachOSlice {
+  readonly cpuType: number;
+  readonly cpuSubtype: number;
 }
 
 interface BinaryTargetIdentity {
@@ -191,8 +250,7 @@ export type BinaryTarget =
       readonly format: "elf";
       readonly architecture: "riscv";
       readonly availableArchitectures: readonly "riscv"[];
-      /** ISA extensions in `.riscv.attributes` are not inspected by the header parser. */
-      readonly riscv: ElfFamilyMetadata;
+      readonly riscv: RiscvElfMetadata;
       readonly executableRole?: never;
       readonly managed?: never;
     })
@@ -243,6 +301,8 @@ export type BinaryTarget =
       readonly format: "mach-o-universal";
       /** Selected slice range a provider must analyze instead of the container. */
       readonly universalSlice: UniversalMachOSlice;
+      /** Exact validated FAT declarations, when supplied by target admission. */
+      readonly universalSlices?: readonly UniversalMachOSliceIdentity[];
       readonly executableRole?: never;
       readonly managed?: never;
     })
@@ -300,15 +360,42 @@ export type BinaryTarget =
         readonly format:
           | ZipPackageFormat
           | "asar"
+          | "ines"
           | "godot-pck"
+          | "unityfs"
+          | "wxapkg"
+          | "uimage"
           | "dmg"
-          | "pkg";
+          | "pkg"
+          | "intel-hex"
+          | "srec"
+          | "esp-image"
+          | "uf2"
+          | "dfuse"
+          | "fit";
+      })
+  | (BinaryTargetIdentity &
+      NonExecutableMetadata & {
+        readonly kind: "archive";
+        readonly format: "esp-flash-image";
+        /** How the dump is read; null inputs take their defaults. */
+        readonly espFlash: EspFlashTargetSelection;
       })
   | (BinaryTargetIdentity &
       NonExecutableMetadata & {
         readonly kind: "artifact";
         readonly format: "plist" | "javascript" | "source-map";
       });
+
+/** Caller inputs that select how an ESP flash dump is read. */
+export interface EspFlashTargetSelection {
+  /** The caller selected the format, so the table scan runs without a bootloader. */
+  readonly selected: boolean;
+  /** Flash address of the dump's first byte. */
+  readonly flashOffset: number | null;
+  /** Flash address of the partition table. */
+  readonly partitionTableOffset: number | null;
+}
 
 /** Whether an executable target contains a thin or universal Mach-O image. */
 export const isMachOFormat = (

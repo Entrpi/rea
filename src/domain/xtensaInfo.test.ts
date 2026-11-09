@@ -1,19 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import { parseXtensaInfoAbi } from "./xtensaInfo.js";
+import { parseXtensaInfo } from "./xtensaInfo.js";
 
-/** One ELF note padded to 4-byte words, as GNU as and ld lay it out. */
+/** One ELF note, padded to 4-byte words as GNU as and ld lay it out by default. */
 const elfNote = (
   owner: string,
   type: number,
   descriptor: Buffer,
   little = true,
+  alignment = 4,
 ): Buffer => {
   const name = Buffer.from(`${owner}\0`, "latin1");
-  const words = (length: number) => Math.ceil(length / 4) * 4;
-  const bytes = Buffer.alloc(
-    12 + words(name.length) + words(descriptor.length),
-  );
+  const padded = (end: number) => Math.ceil(end / alignment) * alignment;
+  const at = padded(12 + name.length);
+  const bytes = Buffer.alloc(padded(at + descriptor.length));
   const write = (value: number, offset: number) =>
     little
       ? bytes.writeUInt32LE(value, offset)
@@ -22,7 +22,7 @@ const elfNote = (
   write(descriptor.length, 4);
   write(type, 8);
   name.copy(bytes, 12);
-  descriptor.copy(bytes, 12 + words(name.length));
+  descriptor.copy(bytes, at);
   return bytes;
 };
 
@@ -39,62 +39,88 @@ const BINUTILS_WINDOWED = Buffer.from(
 const info = (descriptor: string, little = true): Buffer =>
   elfNote("Xtensa_Info", 1, Buffer.from(`${descriptor}\0`, "latin1"), little);
 
-describe(".xtensa.info ABI declarations", () => {
-  it("reads the windowed declaration binutils writes", () => {
+/** What ESP-IDF's windowed builds declare. */
+const WINDOWED = {
+  abi: { status: "declared", abi: "windowed" },
+  literals: { status: "declared", literals: "pc-relative" },
+} as const;
+
+describe(".xtensa.info declarations", () => {
+  it("reads the windowed, PC-relative declarations binutils writes", () => {
     expect(BINUTILS_WINDOWED).toHaveLength(56);
-    expect(parseXtensaInfoAbi(BINUTILS_WINDOWED, true)).toEqual({
-      status: "declared",
-      abi: "windowed",
-    });
+    expect(parseXtensaInfo(BINUTILS_WINDOWED, true, 4n)).toEqual(WINDOWED);
   });
 
   it.each([
-    ["USE_ABSOLUTE_LITERALS=0\nABI=1\n", true, { abi: "call0" }],
-    ["USE_ABSOLUTE_LITERALS=0\nABI=0\n", false, { abi: "windowed" }],
-    ["ABI=1\nUSE_ABSOLUTE_LITERALS=1\n", true, { abi: "call0" }],
+    ["USE_ABSOLUTE_LITERALS=0\nABI=1\n", true, "call0", "pc-relative"],
+    ["USE_ABSOLUTE_LITERALS=0\nABI=0\n", false, "windowed", "pc-relative"],
+    ["ABI=1\nUSE_ABSOLUTE_LITERALS=1\n", true, "call0", "absolute"],
   ] as const)(
     "reads %j with little-endian note words: %s",
-    (descriptor, little, expected) => {
-      expect(parseXtensaInfoAbi(info(descriptor, little), little)).toEqual({
-        status: "declared",
-        ...expected,
+    (descriptor, little, abi, literals) => {
+      expect(parseXtensaInfo(info(descriptor, little), little, 4n)).toEqual({
+        abi: { status: "declared", abi },
+        literals: { status: "declared", literals },
       });
     },
   );
 
   it("keeps an undefined declared value as written", () => {
-    expect(parseXtensaInfoAbi(info("ABI=2\n"), true)).toEqual({
-      status: "unrecognized",
-      value: "2",
-    });
-    expect(parseXtensaInfoAbi(info("ABI=-1\n"), true)).toEqual({
+    expect(
+      parseXtensaInfo(info("USE_ABSOLUTE_LITERALS=0\nABI=2\n"), true, 4n).abi,
+    ).toEqual({ status: "unrecognized", value: "2" });
+    expect(parseXtensaInfo(info("ABI=-1\n"), true, 4n).abi).toEqual({
       status: "unrecognized",
       value: "-1",
     });
+    expect(
+      parseXtensaInfo(info("USE_ABSOLUTE_LITERALS=2\nABI=0\n"), true, 4n),
+    ).toEqual({
+      abi: WINDOWED.abi,
+      literals: { status: "unrecognized", value: "2" },
+    });
   });
 
-  it("reports a note without an ABI key as absent, not windowed", () => {
-    expect(parseXtensaInfoAbi(info("USE_ABSOLUTE_LITERALS=0\n"), true)).toEqual(
-      { status: "absent" },
-    );
+  it("reports a missing key as absent, not as either binutils value", () => {
+    expect(
+      parseXtensaInfo(info("USE_ABSOLUTE_LITERALS=0\n"), true, 4n),
+    ).toEqual({
+      abi: { status: "absent" },
+      literals: WINDOWED.literals,
+    });
+    expect(parseXtensaInfo(info("ABI=0\n"), true, 4n)).toEqual({
+      abi: WINDOWED.abi,
+      literals: { status: "absent" },
+    });
   });
 
   it("finds the Xtensa_Info note after other notes in the section", () => {
     const contents = Buffer.concat([
       elfNote("GNU", 3, Buffer.alloc(20)),
       elfNote("Xtensa_Info", 2, Buffer.from("ABI=1\n\0", "latin1")),
-      info("ABI=0\n"),
+      info("USE_ABSOLUTE_LITERALS=0\nABI=0\n"),
     ]);
-    expect(parseXtensaInfoAbi(contents, true)).toEqual({
-      status: "declared",
-      abi: "windowed",
-    });
+    expect(parseXtensaInfo(contents, true, 4n)).toEqual(WINDOWED);
+  });
+
+  it("pads notes as the section's declared alignment of 8 selects", () => {
+    // With 8-byte padding the empty-owner note ends at 24, not at 20.
+    const contents = Buffer.concat([
+      elfNote("", 3, Buffer.alloc(4), true, 8),
+      elfNote(
+        "Xtensa_Info",
+        1,
+        Buffer.from("USE_ABSOLUTE_LITERALS=0\nABI=0\n\0", "latin1"),
+        true,
+        8,
+      ),
+    ]);
+    expect(parseXtensaInfo(contents, true, 8n)).toEqual(WINDOWED);
+    expect(parseXtensaInfo(contents, true, 4n)).not.toEqual(WINDOWED);
   });
 
   it.each([
-    [info("ABI=0\nABI=1\n"), "declares ABI more than once"],
-    [info("ABI=windowed\n"), "malformed ABI value"],
-    [info("ABI= 0\n"), "malformed ABI value"],
+    [info("ABI=0\n\0ABI=1\n"), "non-zero bytes after its terminating NUL"],
     [Buffer.concat([info("ABI=0\n"), info("ABI=0\n")]), "more than one"],
     [elfNote("GNU", 1, Buffer.from("ABI=0\n\0", "latin1")), "no Xtensa_Info"],
     [BINUTILS_WINDOWED.subarray(0, 40), "exceeds its table"],
@@ -103,26 +129,85 @@ describe(".xtensa.info ABI declarations", () => {
       "trailing non-zero bytes",
     ],
     [Buffer.alloc(0), "no Xtensa_Info"],
-  ])("leaves a malformed declaration unknown (%#)", (contents, reason) => {
-    const parsed = parseXtensaInfoAbi(contents, true);
-    expect(parsed).toMatchObject({
-      status: "unavailable",
-      reason: expect.stringContaining(reason),
-    });
-  });
+  ])(
+    "leaves every declaration unknown in a malformed note (%#)",
+    (contents, reason) => {
+      const unknown = {
+        status: "unavailable",
+        reason: expect.stringContaining(reason),
+      };
+      expect(parseXtensaInfo(contents, true, 4n)).toEqual({
+        abi: unknown,
+        literals: unknown,
+      });
+    },
+  );
+
+  it.each([
+    ["ABI=0\nABI=1\n", "abi", "declares ABI more than once"],
+    ["ABI=windowed\n", "abi", "malformed ABI value"],
+    ["ABI= 0\n", "abi", "malformed ABI value"],
+    [
+      "USE_ABSOLUTE_LITERALS=0\nUSE_ABSOLUTE_LITERALS=1\n",
+      "literals",
+      "declares USE_ABSOLUTE_LITERALS more than once",
+    ],
+    [
+      "USE_ABSOLUTE_LITERALS=no\n",
+      "literals",
+      "malformed USE_ABSOLUTE_LITERALS value",
+    ],
+  ] as const)(
+    "leaves only the malformed key unknown in %j",
+    (malformed, key, reason) => {
+      const other = key === "abi" ? "USE_ABSOLUTE_LITERALS=0\n" : "ABI=0\n";
+      const parsed = parseXtensaInfo(info(`${other}${malformed}`), true, 4n);
+      expect(parsed).toEqual({
+        ...WINDOWED,
+        [key]: {
+          status: "unavailable",
+          reason: expect.stringContaining(reason),
+        },
+      });
+    },
+  );
 
   it("accepts zero padding shorter than a note header, as inspect_elf_notes does", () => {
     expect(
-      parseXtensaInfoAbi(
+      parseXtensaInfo(
         Buffer.concat([BINUTILS_WINDOWED, Buffer.alloc(11)]),
         true,
+        4n,
       ),
-    ).toEqual({ status: "declared", abi: "windowed" });
+    ).toEqual(WINDOWED);
   });
 
   it("does not read big-endian note words as little-endian", () => {
-    expect(parseXtensaInfoAbi(BINUTILS_WINDOWED, false)).toMatchObject({
-      status: "unavailable",
+    expect(parseXtensaInfo(BINUTILS_WINDOWED, false, 4n)).toMatchObject({
+      abi: { status: "unavailable" },
+      literals: { status: "unavailable" },
     });
   });
+});
+
+describe("Xtensa_Info note alignment", () => {
+  it.each([0n, 1n, 2n, 3n, 4n])(
+    "pads notes to 4 for a declared alignment of %s",
+    (declared) => {
+      expect(parseXtensaInfo(BINUTILS_WINDOWED, true, declared)).toEqual(
+        WINDOWED,
+      );
+    },
+  );
+
+  it.each([5n, 6n, 7n, 9n, 16n, 2n ** 63n])(
+    "leaves both declarations unavailable for a declared alignment of %s",
+    (declared) => {
+      const parsed = parseXtensaInfo(BINUTILS_WINDOWED, true, declared);
+      expect(parsed.abi).toMatchObject({ status: "unavailable" });
+      expect(parsed.literals).toEqual(parsed.abi);
+      if (parsed.abi.status === "unavailable")
+        expect(parsed.abi.reason).toContain(`sh_addralign ${declared}`);
+    },
+  );
 });

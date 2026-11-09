@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 
-const execute = promisify(execFile);
 export const XTENSA_LANGUAGE = "Xtensa:LE:32:default";
 export const XTENSA_COMPILER_SPEC = "default";
 
@@ -46,14 +43,17 @@ export function parseXtensaReadelf(text, names) {
   const descriptor = Buffer.from(note.replaceAll(/\s+/gu, ""), "hex")
     .toString("latin1")
     .replace(/\0+$/u, "");
-  const abiLine = descriptor
-    .split("\n")
-    .find((line) => line.startsWith("ABI="));
+  const lines = descriptor.split("\n");
+  const abiLine = lines.find((line) => line.startsWith("ABI="));
   assert.ok(abiLine, "Xtensa_Info note declares no ABI");
   assert.ok(
     ["ABI=0", "ABI=1"].includes(abiLine),
     `Xtensa_Info note declares ${abiLine}, which binutils does not define`,
   );
+  const literalsLine = lines.find((line) =>
+    line.startsWith("USE_ABSOLUTE_LITERALS="),
+  );
+  assert.ok(literalsLine, "Xtensa_Info note declares no USE_ABSOLUTE_LITERALS");
   return {
     xtensa: {
       elfClass: 32,
@@ -64,27 +64,37 @@ export function parseXtensaReadelf(text, names) {
         status: "declared",
         abi: abiLine === "ABI=0" ? "windowed" : "call0",
       },
+      literals: {
+        status: "declared",
+        literals:
+          literalsLine === "USE_ABSOLUTE_LITERALS=0"
+            ? "pc-relative"
+            : "absolute",
+      },
     },
     symbols,
     descriptor,
   };
 }
 
-/** Independent reader is a bounded lane prerequisite, never an REA provider. */
-export async function inspectXtensaReadelf(path, names) {
+/**
+ * Independent reader is a bounded lane prerequisite, never an REA provider; it
+ * runs as a process tree that the lane's commands own.
+ */
+export async function inspectXtensaReadelf(path, names, commands) {
   const command = process.env.REA_XTENSA_READELF ?? "readelf";
   const options = {
     env: { ...process.env, LC_ALL: "C" },
     timeout: 10000,
     maxBuffer: 1024 * 1024,
   };
-  const version = await execute(command, ["--version"], options);
+  const version = await commands.exec(command, ["--version"], options);
   assert.match(
     version.stdout,
     /\b(?:GNU readelf|LLVM)\b/u,
     "This lane requires GNU or LLVM readelf",
   );
-  const result = await execute(
+  const result = await commands.exec(
     command,
     ["-h", "-s", "-n", "-W", path],
     options,

@@ -29,6 +29,7 @@ import {
 import {
   ghidraXtensaLimitations,
   type GhidraXtensaCall0Report,
+  ghidraXtensaProfileMismatchReason,
 } from "./GhidraXtensaProfile.js";
 
 // Abbreviated from Ghidra 12.1.4 Processors/Xtensa/data/languages/xtensa.ldefs:
@@ -82,6 +83,7 @@ const target = (
   xtensa: XtensaElfMetadata = {
     ...HEADER,
     abi: { status: "declared", abi: "windowed" },
+    literals: { status: "declared", literals: "pc-relative" },
     ...change,
   },
 ): BinaryTarget => ({
@@ -166,6 +168,7 @@ const registerPinCases = () => {
         type: 2,
         flags: 0x300,
         abi: "windowed",
+        literals: "pc-relative",
       },
       xtensa_support_lane: "elf32-le-exec-windowed-generic-v1",
     });
@@ -179,6 +182,31 @@ const registerPinCases = () => {
     if (!left.ok) throw left.error;
     if (!right.ok) throw right.error;
     expect(left.value.profile?.digest).not.toBe(right.value.profile?.digest);
+  });
+
+  it("refuses a committed profile resolved for another Xtensa image", async () => {
+    const launches: GhidraClientOptions[] = [];
+    const provider = ghidra({}, capturingFactory(launches));
+    const resolved = await provider.resolveAnalysisProfile(target());
+    if (!resolved.ok || resolved.value.profile === null)
+      throw new Error("expected an Xtensa profile");
+    const { parameters } = resolved.value.profile;
+    // Both images pin the same language; only the committed ELF facts differ.
+    const other = target({ flags: 0 });
+    expect(ghidraXtensaProfileMismatchReason(target(), parameters)).toBeNull();
+    const reason = ghidraXtensaProfileMismatchReason(other, parameters);
+    expect(reason).not.toBeNull();
+    const client = provider.createClient(other, resolved.value.profile);
+    try {
+      expect(await client.execute("health", {})).toMatchObject({
+        ok: false,
+        error: { diagnostics: { reason } },
+      });
+    } finally {
+      await client.close();
+    }
+    // The refusal comes before any Ghidra launch.
+    expect(launches).toEqual([]);
   });
 
   it("imports with the pin and asserts it against the session handshake", async () => {
@@ -218,51 +246,78 @@ const registerPinCases = () => {
   });
 };
 
+const DUPLICATE_LITERALS =
+  "The Xtensa_Info note declares USE_ABSOLUTE_LITERALS more than once.";
+
 const registerRefusalCases = () => {
+  // Each case changes one fact of an admitted target. The second column is
+  // what the refusal must name (the offending value, the declared key or the
+  // reader's diagnostic), or null when the refusal names no such fact.
   it.each([
-    [{ elfClass: 64 }, "ELF32 only"],
-    [{ byteOrder: "big" }, "little-endian images only"],
-    [{ type: 1 }, "relocatable images"],
-    [{ type: 3 }, "shared and position-independent images"],
+    [{ elfClass: 64 }, null],
+    [{ byteOrder: "big" }, null],
+    [{ type: 1 }, "relocatable"],
+    [{ type: 3 }, "shared"],
     [{ type: 0xfe00 }, "e_type 65024"],
-    [{ flags: 0x700 }, "(0x400)"],
-    [{ flags: 0x8000_0300 }, "(0x80000000)"],
-    [{ flags: 0x301 }, "declares machine 1"],
+    [{ flags: 0x700 }, "0x400"],
+    [{ flags: 0x8000_0300 }, "0x80000000"],
+    [{ flags: 0x301 }, "machine 1"],
     [{ abi: { status: "unrecognized", value: "2" } }, "ABI=2"],
-    [{ abi: { status: "absent" } }, "declares no ABI"],
+    [{ abi: { status: "absent" } }, null],
     [
       { abi: { status: "unavailable", reason: "A note is truncated." } },
       "A note is truncated.",
     ],
-  ] satisfies [Partial<XtensaElfMetadata>, string][])(
+    [
+      { literals: { status: "declared", literals: "absolute" } },
+      "USE_ABSOLUTE_LITERALS=1",
+    ],
+    [
+      { literals: { status: "unrecognized", value: "2" } },
+      "USE_ABSOLUTE_LITERALS=2",
+    ],
+    [{ literals: { status: "absent" } }, null],
+    [
+      { literals: { status: "unavailable", reason: DUPLICATE_LITERALS } },
+      DUPLICATE_LITERALS,
+    ],
+  ] satisfies [Partial<XtensaElfMetadata>, string | null][])(
     "refuses an unverified Xtensa interpretation %j",
-    async (change, reason) => {
+    async (change, named) => {
+      const reason =
+        named === null ? expect.any(String) : expect.stringContaining(named);
       const provider = ghidra();
       const value = target(change);
       expect(provider.inspectTargetSupport(value)).toMatchObject({
         status: "unsupported",
         code: "architecture_unsupported",
-        reason: expect.stringContaining(reason),
+        reason,
       });
       expect(await provider.resolveAnalysisProfile(value)).toMatchObject({
         ok: false,
         error: {
           _tag: "AnalysisUnsupportedTargetError",
-          reason: expect.stringContaining(reason),
+          reason,
         },
       });
       expect(ghidraPinnedLanguage(value)).toBeUndefined();
     },
   );
 
-  it("refuses a target whose ABI declaration was never inspected", () => {
-    const uninspected = target({}, HEADER);
-    expect(ghidraPinnedLanguage(uninspected)).toBeUndefined();
-    expect(ghidra().inspectTargetSupport(uninspected)).toMatchObject({
-      status: "unsupported",
-      reason: expect.stringContaining("was not inspected"),
-    });
-  });
+  it.each([
+    ["ABI", HEADER],
+    ["literal", { ...HEADER, abi: { status: "declared", abi: "windowed" } }],
+  ] satisfies [string, XtensaElfMetadata][])(
+    "refuses a target whose %s declaration was never inspected",
+    (declaration, metadata) => {
+      const uninspected = target({}, metadata);
+      expect(ghidraPinnedLanguage(uninspected)).toBeUndefined();
+      expect(ghidra().inspectTargetSupport(uninspected)).toMatchObject({
+        status: "unsupported",
+        code: "architecture_unsupported",
+      });
+    },
+  );
 
   it("does not widen Windows P0", () => {
     const windows = new GhidraProvider(

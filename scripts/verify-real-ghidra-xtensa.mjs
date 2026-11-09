@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   mkdtemp,
@@ -13,7 +12,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import Ajv from "ajv/dist/2020.js";
@@ -59,6 +57,7 @@ import {
   requireMcpToolError,
 } from "./lib/mcp-verifier-results.mjs";
 import { createVerifierRun, completeVerifierRun } from "./lib/verifier-run.mjs";
+import { createVerifierCommands } from "./lib/verify-commands.mjs";
 
 // Optional cross-target lane. No tool acquisition and no target execution.
 if (process.argv.length !== 2)
@@ -82,9 +81,11 @@ const installation = await inspectVerifierGhidraInstallation({
 assert.equal(installation.status, "available", JSON.stringify(installation));
 assert.equal(installation.providerVersion, "12.1.4");
 
-const execute = promisify(execFile);
 const entrypoint = fileURLToPath(new URL("./rea.mjs", import.meta.url));
 const run = createVerifierRun();
+// Every compiler, readelf and CLI command runs as an owned process tree with a
+// deadline.
+const commands = await createVerifierCommands();
 const workspace = await mkdtemp(join(tmpdir(), "rea-xtensa-proof-"));
 const runtime = join(workspace, "runtime");
 await mkdir(runtime);
@@ -134,7 +135,7 @@ try {
 
   const fixture = await writeXtensaFixture(workspace);
   const names = Object.keys(XTENSA_FIXTURE_SYMBOLS);
-  const independent = await inspectXtensaReadelf(fixture.path, names);
+  const independent = await inspectXtensaReadelf(fixture.path, names, commands);
   for (const name of names)
     assert.equal(
       BigInt(independent.symbols[name]),
@@ -172,6 +173,7 @@ try {
       type: 2,
       flags: 0x300,
       abi,
+      literals: "pc-relative",
     });
   };
   const assertEvidence = (evidence, sha256, abi) => {
@@ -283,10 +285,11 @@ try {
 
   const refusals = [];
   for (const [change, reason] of [
-    [{ flags: 0x700 }, "(0x400)"],
+    [{ flags: 0x700 }, "0x400"],
     [{ flags: 0x301 }, "machine 1"],
-    [{ type: 3 }, "shared and position-independent"],
+    [{ type: 3 }, "shared"],
     [{ abi: "2" }, "ABI=2"],
+    [{ literals: "1" }, "USE_ABSOLUTE_LITERALS=1"],
   ]) {
     // Header-mutated copies test admission; they are not new producer claims.
     const rejectedPath = join(workspace, `refused-${refusals.length}.elf`);
@@ -301,7 +304,7 @@ try {
     const error = requireMcpToolError(reply);
     assert.ok(JSON.stringify(error).includes(reason), JSON.stringify(error));
     await assert.rejects(
-      execute(
+      commands.exec(
         process.execPath,
         [
           entrypoint,
@@ -315,9 +318,11 @@ try {
         { env, timeout: 60000, maxBuffer: 1024 * 1024 },
       ),
       (cause) =>
-        Number.isInteger(cause.code) &&
+        cause.name === "VerifierCommandExitError" &&
         cause.code !== 0 &&
-        `${cause.stdout}\n${cause.stderr}`.includes(reason),
+        `${cause.snapshot.stdout.text}\n${cause.snapshot.stderr.text}`.includes(
+          reason,
+        ),
     );
     refusals.push({ change, reason });
   }
@@ -343,7 +348,7 @@ try {
     { command: "search", operands: ["rea_xtensa_", "--kind", "procedures"] },
     { command: "function", operands: ["rea_xtensa_entry"] },
   ]) {
-    const cli = await execute(
+    const cli = await commands.exec(
       process.execPath,
       [
         entrypoint,
@@ -387,7 +392,7 @@ try {
     language: XTENSA_LANGUAGE,
     procedures: procedures.length,
     checks: [
-      "readelf header, symbols and Xtensa_Info ABI",
+      "readelf header, symbols and Xtensa_Info declarations",
       "pinned language and compiler identity",
       "entry, l32r, call8 and retw.n decoding",
       "decompiled call8 argument is the l32r literal; caller returns the callee result",
@@ -408,6 +413,7 @@ try {
   const call0Readelf = await inspectXtensaReadelf(
     call0Fixture.path,
     call0Names,
+    commands,
   );
   for (const name of call0Names)
     assert.equal(
@@ -614,11 +620,12 @@ try {
     const built = await buildXtensaCall0CFixture(
       workspace,
       command,
+      commands,
       flags,
       `${label}.elf`,
     );
     const cNames = ["rea_xtensa_call0_c_entry", "rea_xtensa_call0_c_scale"];
-    const readelf = await inspectXtensaReadelf(built.path, cNames);
+    const readelf = await inspectXtensaReadelf(built.path, cNames, commands);
     assert.equal(readelf.xtensa.abi.abi, "call0", `${label} declares call0`);
     const cTarget = await parseBinaryTarget(built.path);
     if (!cTarget.ok) throw cTarget.error;
@@ -670,9 +677,9 @@ try {
 
   const compiler = process.env.REA_XTENSA_CC;
   if (compiler !== undefined) {
-    const built = await buildXtensaCFixture(workspace, compiler);
+    const built = await buildXtensaCFixture(workspace, compiler, commands);
     const cNames = ["rea_xtensa_c_entry", "rea_xtensa_c_scale"];
-    const readelf = await inspectXtensaReadelf(built.path, cNames);
+    const readelf = await inspectXtensaReadelf(built.path, cNames, commands);
     const cTarget = await parseBinaryTarget(built.path);
     if (!cTarget.ok) throw cTarget.error;
     assert.deepEqual(cTarget.value.xtensa, readelf.xtensa);
@@ -696,6 +703,42 @@ try {
           BigInt(address) === BigInt(readelf.symbols.rea_xtensa_c_scale),
       ),
     );
+    // The compiler's own literal load: walk the callee as Ghidra decodes it
+    // until its l32r, then read the word that load references.
+    let literalLoad;
+    let at = BigInt(readelf.symbols.rea_xtensa_c_scale);
+    for (let step = 0; step < 64 && literalLoad === undefined; step += 1) {
+      const decoded = await call(
+        "inspect_native_instruction",
+        { address: hex(at) },
+        built.sha256,
+      );
+      assert.equal(decoded.status, "decoded", `${hex(at)} was not decoded`);
+      if (decoded.mnemonic?.toLowerCase() === "l32r") literalLoad = decoded;
+      else if (decoded.flow?.kind === "return") break;
+      at += BigInt(decoded.bytes.length / 2);
+    }
+    assert.ok(
+      literalLoad !== undefined,
+      "rea_xtensa_c_scale loads no literal with l32r before it returns",
+    );
+    const literalWords = [];
+    for (const reference of literalLoad.references)
+      literalWords.push(
+        (
+          await call(
+            "read_bytes",
+            { address: reference.target_address, length: 4 },
+            built.sha256,
+          )
+        ).bytes_hex,
+      );
+    const constant = Buffer.alloc(4);
+    constant.writeUInt32LE(XTENSA_C_FIXTURE_VALUES.constant);
+    assert.ok(
+      literalWords.includes(constant.toString("hex")),
+      `l32r references no literal holding the constant: ${JSON.stringify(literalWords)}`,
+    );
     const decompiled = {};
     for (const name of cNames)
       decompiled[name] = await call("procedure_pseudo_code", {
@@ -714,9 +757,11 @@ try {
       checks: [
         "readelf symbols",
         "call8 callee",
+        "the callee's compiled l32r loads the constant from its literal",
         "decompiled call8 arguments are the global and the factor; caller returns the callee result",
-        "decompiled callee returns value * factor plus its l32r constant",
+        "decompiled callee returns value * factor plus the constant",
       ],
+      literal_load: { address: literalLoad.address, bytes: literalLoad.bytes },
       entry_pseudocode: decompiled.rea_xtensa_c_entry,
       scale_pseudocode: decompiled.rea_xtensa_c_scale,
     });
@@ -724,7 +769,13 @@ try {
 } catch (cause) {
   failure = cause;
 }
-for (const close of [() => client.close(), () => transport.close()]) {
+// The workspace is removed only after every owned command tree has stopped;
+// a failed close keeps it for inspection.
+for (const close of [
+  () => client.close(),
+  () => transport.close(),
+  () => commands.close(),
+]) {
   try {
     await close();
   } catch (cause) {

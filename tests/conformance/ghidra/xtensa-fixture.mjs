@@ -1,11 +1,7 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
-
-const execute = promisify(execFile);
 
 /**
  * Source-owned windowed-ABI code, so the base lane needs no Xtensa compiler.
@@ -264,13 +260,18 @@ function layoutFixture({ text, base, symbols, entry, abi }) {
   return bytes;
 }
 
-/** File offset of the `ABI=` digit in the one `.xtensa.info` descriptor. */
-const abiDigitOffset = (bytes) => {
+/**
+ * File offset of a declared key's one-digit value in the one `.xtensa.info`
+ * descriptor, which every fixture writes as `USE_ABSOLUTE_LITERALS=0\nABI=`.
+ */
+const infoDigitOffset = (bytes, key) => {
   const prefix = Buffer.from("USE_ABSOLUTE_LITERALS=0\nABI=", "latin1");
   const at = bytes.indexOf(prefix);
   if (at < 0 || bytes.lastIndexOf(prefix) !== at)
     throw new Error("Expected exactly one Xtensa_Info descriptor");
-  return at + prefix.length;
+  return key === "ABI"
+    ? at + prefix.length
+    : at + "USE_ABSOLUTE_LITERALS=".length;
 };
 
 /** Header-mutated copies test admission; they are not new producer claims. */
@@ -279,7 +280,13 @@ export function mutateXtensaFixture(bytes, change) {
   if (change.flags !== undefined) copy.writeUInt32LE(change.flags, 36);
   if (change.type !== undefined) copy.writeUInt16LE(change.type, 16);
   if (change.abi !== undefined)
-    copy.write(change.abi, abiDigitOffset(copy), "latin1");
+    copy.write(change.abi, infoDigitOffset(copy, "ABI"), "latin1");
+  if (change.literals !== undefined)
+    copy.write(
+      change.literals,
+      infoDigitOffset(copy, "USE_ABSOLUTE_LITERALS"),
+      "latin1",
+    );
   return copy;
 }
 
@@ -306,9 +313,10 @@ export function writeXtensaCall0Fixture(directory) {
 /**
  * Optional route: build the C fixture with a caller-supplied Espressif
  * compiler, for example xtensa-esp32-elf-gcc. The lane never acquires one.
+ * The compiler runs as a process tree that the lane's commands own.
  */
-export function buildXtensaCFixture(directory, compiler) {
-  return buildCFixture(directory, compiler, {
+export function buildXtensaCFixture(directory, compiler, commands) {
+  return buildCFixture(directory, compiler, commands, {
     source: "xtensa.c",
     output: "xtensa-c.elf",
     entry: "rea_xtensa_c_entry",
@@ -321,8 +329,14 @@ export function buildXtensaCFixture(directory, compiler) {
  * an ESP8266 compiler such as xtensa-lx106-elf-gcc, whose only ABI is call0,
  * or an Espressif ESP32 compiler with `-mabi=call0`.
  */
-export function buildXtensaCall0CFixture(directory, compiler, flags, output) {
-  return buildCFixture(directory, compiler, {
+export function buildXtensaCall0CFixture(
+  directory,
+  compiler,
+  commands,
+  flags,
+  output,
+) {
+  return buildCFixture(directory, compiler, commands, {
     source: "xtensa-call0.c",
     output,
     entry: "rea_xtensa_call0_c_entry",
@@ -330,7 +344,7 @@ export function buildXtensaCall0CFixture(directory, compiler, flags, output) {
   });
 }
 
-async function buildCFixture(directory, compiler, fixture) {
+async function buildCFixture(directory, compiler, commands, fixture) {
   const source = fileURLToPath(
     new URL(`../c/${fixture.source}`, import.meta.url),
   );
@@ -348,8 +362,8 @@ async function buildCFixture(directory, compiler, fixture) {
     path,
   ];
   const options = { timeout: 60000, maxBuffer: 1024 * 1024 };
-  const version = await execute(compiler, ["--version"], options);
-  await execute(compiler, args, options);
+  const version = await commands.exec(compiler, ["--version"], options);
+  await commands.exec(compiler, args, options);
   const bytes = await readFile(path);
   return {
     path,

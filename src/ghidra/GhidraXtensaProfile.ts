@@ -1,5 +1,11 @@
+import { isDeepStrictEqual } from "node:util";
+
 import type { GhidraLanguageOverride } from "../config/ghidraLanguageOverride.js";
-import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
+import type {
+  BinaryTarget,
+  XtensaAbiDeclaration,
+  XtensaLiteralDeclaration,
+} from "../domain/binaryTargetTypes.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 
 /**
@@ -28,6 +34,49 @@ const EF_XTENSA_XT_LIT = 0x00000200;
 const EF_XTENSA_DECLARED_BITS =
   EF_XTENSA_MACH | EF_XTENSA_XT_INSN | EF_XTENSA_XT_LIT;
 
+const abiUnsupportedReason = (
+  abi: XtensaAbiDeclaration | undefined,
+): string | null => {
+  if (abi === undefined)
+    return "The Xtensa ABI declaration in .xtensa.info was not inspected; this lane does not infer an ABI.";
+  switch (abi.status) {
+    case "declared":
+      return null;
+    case "unrecognized":
+      return `The image declares ABI=${abi.value} in .xtensa.info, which binutils does not define; this lane admits only the windowed (0) and call0 (1) ABIs.`;
+    case "absent":
+      return "The image declares no ABI in .xtensa.info; this lane does not infer an ABI from the family name.";
+    case "unavailable":
+      return [
+        "The Xtensa ABI declaration is unreadable or malformed, so this lane does not infer an ABI.",
+        abi.reason,
+      ].join(" ");
+  }
+};
+
+/** Ghidra 12.1.4 computes every L32R address from the instruction's own address. */
+const literalsUnsupportedReason = (
+  literals: XtensaLiteralDeclaration | undefined,
+): string | null => {
+  if (literals === undefined)
+    return "The Xtensa literal declaration in .xtensa.info was not inspected; this lane does not assume PC-relative L32R literals.";
+  switch (literals.status) {
+    case "declared":
+      return literals.literals === "pc-relative"
+        ? null
+        : "The image declares USE_ABSOLUTE_LITERALS=1 in .xtensa.info: its configuration addresses L32R literals from LITBASE (the Extended L32R option). Ghidra 12.1.4 decodes every L32R as PC-relative, so literal loads and the references derived from them could be wrong; this lane admits only PC-relative literals (0), as ESP-IDF builds declare.";
+    case "unrecognized":
+      return `The image declares USE_ABSOLUTE_LITERALS=${literals.value} in .xtensa.info, which binutils does not define; this lane admits only PC-relative literals (0).`;
+    case "absent":
+      return "The image declares no USE_ABSOLUTE_LITERALS in .xtensa.info; this lane does not assume PC-relative L32R literals.";
+    case "unavailable":
+      return [
+        "The Xtensa literal declaration is unreadable or malformed, so this lane does not assume PC-relative L32R literals.",
+        literals.reason,
+      ].join(" ");
+  }
+};
+
 /** Keep family recognition separate from the deliberately bounded Ghidra lane. */
 export const ghidraXtensaUnsupportedReason = (
   target: BinaryTarget,
@@ -52,22 +101,10 @@ export const ghidraXtensaUnsupportedReason = (
     return `Xtensa e_flags declares bits outside the verified lane (0x${unsupportedFlags.toString(16)}); reserved or newer declarations are not treated as compatible with this profile.`;
   if ((metadata.flags & EF_XTENSA_MACH) !== 0)
     return `Xtensa e_flags declares machine ${metadata.flags & EF_XTENSA_MACH}; binutils defines only E_XTENSA_MACH (0), so this lane does not guess a core.`;
-  const abi = metadata.abi;
-  if (abi === undefined)
-    return "The Xtensa ABI declaration in .xtensa.info was not inspected; this lane does not infer an ABI.";
-  switch (abi.status) {
-    case "declared":
-      return null;
-    case "unrecognized":
-      return `The image declares ABI=${abi.value} in .xtensa.info, which binutils does not define; this lane admits only the windowed (0) and call0 (1) ABIs.`;
-    case "absent":
-      return "The image declares no ABI in .xtensa.info; this lane does not infer an ABI from the family name.";
-    case "unavailable":
-      return [
-        "The Xtensa ABI declaration is unreadable or malformed, so this lane does not infer an ABI.",
-        abi.reason,
-      ].join(" ");
-  }
+  return (
+    abiUnsupportedReason(metadata.abi) ??
+    literalsUnsupportedReason(metadata.literals)
+  );
 };
 
 /** Prototype policy ReaGhidraXtensaCall0.java applies after analysis. */
@@ -131,7 +168,7 @@ export const ghidraXtensaProfileParameters = (
 ): Readonly<Record<string, JsonValue>> => {
   if (target.kind !== "executable" || target.architecture !== "xtensa")
     return {};
-  const { elfClass, byteOrder, type, flags, abi } = target.xtensa;
+  const { elfClass, byteOrder, type, flags, abi, literals } = target.xtensa;
   const call0 = isGhidraXtensaCall0Target(target);
   return {
     xtensa_elf: {
@@ -140,12 +177,30 @@ export const ghidraXtensaProfileParameters = (
       type,
       flags,
       abi: abi?.status === "declared" ? abi.abi : null,
+      literals: literals?.status === "declared" ? literals.literals : null,
     },
     xtensa_support_lane: call0
       ? "elf32-le-exec-call0-generic-v1"
       : "elf32-le-exec-windowed-generic-v1",
     ...(call0 ? { xtensa_call0_prototype: GHIDRA_XTENSA_CALL0_PROTOTYPE } : {}),
   };
+};
+
+/**
+ * Bind a committed Xtensa profile to the target being imported. Every admitted
+ * Xtensa ELF pins the same language, so the language checks alone cannot tell
+ * a profile resolved for another image, whose ELF facts every Evidence record
+ * would then attribute to this one.
+ */
+export const ghidraXtensaProfileMismatchReason = (
+  target: BinaryTarget,
+  parameters: Readonly<Record<string, unknown>>,
+): string | null => {
+  const expected = ghidraXtensaProfileParameters(target);
+  return isDeepStrictEqual(parameters.xtensa_elf, expected.xtensa_elf) &&
+    parameters.xtensa_support_lane === expected.xtensa_support_lane
+    ? null
+    : "The committed Xtensa analysis profile was resolved for a different target; reopen the target to resolve a new profile.";
 };
 
 /** What verify:ghidra:xtensa and REA's ESP-IDF measurement establish, and what they do not. */

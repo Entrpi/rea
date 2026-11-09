@@ -22,6 +22,9 @@ export const ghidraProjectHistoryEvidence = (
     ...(info.xtensa_call0_prototype === undefined
       ? {}
       : { xtensa_call0_prototype: info.xtensa_call0_prototype }),
+    ...(info.riscv_calling_convention === undefined
+      ? {}
+      : { riscv_calling_convention: info.riscv_calling_convention }),
   };
   if (Object.keys(reports).length === 0) return undefined;
   return createEvidence(

@@ -1,4 +1,5 @@
 import { SdkErrorCode } from "@modelcontextprotocol/client";
+import { ArtifactResourceScope } from "../../../src/artifacts/ArtifactResourceScope.js";
 import { expect, it as test, onTestFinished, vi } from "vitest";
 import {
   access,
@@ -440,6 +441,8 @@ it("retire sessions when APK bytes, engine bytes or JVM options change", async (
     Buffer.concat([await readFile(apk), Buffer.from("new artifact bytes")]),
   );
   const changed = await inspect();
+  expect(first.subject?.digest.sha256).toEqual(expect.any(String));
+  expect(changed.subject?.digest.sha256).toEqual(expect.any(String));
   expect(changed.subject?.digest.sha256).not.toBe(first.subject?.digest.sha256);
   await verifyCleanup(launches.slice(0, 1));
   await writeJadxJarInventory(jar, ["fixture/NewEngineMarker.class"]);
@@ -983,6 +986,8 @@ it("bounds each upstream call by the selected deadline instead of a fixed limit"
         bridgeHash: "0".repeat(64),
         signal: new AbortController().signal,
         timeoutMs: 300,
+        resources: new ArtifactResourceScope(),
+        deadline: new AbortController().signal,
       }),
     ).rejects.toMatchObject({
       code: SdkErrorCode.RequestTimeout,
