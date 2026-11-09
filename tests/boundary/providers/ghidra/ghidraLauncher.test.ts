@@ -319,6 +319,9 @@ describe("Ghidra headless launcher", () => {
     expect(arguments_).toContain("-readOnly");
     expect(arguments_).toContain("-deleteProject");
   });
+});
+
+describe("Ghidra post-analysis calling-convention scripts", () => {
   it("remaps soft-float storage after the no-return fix and before the bridge", () => {
     const base = {
       platform: "linux" as const,
