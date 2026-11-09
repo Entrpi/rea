@@ -118,6 +118,8 @@ public final class ReaGhidraRiscvCallingConvention extends GhidraScript {
   private record Held(long bytes, boolean untyped) {}
 
   private final Map<DataType, Held> heldFields = new HashMap<>();
+  private final Map<DataType, Boolean> unexplained = new HashMap<>();
+  private final Map<DataType, Long> alignments = new HashMap<>();
   private final Map<DataType, Kind> psabiKinds = new HashMap<>();
   private final Map<DataType, Kind> parameterKinds = new HashMap<>();
   private final Map<DataType, Kind> returnKinds = new HashMap<>();
@@ -433,6 +435,11 @@ public final class ReaGhidraRiscvCallingConvention extends GhidraScript {
     DataType value = strip(type);
     if (!(value instanceof Union) && !(value instanceof Array) && flatten(type, fields)) {
       long floats = fields.stream().filter(Boolean::booleanValue).count();
+      // DWARF omits unnamed bit-fields of nonzero width, which the psABI still counts:
+      // `struct { float f; unsigned : 1; }` takes fa0 and a0, yet Ghidra sees one float.
+      // Bytes that natural alignment does not explain may hold one, so a float there has no
+      // known class. An unnamed bit-field inside a named one's storage unit leaves no trace.
+      if (floats > 0 && unexplainedBytes(type)) return Kind.UNKNOWN;
       if (fields.size() == 1 && floats == 1) return Kind.FLOAT;
       if (fields.size() == 2 && floats == 2) return Kind.FLOAT_PAIR;
       if (fields.size() == 2 && floats == 1) return Kind.FLOAT_INTEGER;
@@ -533,6 +540,62 @@ public final class ReaGhidraRiscvCallingConvention extends GhidraScript {
         || type.getLength() > 4) return false;
     fields.add(false);
     return true;
+  }
+
+  /**
+   * Whether a structure, or one nested in it, has bytes that neither a member nor the padding
+   * that natural alignment adds before a member or at the end accounts for. Over-alignment, such
+   * as `__attribute__((aligned(8)))`, counts too: it cannot be told apart from an omitted field.
+   */
+  private boolean unexplainedBytes(DataType type) {
+    type = strip(type);
+    Boolean known = unexplained.get(type);
+    if (known != null) return known;
+    boolean result = false;
+    if (type instanceof Array array) result = unexplainedBytes(array.getDataType());
+    else if (type instanceof Structure structure) {
+      long end = 0;
+      long alignment = 1;
+      for (DataTypeComponent component : structure.getDefinedComponents()) {
+        if (component.getLength() == 0) continue;
+        long member = naturalAlignment(component.getDataType());
+        if (component.getOffset() > alignUp(end, member)
+            || unexplainedBytes(component.getDataType())) {
+          result = true;
+          break;
+        }
+        end = Math.max(end, (long) component.getOffset() + component.getLength());
+        alignment = Math.max(alignment, member);
+      }
+      result = result || structure.getLength() > alignUp(end, alignment);
+    }
+    unexplained.put(type, result);
+    return result;
+  }
+
+  /**
+   * C's alignment for a type, worked out from its members because Ghidra's DWARF import does not
+   * pack structures. Both results are kept per type, as nested types repeat each other.
+   */
+  private long naturalAlignment(DataType type) {
+    type = strip(type);
+    Long known = alignments.get(type);
+    if (known != null) return known;
+    long result;
+    if (type instanceof BitFieldDataType bitField)
+      result = naturalAlignment(bitField.getBaseDataType());
+    else if (type instanceof Array array) result = naturalAlignment(array.getDataType());
+    else if (type instanceof Structure structure) {
+      result = 1;
+      for (DataTypeComponent component : structure.getDefinedComponents())
+        result = Math.max(result, naturalAlignment(component.getDataType()));
+    } else result = Math.max(1, type.getAlignment());
+    alignments.put(type, result);
+    return result;
+  }
+
+  private static long alignUp(long value, long alignment) {
+    return (value + alignment - 1) / alignment * alignment;
   }
 
   private static DataType strip(DataType type) {
