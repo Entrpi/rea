@@ -527,7 +527,8 @@ export type BinaryTarget =
           | "esp-image"
           | "uf2"
           | "dfuse"
-          | "fit";
+          | "fit"
+          | "esp8266-image";
       })
   | (BinaryTargetIdentity &
       NonExecutableMetadata & {

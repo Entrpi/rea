@@ -44,6 +44,7 @@ import {
 } from "../../domain/zipPackageFormat.js";
 import { artifactFormatDescriptor } from "../artifactFormats.js";
 import { ArtifactReaderFailure } from "../ArtifactReader.js";
+import { admitEsp8266ImageHeader } from "../../domain/firmware/espImage.js";
 import type { HashResult } from "../ArtifactHash.js";
 import {
   hashStableRootArtifactHandle,
@@ -91,6 +92,7 @@ export const classifyAndHashRootForInventory = async (
     | "selectedPath"
     | "expectedRootSha256"
     | "espFlashSelection"
+    | "selectedRootFormat"
   >,
   probeFacts?: ArtifactEmbeddedFormatProbeFacts,
 ): Promise<RootInventoryClassification> => {
@@ -167,6 +169,7 @@ export const classifyAndHashRootForInventory = async (
       options.asarHeaderAdmission,
       options.selectedPath,
       options.espFlashSelection,
+      options.selectedRootFormat,
     );
     const format =
       typeof classified === "string" ? classified : classified.kind;
@@ -220,6 +223,7 @@ const classifyRootFormat = async (
   asarHeaderAdmission?: AsarHeaderAdmission,
   selectedPath?: string,
   espFlashSelection?: EspFlashSelection,
+  selectedRootFormat?: ArtifactInventoryOptions["selectedRootFormat"],
 ): Promise<ArtifactOccurrence["artifact_format"] | ArtifactFormatAdmission> => {
   const { handle } = source;
   const probe = createArtifactClassificationProbe(asarHeaderAdmission);
@@ -285,6 +289,15 @@ const classifyRootFormat = async (
         `ESP flash image layout is not recognized: ${selected.error}`,
       );
     return { kind: "esp-flash-image", source, location: selected.value };
+  }
+  if (selectedRootFormat === "esp8266-image") {
+    const admitted = admitEsp8266ImageHeader(evidence.prefix, archiveBytes);
+    if (!admitted.ok)
+      throw new ArtifactReaderFailure(
+        admitted.error.kind === "unsupported" ? "unavailable" : "format",
+        admitted.error.message,
+      );
+    return "esp8266-image";
   }
   if (nesContainerFormat(evidence.prefix) !== undefined) {
     const parsed = parseInesLayout(evidence.prefix, archiveBytes);

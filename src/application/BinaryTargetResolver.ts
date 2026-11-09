@@ -107,7 +107,9 @@ import {
 import { espFlashSelectionError } from "../domain/firmware/espFlashSelection.js";
 import { hasFitImagesNode } from "../domain/firmware/fitImage.js";
 import {
+  ESP8266_IMAGE_HEADER_BYTES,
   ESP8266_REFUSAL,
+  admitEsp8266ImageHeader,
   recognizeEspImage,
 } from "../domain/firmware/espImage.js";
 import {
@@ -493,6 +495,40 @@ const readOpenedBinaryTarget = async (
       format: "dos-com",
       architecture: "x86",
       availableArchitectures: ["x86"],
+    });
+  }
+  if (formatHint === "esp8266-image") {
+    if (targetKind !== undefined && targetKind !== "archive")
+      return err(
+        new BinaryTargetError(
+          path,
+          "ESP8266 image format requires an archive target kind",
+          { constraint: "load_selection_rejected" },
+        ),
+      );
+    // The caller names the chip, which the shared 0xE9 magic cannot.
+    const admitted = admitEsp8266ImageHeader(
+      await readLeadingBytes(
+        handle,
+        Math.min(metadata.size, ESP8266_IMAGE_HEADER_BYTES),
+        path,
+        signal,
+      ),
+      metadata.size,
+    );
+    if (!admitted.ok)
+      return err(
+        new BinaryTargetError(path, admitted.error.message, {
+          constraint: "file_format_rejected",
+        }),
+      );
+    return ok({
+      path,
+      sourcePath,
+      artifactSelectedPath: selectedPath,
+      sha256: await sha256Handle(handle, path, metadata, signal),
+      kind: "archive",
+      format: "esp8266-image",
     });
   }
   // Probe WASM content before suffix-only database routing; an explicit
@@ -928,6 +964,7 @@ const isArchiveFormat = (
     "uf2",
     "dfuse",
     "fit",
+    "esp8266-image",
   ].includes(format);
 
 /** Whether the leading bytes begin any executable header family, valid or not. */

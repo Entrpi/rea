@@ -41,6 +41,7 @@ type FormatsWithReaders =
   | "srec"
   | "esp-image"
   | "esp-flash-image"
+  | "esp8266-image"
   | "uf2"
   | "dfuse"
   | "fit";

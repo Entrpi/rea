@@ -213,6 +213,7 @@ export interface ArtifactReader {
     | "uf2"
     | "dfuse"
     | "fit"
+    | "esp8266-image"
     | "file";
   entries(
     signal?: AbortSignal,

@@ -52,6 +52,7 @@ export const evidenceSubjectFormatSchema = z.enum([
   "uf2",
   "dfuse",
   "fit",
+  "esp8266-image",
 ]);
 
 /** Format-owned architecture declarations shared by Evidence and persisted executions. */

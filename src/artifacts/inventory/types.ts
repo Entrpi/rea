@@ -1,4 +1,5 @@
 import type { EspFlashSelection } from "../../domain/firmware/espFlashLocation.js";
+import type { CallerSelectedRootFormat } from "../../domain/dosCom.js";
 import type { ArtifactIntegrityPolicyName } from "../../domain/artifactIntegrityPolicy.js";
 import type { AsarHeaderAdmission } from "../../config/asarHeaderAdmission.js";
 import type { ArtifactResourceScope } from "../ArtifactResourceScope.js";
@@ -20,4 +21,9 @@ export interface ArtifactInventoryOptions {
    * image; detection with defaults applies otherwise.
    */
   readonly espFlashSelection?: EspFlashSelection | undefined;
+  /**
+   * A root format the caller named because its bytes do not identify it;
+   * byte classification applies otherwise.
+   */
+  readonly selectedRootFormat?: CallerSelectedRootFormat | undefined;
 }

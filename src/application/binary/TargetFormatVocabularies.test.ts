@@ -129,6 +129,7 @@ const TARGETS: TargetFixtures = {
   "intel-hex": { ...archive, format: "intel-hex" },
   srec: { ...archive, format: "srec" },
   "esp-image": { ...archive, format: "esp-image" },
+  "esp8266-image": { ...archive, format: "esp8266-image" },
   "esp-flash-image": {
     ...archive,
     format: "esp-flash-image",
@@ -180,10 +181,14 @@ describe("target format vocabularies", () => {
   it.each(executableFormatHintSchema.options)(
     "admits the caller-selected %s hint only as its own target format",
     (hint) => {
-      // An ESP flash dump is the one caller-selected format read as an archive.
+      // ESP flash dumps and ESP8266 images are the caller-selected formats
+      // read as archives.
       expect(TARGETS[hint]).toMatchObject({
         format: hint,
-        kind: hint === "esp-flash-image" ? "archive" : "executable",
+        kind:
+          hint === "esp-flash-image" || hint === "esp8266-image"
+            ? "archive"
+            : "executable",
       });
     },
   );

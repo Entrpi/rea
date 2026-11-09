@@ -14,6 +14,7 @@ import { absoluteCallerPath } from "../../filesystem/callerPath.js";
 import type { AsarHeaderAdmission } from "../../config/asarHeaderAdmission.js";
 import type { EspFlashSelection } from "../../domain/firmware/espFlashLocation.js";
 import { artifactFormatDescriptor } from "../artifactFormats.js";
+import { callerSelectedRootFormat } from "../../domain/dosCom.js";
 import { createArtifactReader } from "../createArtifactReader.js";
 import { resolveAsarHeaderAdmission } from "../AsarHeader.js";
 import {
@@ -109,6 +110,7 @@ const extractArtifactInScope = async (
           input.asarHeaderAdmission ??
           resolveAsarHeaderAdmission(input.environment),
         espFlashSelection: input.espFlashSelection,
+        selectedRootFormat: callerSelectedRootFormat(input.inputFormat),
         integrity: input.integrityPolicy,
       },
       probeFacts,

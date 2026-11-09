@@ -1,5 +1,6 @@
 import type { EspFlashSelection } from "../domain/firmware/espFlashLocation.js";
 import type { AnalysisSettingsReader } from "../domain/analysisSettings.js";
+import { callerSelectedRootFormat } from "../domain/dosCom.js";
 import { runtimeAsarHeaderAdmission } from "../config/runtimeAnalysisSettings.js";
 import { artifactTargetRefusal } from "../domain/apple/artifactTargetApplicability.js";
 import { bindArtifactFileCleanup } from "./ArtifactFileOperation.js";
@@ -552,6 +553,7 @@ class ArtifactClient implements AnalysisClient {
         this.settings,
       ),
       espFlashSelection: espFlashSelection(this.target),
+      selectedRootFormat: callerSelectedRootFormat(this.target.format),
       ...(options?.signal === undefined ? {} : { signal: options.signal }),
       integrity: parsed.integrity_policy,
     });

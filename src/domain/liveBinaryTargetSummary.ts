@@ -115,6 +115,7 @@ export const liveBinaryTargetSummaryVariants = [
       "uf2",
       "dfuse",
       "fit",
+      "esp8266-image",
     ]),
     architecture: z.null(),
   }),

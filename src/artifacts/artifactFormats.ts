@@ -399,6 +399,15 @@ const NON_ZIP_FORMATS = {
     createReader: (path, options) =>
       new EspImageArtifactReader(path, sourceOf(options)),
   }),
+  "esp8266-image": container("esp8266-image", {
+    roleContainer: true,
+    retainClassifiedSource: true,
+    extractable: true,
+    absentInventory: "unavailable",
+    readerLimitation: ESP_IMAGE_LIMITATIONS.esp8266InventoryScope,
+    createReader: (path, options) =>
+      new EspImageArtifactReader(path, sourceOf(options), "esp8266-image"),
+  }),
   "esp-flash-image": container("esp-flash-image", {
     roleContainer: true,
     retainClassifiedSource: true,

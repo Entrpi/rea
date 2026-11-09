@@ -626,6 +626,60 @@ describe("binary target I/O: image classification", () => {
     expect(JSON.stringify(unrecognized)).not.toContain("ESP");
   });
 
+  it("reads an ESP8266 image only when the caller names the chip", async () => {
+    const directory = await createTestTempDirectory("rea-esp8266-target-");
+    const named = join(directory, "esp8266.bin");
+    const esp32 = join(directory, "firmware.bin");
+    const v2 = join(directory, "user1.bin");
+    const other = join(directory, "other.bin");
+    const short = join(directory, "short.bin");
+    const image = esp8266Image();
+    await Promise.all([
+      writeFile(named, image),
+      writeFile(esp32, espImage({ segments: ESP32C3_APP_SEGMENTS })),
+      writeFile(v2, Buffer.from([0xea, ...image.subarray(1)])),
+      writeFile(other, Buffer.alloc(64, 0x5a)),
+      writeFile(short, image.subarray(0, 7)),
+    ]);
+    const selected = { loadSelection: { format: "esp8266-image" } } as const;
+    expect(await parseBinaryTarget(named, selected)).toMatchObject({
+      ok: true,
+      value: { kind: "archive", format: "esp8266-image" },
+    });
+    // The caller's chip is kept, as esptool --chip esp8266 keeps it.
+    expect(await parseBinaryTarget(esp32, selected)).toMatchObject({
+      ok: true,
+      value: { kind: "archive", format: "esp8266-image" },
+    });
+    for (const [path, reason] of [
+      [v2, /^ESP8266 v2 images \(magic 0xea\)/u],
+      [other, /^ESP8266 image header needs magic 0xe9/u],
+      [short, /^ESP8266 image header needs 8 bytes/u],
+    ] as const)
+      expect(await parseBinaryTarget(path, selected)).toMatchObject({
+        ok: false,
+        error: {
+          _tag: "BinaryTargetError",
+          constraint: "file_format_rejected",
+          reason: expect.stringMatching(reason),
+        },
+      });
+    expect(
+      await parseBinaryTarget(named, { ...selected, targetKind: "executable" }),
+    ).toMatchObject({
+      ok: false,
+      error: { constraint: "load_selection_rejected" },
+    });
+    expect(
+      await parseBinaryTarget(named, {
+        loadSelection: { format: "esp8266-image", architecture: "riscv" },
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { constraint: "load_selection_rejected" },
+    });
+  });
+
   it("does not trust a ZIP-family extension without ZIP magic", async () => {
     const directory = await createTestTempDirectory("rea-fake-archive-");
     const path = join(directory, "fake.zip");

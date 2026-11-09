@@ -1,7 +1,9 @@
 import { z } from "incur";
 
 import {
+  CALLER_SELECTED_ROOT_FORMATS,
   executableFormatHintSchema,
+  type CallerSelectedRootFormat,
   type ExecutableFormatHint,
 } from "../domain/dosCom.js";
 import type { BinaryArchitecture } from "../domain/binaryTargetTypes.js";
@@ -189,10 +191,11 @@ export const snapshotSelectionOption = z
 
 /**
  * Explicit interpretation for headerless native executable formats. Flash
- * dumps take their offsets on the artifact commands instead.
+ * dumps take their offsets on the artifact commands instead, and ESP8266
+ * images are archives, so the artifact commands select them too.
  */
-const formatSelectionOption = executableFormatHintSchema
-  .exclude(["esp-flash-image"])
+export const formatSelectionOption = executableFormatHintSchema
+  .exclude(["esp-flash-image", ...CALLER_SELECTED_ROOT_FORMATS])
   .optional()
   .describe(
     "Explicit interpretation: dos-com or raw-binary (headerless), or gamecube-dol (GameCube/Wii DOL, never auto-detected); omission preserves header-based detection",
@@ -262,7 +265,9 @@ export const nativeOpenOptionFields = {
 export interface NativeOpenCliFlags {
   readonly snapshot?: string | undefined;
   readonly provider?: AnalysisProviderSelector | undefined;
-  readonly "target-format"?: ExecutableFormatHint | undefined;
+  readonly "target-format"?:
+    | Exclude<ExecutableFormatHint, CallerSelectedRootFormat>
+    | undefined;
   readonly architecture?: BinaryArchitecture | undefined;
   readonly "entry-point"?: string | undefined;
   readonly "base-address"?: string | undefined;

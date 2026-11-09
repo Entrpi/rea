@@ -89,6 +89,7 @@ const formatSchema = z.enum([
   "uf2",
   "dfuse",
   "fit",
+  "esp8266-image",
   "plist",
   "javascript",
   "source-map",

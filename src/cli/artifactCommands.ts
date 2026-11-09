@@ -19,6 +19,10 @@ import { cliDecimalField } from "./options.js";
 
 import { artifactExtractionInputSchema } from "../contracts/artifactToolContracts.js";
 
+import {
+  CALLER_SELECTED_ROOT_FORMATS,
+  type CallerSelectedRootFormat,
+} from "../domain/dosCom.js";
 import type { DirectAnalysis } from "../composition/directAnalysis.js";
 import { createArtifactExtractionDestination } from "../application/artifacts/ArtifactExtractionDestination.js";
 import { registerArtifactComparisonCommand } from "./artifactComparisonCommand.js";
@@ -196,13 +200,16 @@ const registerInterfaceBuilderCommand = (
   });
 };
 
-/** Options that read a dump as an ESP flash image with caller inputs. */
-const espFlashSelectionOptions = {
+/**
+ * Options that name a target format its bytes do not establish: an ESP flash
+ * dump read with caller inputs, or an ESP8266 image.
+ */
+const artifactTargetSelectionOptions = {
   targetFormat: z
-    .enum(["esp-flash-image"])
+    .enum(["esp-flash-image", ...CALLER_SELECTED_ROOT_FORMATS] as const)
     .optional()
     .describe(
-      "Read the target as an ESP flash dump; required with --flash-offset or --partition-table-offset",
+      "Read the target as an ESP flash dump (esp-flash-image; required with --flash-offset or --partition-table-offset) or as an ESP8266 firmware image (esp8266-image, never detected because it shares the ESP32 image magic)",
     ),
   flashOffset: espFlashAddressSchema
     .optional()
@@ -214,8 +221,11 @@ const espFlashSelectionOptions = {
     ),
 };
 
-const espFlashTargetSelection = (options: {
-  readonly targetFormat?: "esp-flash-image" | undefined;
+const artifactTargetSelection = (options: {
+  readonly targetFormat?:
+    | "esp-flash-image"
+    | CallerSelectedRootFormat
+    | undefined;
   readonly flashOffset?: string | undefined;
   readonly partitionTableOffset?: string | undefined;
 }): ArtifactTargetSelection => ({
@@ -268,7 +278,7 @@ const registerExtractionCommand = (
         .enum(["fail", "record-and-continue"])
         .default("fail")
         .describe("Behavior when declared artifact integrity does not match"),
-      ...espFlashSelectionOptions,
+      ...artifactTargetSelectionOptions,
     }),
     run: ({ args, options }) =>
       logCliCommand(logger, "extract-artifact", () =>
@@ -287,7 +297,7 @@ const registerExtractionCommand = (
           logger,
           undefined,
           undefined,
-          espFlashTargetSelection(options),
+          artifactTargetSelection(options),
         ).then(projectCliAnalysisResult),
       ),
   });
@@ -310,7 +320,7 @@ const registerInspectionCommand = (
         .enum(["fail", "record-and-continue"])
         .default("fail")
         .describe("Behavior when declared artifact integrity does not match"),
-      ...espFlashSelectionOptions,
+      ...artifactTargetSelectionOptions,
     }),
     run: ({ args, options }) =>
       logCliCommand(logger, "inspect-artifact", () =>
@@ -331,7 +341,7 @@ const registerInspectionCommand = (
             logger,
             signal,
             undefined,
-            espFlashTargetSelection(options),
+            artifactTargetSelection(options),
           );
           return publishCliAnalysisEvidence(complete, delivery);
         }),
