@@ -46,14 +46,14 @@ import {
   ghidraVariantProcessorLabels,
 } from "./GhidraRawBinaryLanguage.js";
 
-// Computed by upstream main at 8dfc47b10, which has no ARM ELF lane, for an
+// Computed by upstream main at 2885347cd, which has no ARM ELF lane, for an
 // ARM ELF without and with REA_GHIDRA_LANGUAGE_ID=ARM:LE:32:Cortex. Targets
 // outside the lane, and a caller-selected language, keep these digests and so
 // their snapshots.
 const AUTO_DIGEST =
-  "72e1ea8a4e9c0dd7808ccc1be5718547e92aeb27e43c44188adcc59b742ae3ed";
+  "b124b79b6374e97e0490d5958ecd6473f935fb0649683433c88dc0191bbeed1e";
 const CORTEX_OVERRIDE_DIGEST =
-  "8cbd8c7c86fed0db6cfa2fae16f426acd825800eb13e660c44150e07bb878de7";
+  "f6f887eb41ed5145378ae0022826c7ef446e45ca1127fded040a19f63d94fc4e";
 
 // Abbreviated from Ghidra 12.1.4 Processors/ARM/data/languages/ARM.ldefs.
 const ARM_LDEFS = `<?xml version="1.0" encoding="UTF-8"?>
