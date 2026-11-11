@@ -1703,17 +1703,20 @@ describe("Ghidra raw-binary entry context descriptor", () => {
           ...(entryContext === undefined ? {} : { entryContext }),
         },
       });
-      await launcher.launch({
-        runtimeRoot: runtime.path,
-        transport: "unix-socket",
-        endpointPath: join(runtime.path, "bridge.sock"),
-        token: "token-for-context-test",
-        runId: "d6fcbb66-e829-4ff6-a535-0035aec63139",
-        targetPath: "/tmp/flash.bin",
-        targetSha256: "c".repeat(64),
-        providerVersion: "12.1.4",
-        profileDigest: "a".repeat(64),
-      });
+      await launcher.launch(
+        {
+          runtimeRoot: runtime.path,
+          transport: "unix-socket",
+          endpointPath: join(runtime.path, "bridge.sock"),
+          token: "token-for-context-test",
+          runId: "d6fcbb66-e829-4ff6-a535-0035aec63139",
+          targetPath: "/tmp/flash.bin",
+          targetSha256: "c".repeat(64),
+          providerVersion: "12.1.4",
+          profileDigest: "a".repeat(64),
+        },
+        { resourceScope: createTestArtifactResourceScope() },
+      );
       const descriptor = z
         .record(z.string(), z.unknown())
         .parse(
