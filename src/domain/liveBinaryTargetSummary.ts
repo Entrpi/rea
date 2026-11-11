@@ -84,6 +84,7 @@ export const liveBinaryTargetSummaryVariants = [
       "dfuse",
       "fit",
       "esp8266-image",
+      "ntfs-mft",
     ]),
     architecture: z.null(),
   }),

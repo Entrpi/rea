@@ -303,7 +303,8 @@ export type BinaryTarget =
           | "uf2"
           | "dfuse"
           | "fit"
-          | "esp8266-image";
+          | "esp8266-image"
+          | "ntfs-mft";
       })
   | (BinaryTargetIdentity &
       NonExecutableMetadata & {

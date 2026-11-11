@@ -1,4 +1,8 @@
 import type { EspFlashSelection } from "../domain/firmware/espFlashLocation.js";
+import {
+  resolveArtifactReaderLimits,
+  type ArtifactReaderLimitsInput,
+} from "../domain/artifactReaderLimits.js";
 import type { AnalysisSettingsReader } from "../domain/analysisSettings.js";
 import { callerSelectedRootFormat } from "../domain/dosCom.js";
 import { runtimeAsarHeaderAdmission } from "../config/runtimeAnalysisSettings.js";
@@ -349,6 +353,13 @@ class ArtifactClient implements AnalysisClient {
               this.settings,
             ),
             integrityPolicy: parsed.integrity_policy,
+            ...(parsed.artifact_limits === undefined
+              ? {}
+              : {
+                  readerLimits: resolveArtifactReaderLimits(
+                    parsed.artifact_limits,
+                  ),
+                }),
             resourceScope: this.#resourceScope,
           },
           options?.signal,
@@ -488,6 +499,9 @@ class ArtifactClient implements AnalysisClient {
     const parsed = artifactInventoryInputSchema.parse(parameters);
     const inventoryParameters = {
       integrity_policy: parsed.integrity_policy,
+      ...(parsed.artifact_limits === undefined
+        ? {}
+        : { artifact_limits: parsed.artifact_limits }),
     };
     await options?.progress?.report({
       phase: "inspect_artifact.inventory",
@@ -537,6 +551,7 @@ class ArtifactClient implements AnalysisClient {
   private inventory(
     parsed: {
       readonly integrity_policy: "fail" | "record-and-continue";
+      readonly artifact_limits?: ArtifactReaderLimitsInput | undefined;
     },
     options?: ExecutionOptions,
   ) {
@@ -556,6 +571,11 @@ class ArtifactClient implements AnalysisClient {
       selectedRootFormat: callerSelectedRootFormat(this.target.format),
       ...(options?.signal === undefined ? {} : { signal: options.signal }),
       integrity: parsed.integrity_policy,
+      ...(parsed.artifact_limits === undefined
+        ? {}
+        : {
+            readerLimits: resolveArtifactReaderLimits(parsed.artifact_limits),
+          }),
     });
   }
 }
