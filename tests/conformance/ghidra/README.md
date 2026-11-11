@@ -31,6 +31,12 @@ no-overwrite CLI delivery. It checks the target and project files for changes.
   `REA_LLD`, `REA_LLVM_STRIP`, `REA_LLVM_READELF` and `REA_LLVM_OBJDUMP` select
   existing tool commands.
 
+- `ReaInstructionContextProbe.java` inspects source-owned ARM, Thumb, MIPS32
+  and MIPS16 instructions through the production bridge in an ephemeral,
+  read-only Ghidra project. It checks exact decoder-context register names,
+  values and provenance; the ARM lane also injects an unavailable provider
+  value. The `ghidra-bridge-sources` CI job runs both processor families. The
+  input bytes are never executed.
 - `ReaDecodeProbe.java` decodes source-owned instruction bytes from a
   language's default context and checks each mnemonic, length and optional
   complete operand. The `ghidra-bridge-sources` CI job runs it for `ARM:LE:32:Cortex`,
