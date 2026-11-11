@@ -406,8 +406,12 @@ not original source. Provider unavailability and unsupported metadata remain
 unknown rather than false.
 
 ESP32, ESP32-S2 and ESP32-S3 ELF builds (`EM_XTENSA`) open only with Ghidra:
-little-endian ELF32 `ET_EXEC` whose `.xtensa.info` declares the windowed ABI.
-call0 builds such as ESP8266 are refused. On ESP32-S3, Ghidra does not decode
+little-endian ELF32 `ET_EXEC` whose `.xtensa.info` declares the windowed or call0
+ABI. For call0 builds such as ESP8266, REA assigns Ghidra's `__call0` prototype
+to every function, external function and function definition after analysis. A
+call to an address where Ghidra has no function, such as mask ROM outside the
+image, or through an untyped function pointer, keeps Ghidra's default prototype,
+so check values kept across such calls against the assembly. On ESP32-S3, Ghidra does not decode
 SALT/SALTU, so calls after them in a function are missing; check the assembly
 when a function looks truncated. See the [Xtensa guide](https://github.com/morluto/rea/blob/main/docs/providers/ghidra-xtensa.md).
 
@@ -758,8 +762,8 @@ that address. Hopper and IDA refuse this interpretation; Ghidra uses
 `BinaryLoader` with a generic language: big-endian for `m68k`, little-endian
 otherwise. For a Cortex-M dump, add `architecture_variant` (`armv6-m`,
 `armv7-m`, `armv7e-m`, `armv8-m.base`, `armv8-m.main` or `armv8.1-m.main`)
-and `base_address`, which maps file offset 0 separately; each requires the
-other. Omit `entry_point` to take Reset from the vector table, adding
+and `base_address`, which maps file offset 0 separately and which a variant
+requires. Omit `entry_point` to take Reset from the vector table, adding
 `vector_table_address` when a header precedes it. An odd entry is refused.
 Results report canonical addresses (`0x08000000` as `0x8000000`) and treat an
 omitted `vector_table_address` as one at the base; when your exact spelling
@@ -769,7 +773,13 @@ matters, save your request beside the Evidence, together with its
 `0x0000..0xffff`. 65C02, 65816, cartridge containers, bank switching, and mapper
 semantics are unsupported. `m68k` requires an even entry and decodes the 68040
 superset of the 68000 family; Amiga/Atari containers and vector-table entry
-discovery are unsupported. Windows Ghidra P0 admits raw images only for `6502`. See [raw binary guide](https://github.com/morluto/rea/blob/main/docs/providers/raw-binary.md).
+discovery are unsupported. For a processor no `architecture` describes, such as
+SuperH-4 or a community SLEIGH module, pass `provider_language` (`provider`
+`ghidra`, `language_id` and `compiler_spec_id` from the installation's
+`.ldefs`) instead of `architecture`, with `entry_point`, an optional
+`base_address` and `provider_id: "ghidra"`. It is an expert, unverified
+override: results report `architecture: null`, and REA refuses languages that
+are not byte-addressed with one loaded space. Windows Ghidra P0 admits raw images only for `6502`. See [raw binary guide](https://github.com/morluto/rea/blob/main/docs/providers/raw-binary.md).
 
 Cortex-M ELF executables need none of these inputs: Ghidra pins the M-profile
 decoder that `.ARM.attributes` declares, and the session names a float ABI the
