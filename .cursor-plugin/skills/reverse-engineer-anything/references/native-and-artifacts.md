@@ -771,6 +771,10 @@ semantics are unsupported. `m68k` requires an even entry and decodes the 68040
 superset of the 68000 family; Amiga/Atari containers and vector-table entry
 discovery are unsupported. Windows Ghidra P0 admits raw images only for `6502`. See [raw binary guide](https://github.com/morluto/rea/blob/main/docs/providers/raw-binary.md).
 
+Cortex-M ELF executables need none of these inputs: Ghidra pins the M-profile
+decoder that `.ARM.attributes` declares, and the session names a float ABI the
+lane has not verified. See [ARM ELF guide](https://github.com/morluto/rea/blob/main/docs/providers/ghidra-arm.md).
+
 Intel HEX, S-record, UF2 and DfuSe files are containers, not raw images:
 `inspect_artifact` lists address regions (UF2 per familyID, DfuSe per element
 with its alternate setting), and `extract_artifact` writes each region. Open an
