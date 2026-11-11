@@ -48,13 +48,14 @@ import {
 
 // Computed by upstream main at 71f680d7c, which has no ARM ELF lane, and
 // recomputed on embedded-integration, where Change 2's no_return_repair
-// revision changes every Ghidra profile: for an ARM ELF without and with
+// revision changes every Ghidra profile, then for main 2885347cd's
+// value-flow budgets: for an ARM ELF without and with
 // REA_GHIDRA_LANGUAGE_ID=ARM:LE:32:Cortex. Targets outside the lane, and a
 // caller-selected language, keep these digests and so their snapshots.
 const AUTO_DIGEST =
-  "f3599aaaa0482fd45cd6bf0b4b0a86324098a45ccf91fb5f5d8d36f5737ae396";
+  "021fa34c68b4ec0e35b46d1f475ce79c2edb342cf6123e9ee7e9297fec0429d0";
 const CORTEX_OVERRIDE_DIGEST =
-  "f95540a6f03fae73134c641138a5033020e43ad6a25891195ee865896787a861";
+  "6ad42869458f80f7aa9ae64613f96210691abbc0bdc31d8a34988d5dae09d681";
 
 // Abbreviated from Ghidra 12.1.4 Processors/ARM/data/languages/ARM.ldefs.
 const ARM_LDEFS = `<?xml version="1.0" encoding="UTF-8"?>

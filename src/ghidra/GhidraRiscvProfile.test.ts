@@ -981,12 +981,13 @@ const canonical: GhidraRiscvLoadPreparationReport = {
 // Profiles of images without an overlap, as embedded-integration commits them
 // without the overlay: pinned before the overlay merge (c6a91da06), then for
 // main's load-image observation and procedure search revisions, and again for
-// main's revisions through 240f08d40. Other topics
+// main's revisions through 240f08d40, and for its value-flow budgets
+// (2885347cd). Other topics
 // here, such as Change 2's no_return_repair bump, move them from main's; the
 // overlay leaves them alone.
 const UNCHANGED_DIGESTS = {
-  ilp32: "17515b98731c8d37d03d4a4f535cd63d9abce98d806c8b58db4d4b73d2938092",
-  double64: "ac6fb1b8e1f1eb188bfdd9c535bb3e3578f3eeda3a9f0a1c035a57f280ed43f6",
+  ilp32: "531addfe7983ac67a7f1ece06650fa4db020bc2a5e9efda826b9911ab0d04c34",
+  double64: "12f7823aee1a23788ad2403473b3b664d5525e2c0214028c7f43d137eb04cc55",
 } as const;
 
 describe("RISC-V load preparation admission", () => {
