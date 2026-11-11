@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { withVerifierCleanup } from "../../lib/verifier-cleanup.mjs";
+import { withVerifierWorkspace } from "../../lib/verifier-workspace.mjs";
 import {
   ESP8266_SELECTION,
   assertAgrees,
@@ -29,7 +29,7 @@ import {
 let workspace;
 const path = (name) => join(workspace, name);
 
-await withVerifierCleanup(async () => {
+const verify = async () => {
   const { compilerVersion, esptoolVersion, xtensaVersion } = await checkTools();
   workspace = await mkdtemp(join(tmpdir(), "rea-esp-image-proof-"));
   const report = {
@@ -497,12 +497,6 @@ await withVerifierCleanup(async () => {
     entries: v1Extracted.artifacts.length,
   });
   console.log(JSON.stringify(report, null, 2));
-}, [
-  // Remove outputs only after every owned command tree has stopped; a failed
-  // close keeps the workspace for inspection.
-  async () => {
-    await commands.close();
-    if (workspace !== undefined)
-      await rm(workspace, { recursive: true, force: true });
-  },
-]);
+};
+
+await withVerifierWorkspace(verify, commands, () => workspace);
