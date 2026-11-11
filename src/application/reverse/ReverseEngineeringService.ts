@@ -592,6 +592,7 @@ export class ReverseEngineeringService {
       environment,
       signal,
       timeoutMs,
+      outputBudgetBytes,
       hash,
     );
     // An error before Evidence exists keeps the executable the caller
@@ -1246,6 +1247,7 @@ export class ReverseEngineeringService {
     environment: NodeJS.ProcessEnv,
     signal: AbortSignal | undefined,
     timeoutMs: number,
+    outputBudgetBytes: number,
     hash: (file: string) => Promise<string>,
   ): Promise<Result<ProviderIdentification, AnalysisError>> {
     const probe = profile.versionProbe;
@@ -1315,6 +1317,7 @@ export class ReverseEngineeringService {
     if (lookup.status !== "found") {
       const missing = lookup.status === "missing" ? lookup : undefined;
       const stopped = missing?.stoppedAt;
+      const denied = missing?.deniedAt;
       const cwdCode =
         lookup.status === "no-working-directory"
           ? commandFailureCode(lookup.cause)
@@ -1331,6 +1334,13 @@ export class ReverseEngineeringService {
         ...(missing?.selectedPath === undefined
           ? {}
           : { provider_executable_path: missing.selectedPath }),
+        // Where a launch by name fails with EACCES and access must be granted.
+        ...(denied === undefined
+          ? {}
+          : {
+              executable_lookup_denied_candidate: denied.candidate,
+              executable_lookup_denied_reason: denied.reason,
+            }),
         ...(stopped === undefined
           ? {}
           : {
@@ -1345,7 +1355,9 @@ export class ReverseEngineeringService {
           lookup.status === "no-working-directory"
             ? "the executable could not be located: its lookup needed the working directory, which could not be read"
             : stopped === undefined
-              ? "the executable could not be located"
+              ? denied === undefined
+                ? "the executable could not be located"
+                : `the executable could not be located; a launch by name is denied (EACCES) at ${denied.candidate}, ${denied.reason === "permission" ? "which lacks execute permission or is under a directory that cannot be searched" : "which is not a regular file"}`
               : `the executable lookup stopped at ${stopped.candidate}${stopped.code === undefined ? "" : ` (${stopped.code})`}, where at least one native search stops, so the host's own search decides what runs`,
           profile.executable,
           Object.keys(observed).length === 0 ? undefined : observed,
@@ -1399,6 +1411,7 @@ export class ReverseEngineeringService {
       environment,
       signal,
       timeoutMs,
+      outputBudgetBytes,
     );
     // A probe that ends the call keeps the path and digest it ran from.
     if (!outcome.ok) return err(outcome.error.retainDiagnostics(parameters));
@@ -1463,7 +1476,8 @@ export class ReverseEngineeringService {
 
   /**
    * Run one version probe under the call's deadline and cancellation. Its
-   * output stays separate from the command's; a failed probe keeps bounded
+   * output stays separate from the command's but runs, before the command,
+   * within the output bytes the call reserved; a failed probe keeps bounded
    * diagnostics.
    */
   async #runVersionProbe(
@@ -1473,6 +1487,7 @@ export class ReverseEngineeringService {
     environment: NodeJS.ProcessEnv,
     signal: AbortSignal | undefined,
     timeoutMs: number,
+    outputBudgetBytes: number,
   ): Promise<Result<VersionProbeOutcome, AnalysisError>> {
     try {
       const output = await this.#run(executable, probe.arguments, {
@@ -1480,7 +1495,7 @@ export class ReverseEngineeringService {
         signal,
         timeout: timeoutMs,
         stopSignal: "SIGTERM",
-        maxBuffer: MAX_COMBINED_OUTPUT_BYTES,
+        maxBuffer: outputBudgetBytes,
       });
       // Replacement characters could read as a version, and a banner accepted
       // beside undecodable stderr would drop the probe's diagnostics, so output
@@ -1499,10 +1514,13 @@ export class ReverseEngineeringService {
         output.stdout.split(/\r?\n/u, 1)[0] ?? "",
         VERSION_PROBE_TEXT_BYTES,
       );
-      // A cut banner identifies nothing: the cut could fall inside its version.
-      const identification = banner.truncated
-        ? undefined
-        : probe.identify(banner.text.trim());
+      // A cut banner identifies nothing: the cut could fall inside its
+      // version, whether the record's budget or the call's output allowance
+      // cut it.
+      const identification =
+        banner.truncated || output.outputTruncated === true
+          ? undefined
+          : probe.identify(banner.text.trim());
       return ok(
         identification === undefined
           ? {

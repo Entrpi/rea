@@ -134,20 +134,6 @@ describe("execFileOutput", () => {
     },
   );
 
-  it("reports raw byte counts when UTF-8 decoding changes the captured text", async () => {
-    const result = await execFileOutput(process.execPath, [
-      "-e",
-      "process.stdout.write(Buffer.from([0x61, 0xff])); process.stderr.write(Buffer.from([0xe2, 0x82, 0xac]));",
-    ]);
-
-    expect(result).toMatchObject({
-      stdout: "a�",
-      stderr: "€",
-      stdoutBytes: 2,
-      stderrBytes: 3,
-    });
-  });
-
   it("captures output larger than Node's default execFile limit", async () => {
     const marker = "tail-marker";
     const result = await execFileOutput(process.execPath, [
@@ -637,24 +623,62 @@ describe.skipIf(process.platform === "win32")(
   },
 );
 
-describe("execFileOutput failure metadata", () => {
-  it("preserves raw byte counts on a failed command with invalid UTF-8", async () => {
-    const failure: unknown = await execFileOutput(process.execPath, [
+describe("execFileOutput decoding", () => {
+  it("reports raw byte counts when UTF-8 decoding changes the captured text", async () => {
+    const result = await execFileOutput(process.execPath, [
       "-e",
-      "process.stdout.write(Buffer.from([0x61, 0xff])); process.stderr.write(Buffer.from([0xe2, 0x82, 0xac])); process.exitCode = 7;",
-    ]).then(
-      () => undefined,
-      (cause: unknown) => cause,
-    );
+      "process.stdout.write(Buffer.from([0x61, 0xff])); process.stderr.write(Buffer.from([0xe2, 0x82, 0xac]));",
+    ]);
 
-    expect(execFileOutputFailure(failure)).toMatchObject({
+    expect(result).toMatchObject({
       stdout: "a�",
       stderr: "€",
       stdoutBytes: 2,
       stderrBytes: 3,
-      code: 7,
+      stdoutInvalidUtf8: true,
     });
+    expect(result).not.toHaveProperty("stderrInvalidUtf8");
   });
+});
+
+describe("execFileOutput failure metadata", () => {
+  it.each([
+    { route: "execFile", options: {} },
+    { route: "spawn", options: { stopSignal: "SIGTERM" as const } },
+  ])(
+    "preserves raw byte counts and marks invalid UTF-8 on a failed command through $route",
+    async ({ options }) => {
+      const failure: unknown = await execFileOutput(
+        process.execPath,
+        [
+          "-e",
+          "process.stdout.write(Buffer.from([0x61, 0xff])); process.stderr.write(Buffer.from([0xe2, 0x82, 0xac])); process.exitCode = 7;",
+        ],
+        options,
+      ).then(
+        () => undefined,
+        (cause: unknown) => cause,
+      );
+
+      const projected = execFileOutputFailure(failure);
+      expect(projected).toMatchObject({
+        stdout: "a�",
+        stderr: "€",
+        stdoutBytes: 2,
+        stderrBytes: 3,
+        code: 7,
+        stdoutInvalidUtf8: true,
+      });
+      expect(projected).not.toHaveProperty("stderrInvalidUtf8");
+      if (projected === undefined) throw new Error("Expected a failure");
+      expect(execFileFailureCapturedOutput(projected)).toMatchObject({
+        stdout_invalid_utf8: true,
+      });
+      expect(execFileFailureCapturedOutput(projected)).not.toHaveProperty(
+        "stderr_invalid_utf8",
+      );
+    },
+  );
   // Without stopSignal the command takes Node's execFile; adb always passes
   // one and takes the owned spawn route. Both throw ENOTDIR synchronously.
   it.skipIf(process.platform === "win32").each([

@@ -37,6 +37,17 @@ export type ExecutableLookup =
         readonly candidate: string;
         readonly code?: string;
       };
+      /**
+       * The first PATH candidate that a launch by name is denied with EACCES:
+       * one the host refused (a file without execute permission, or one under
+       * an unsearchable directory) or one that is not a regular file, such as
+       * a directory, which execve refuses. When no candidate runs, the launch
+       * fails with EACCES and this is where to repair access or the file.
+       */
+      readonly deniedAt?: {
+        readonly candidate: string;
+        readonly reason: "permission" | "not-regular-file";
+      };
     }
   /** A relative command, or a match under a relative PATH entry, needed the working directory, which could not be read. */
   | { readonly status: "no-working-directory"; readonly cause: unknown }
@@ -47,6 +58,8 @@ export type ExecutableLookup =
       /** The path being checked when the lookup stopped. */
       readonly candidate: string;
     };
+
+type DeniedReason = "permission" | "not-regular-file";
 
 /** Optional bounds for one lookup. */
 export interface ExecutableLookupBounds {
@@ -106,6 +119,16 @@ export const lookupExecutable = async (
   try {
     const checked: string[] = [];
     let selectedPath: string | undefined;
+    let deniedAt:
+      | { readonly candidate: string; readonly reason: DeniedReason }
+      | undefined;
+    const deny = (candidate: string, reason: DeniedReason): void => {
+      if (!explicit) deniedAt ??= { candidate, reason };
+    };
+    const movedPast = (candidate: string, code: string | undefined): void => {
+      checked.push(`${candidate}${systemErrorSuffix(code)}`);
+      if (code === "EACCES") deny(candidate, "permission");
+    };
     const missing = (stoppedAt?: {
       readonly candidate: string;
       readonly code: string | undefined;
@@ -113,6 +136,7 @@ export const lookupExecutable = async (
       status: "missing",
       checked,
       ...(selectedPath === undefined ? {} : { selectedPath }),
+      ...(deniedAt === undefined ? {} : { deniedAt }),
       ...(stoppedAt === undefined
         ? {}
         : {
@@ -156,12 +180,13 @@ export const lookupExecutable = async (
             code,
             cause: metadata.cause,
           };
-        checked.push(`${candidate}${systemErrorSuffix(code)}`);
+        movedPast(candidate, code);
         if (searchMovesPast(code)) continue;
         return missing({ candidate, code });
       }
       if (!metadata.value.isFile()) {
         checked.push(`${candidate} (not a regular file)`);
+        deny(candidate, "not-regular-file");
         continue;
       }
       const executable = await deadline.run(() =>
@@ -180,7 +205,7 @@ export const lookupExecutable = async (
             }
           : { status: "no-working-directory", cause: unnamed.cause };
       const code = systemErrorCode(executable.cause);
-      checked.push(`${candidate}${systemErrorSuffix(code)}`);
+      movedPast(candidate, code);
       if (!searchMovesPast(code)) return missing({ candidate, code });
     }
     return missing();

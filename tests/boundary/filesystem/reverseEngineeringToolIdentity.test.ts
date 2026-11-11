@@ -441,6 +441,18 @@ posix(
     await expect(
       lookupExecutable("rizin", cwd, `${unexecutable}${delimiter}${directory}`),
     ).resolves.toEqual({ status: "found", path: executable });
+    // Without a later match, the first file it moved past is where a launch
+    // by name is denied.
+    await expect(lookupExecutable("rizin", cwd, unexecutable)).resolves.toEqual(
+      {
+        status: "missing",
+        checked: [`${join(unexecutable, "rizin")} (EACCES)`],
+        deniedAt: {
+          candidate: join(unexecutable, "rizin"),
+          reason: "permission",
+        },
+      },
+    );
     // The execute check stops the same way, as at an I/O error on a mount.
     const failing = join(unexecutable, "rizin");
     await expect(
@@ -703,6 +715,55 @@ posix(
           limitation.includes("ELOOP"),
       ),
     ).toBe(true);
+  },
+);
+
+posix.each([
+  [
+    "a file without execute permission",
+    "permission",
+    (file: string) => chmod(file, 0o644),
+  ],
+  [
+    "a directory",
+    "not-regular-file",
+    async (file: string) => {
+      await rm(file);
+      await mkdir(file);
+    },
+  ],
+] as const)(
+  "keeps the PATH candidate a launch by name is denied when the search finds only %s",
+  async (_case, reason, deny) => {
+    const { executable, path } = await rizinExecutableFixture();
+    await deny(executable);
+    // Every native search moves past the candidate, then fails with EACCES.
+    const run = vi.fn(
+      async (
+        _command: string,
+        _args: readonly string[],
+        _options?: ExecFileOutputOptions,
+      ): Promise<never> => {
+        throw Object.assign(new Error("spawn EACCES"), { code: "EACCES" });
+      },
+    );
+    const service = new TestReverseEngineeringService({
+      run,
+      lookup: lookupExecutable,
+      environment: { REA_RIZIN_COMMAND: "rizin", PATH: dirname(executable) },
+    });
+    const result = await service.executeRizinCommand({ path, command: "iI" });
+    if (result.ok) throw new Error("Expected the launch to fail");
+    expect(run.mock.calls.map(([command]) => command)).toEqual(["rizin"]);
+    expect(result.error.diagnostics).toMatchObject({
+      provider_executable: "rizin",
+      executable_lookup_denied_candidate: executable,
+      executable_lookup_denied_reason: reason,
+    });
+    // The denied file is where access must be granted, not the file that ran.
+    expect(result.error.diagnostics).not.toHaveProperty(
+      "provider_executable_path",
+    );
   },
 );
 
@@ -1323,6 +1384,48 @@ posix.each([
     expect(result.value.parameters).toMatchObject({
       provider_version_banner: prefix + filler.repeat(kept),
       provider_version_banner_truncated: true,
+      provider_identity: "assumed",
+      provider_version_probe: { exit_code: 0, output_truncated: true },
+    });
+  },
+);
+
+posix(
+  "probes within the call's output allowance and identifies nothing from output that allowance cut",
+  async () => {
+    const { executable, path } = await rizinExecutableFixture();
+    // A banner that would identify the tool, cut by the call's allowance.
+    const run = vi.fn(
+      async (
+        _command: string,
+        args: readonly string[],
+        _options?: ExecFileOutputOptions,
+      ) =>
+        args[0] === "-v"
+          ? {
+              stdout: "rizin 0.9.1 @ linux-x86-64",
+              stderr: "",
+              outputTruncated: true,
+            }
+          : { stdout: "command output", stderr: "" },
+    );
+    const service = new TestReverseEngineeringService({
+      run,
+      lookup: lookupExecutable,
+      environment: { REA_RIZIN_COMMAND: executable },
+    });
+    const result = await service.executeRizinCommand({
+      path,
+      command: "iI",
+      max_output_bytes: 26,
+    });
+    if (!result.ok) throw result.error;
+    expect(run.mock.calls.map(([, , options]) => options?.maxBuffer)).toEqual([
+      26, 26,
+    ]);
+    expect(result.value.provider.version).toBeNull();
+    expect(result.value.parameters).toMatchObject({
+      provider_version_banner_truncated: false,
       provider_identity: "assumed",
       provider_version_probe: { exit_code: 0, output_truncated: true },
     });
