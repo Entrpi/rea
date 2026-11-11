@@ -90,6 +90,7 @@ const formatSchema = z.enum([
   "dfuse",
   "fit",
   "esp8266-image",
+  "ntfs-mft",
   "plist",
   "javascript",
   "source-map",

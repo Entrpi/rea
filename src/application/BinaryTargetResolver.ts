@@ -106,6 +106,7 @@ import {
 } from "../domain/firmware/espFlashLocation.js";
 import { espFlashSelectionError } from "../domain/firmware/espFlashSelection.js";
 import { hasFitImagesNode } from "../domain/firmware/fitImage.js";
+import { hasMftFileRecordHeader } from "../domain/windows/ntfsMft.js";
 import {
   ESP8266_IMAGE_HEADER_BYTES,
   ESP8266_REFUSAL,
@@ -881,6 +882,7 @@ const detectArtifactFormat = async (
     });
   if (esp === "esp-image") return "esp-image";
   if (hasFitImagesNode(magic)) return "fit";
+  if (hasMftFileRecordHeader(magic)) return "ntfs-mft";
   // Binary plists, including keyed archives, often use other extensions.
   if (hasBinaryPlistSignature(magic)) return "plist";
   const named = namedArtifactFormat(lower);
@@ -965,6 +967,7 @@ const isArchiveFormat = (
     "dfuse",
     "fit",
     "esp8266-image",
+    "ntfs-mft",
   ].includes(format);
 
 /** Whether the leading bytes begin any executable header family, valid or not. */

@@ -44,7 +44,8 @@ type FormatsWithReaders =
   | "esp8266-image"
   | "uf2"
   | "dfuse"
-  | "fit";
+  | "fit"
+  | "ntfs-mft";
 
 const readerFormatsMatch: Equal<ArtifactReaderFormat, FormatsWithReaders> =
   true;

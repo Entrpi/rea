@@ -21,13 +21,13 @@ import { GhidraProvider } from "./GhidraProvider.js";
 
 // Digests commit to the current shared policy, including the instruction
 // status, load-image relocation-symbol, procedure search, byte-search and
-// bit-field base-type and inventory-search revisions that prevent reuse of snapshots with earlier
+// bit-field base-type, runtime value-flow budgets and inventory-search revisions that prevent reuse of snapshots with earlier
 // results. On embedded-integration they also include Change 2's
 // no_return_repair revision, so they differ from main's.
 const RAW_DIGESTS = {
-  "6502": "63514828258d47178388803493a409ecd23a9326d53d354247035ac5a212d4c2",
+  "6502": "58d044264b86dfc41b45a15e03e373d9e3189790141a668d037dd7cfb4b30311",
   "x86-disabled-analyzer":
-    "a97063fbf3af30bfde7cb725ea2de6551d652b92c1d05d8d29f24182aa9d98b2",
+    "79c365db460e29771d0153d07c26f61398b552e4e2ab57fa758b44c59486d160",
 } as const;
 
 // Computed by upstream main at 71f680d7c, which has neither a separate base nor
@@ -103,6 +103,7 @@ describe("raw-binary analysis profile digest", () => {
       instruction_status: "unlisted-and-containing-code-data-v3",
       inventory_search_projection: "provider-inventory-facts-v1",
       value_flow_effect_scope: "pcode-load-store-explicit-v1",
+      native_value_flow_projection: "accepted-runtime-budgets-v1",
       byte_search_boundary: "contiguous-eligible-initialized-blocks-v1",
       byte_search_coverage: "separate-loaded-overlays-v1",
       data_type_observations: "bit-field-base-and-lookup-v1",
@@ -129,6 +130,7 @@ describe("raw-binary analysis profile digest", () => {
     expect(resolved.value.profile?.parameters).toMatchObject({
       inventory_search_projection: "provider-inventory-facts-v1",
       value_flow_effect_scope: "pcode-load-store-explicit-v1",
+      native_value_flow_projection: "accepted-runtime-budgets-v1",
       byte_search_coverage: "separate-loaded-overlays-v1",
       analysis_options: {
         disabled_analyzers: ["Aggressive Instruction Finder"],
