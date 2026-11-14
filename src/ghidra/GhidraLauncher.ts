@@ -23,7 +23,7 @@ import {
   type GhidraLanguageDefinitionCommitment,
 } from "./GhidraLanguageCatalog.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
-import { copyFile, mkdir, readFile, realpath } from "node:fs/promises";
+import { copyFile, mkdir, realpath } from "node:fs/promises";
 import { basename, dirname, join, posix, win32 } from "node:path";
 
 import { writeGhidraRuntimeFile } from "./GhidraRuntimeFile.js";
