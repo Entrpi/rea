@@ -209,7 +209,11 @@ export const parseBinaryTarget = async (
     const resolved = await resolveAppBundle(canonical, options);
     if (!resolved.ok) return resolved;
     throwIfTargetResolutionCancelled(signal);
-    const { executable: path, infoPlist } = resolved.value;
+    const {
+      executable: path,
+      infoPlist,
+      bundleExecutableSelection,
+    } = resolved.value;
     const bundle =
       infoPlist === undefined ? {} : { bundleInfoPlist: infoPlist };
     // A bundle directory is selected for its executable, so the executable's
@@ -232,6 +236,9 @@ export const parseBinaryTarget = async (
               selectedPath: candidate,
               classifiedAs,
               ...bundle,
+              ...(bundleExecutableSelection === undefined
+                ? {}
+                : { bundleExecutableSelection }),
             },
             options,
           );
@@ -316,8 +323,7 @@ const readOpenedBinaryTarget = async (
     readonly selectedPath: string;
     /** Spelling whose name supplies format hints: the selected file, or a bundle's executable. */
     readonly classifiedAs: string;
-    readonly bundleInfoPlist?: string;
-  },
+  } & Pick<BinaryTarget, "bundleInfoPlist" | "bundleExecutableSelection">,
   options: BinaryTargetResolverOptions,
 ): Promise<TargetResolution> => {
   const { handle, initial: metadata } = source;
@@ -328,6 +334,7 @@ const readOpenedBinaryTarget = async (
     selectedPath,
     classifiedAs,
     bundleInfoPlist,
+    bundleExecutableSelection,
   } = selected;
   const bundle = bundleInfoPlist === undefined ? {} : { bundleInfoPlist };
   // Every admitted target shares one identity; routes add their own facts.
@@ -336,6 +343,9 @@ const readOpenedBinaryTarget = async (
     sourcePath,
     ...(callerInputPath === path ? {} : { callerInputPath }),
     ...bundle,
+    ...(bundleExecutableSelection === undefined
+      ? {}
+      : { bundleExecutableSelection }),
     sha256: await sha256Handle(source, path, signal),
   });
   const hostArchitecture =
