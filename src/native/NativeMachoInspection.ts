@@ -863,6 +863,7 @@ const selectArchitecture = (
   // can hold several slices of one family (arm64e and arm64e.x1), and slice
   // tools without -arch print every slice.
   target.kind !== "executable" ||
+  target.architecture === undefined ||
   (target.availableArchitectures.length < 2 && available.length < 2)
     ? ok(null)
     : selectLipoArchitecture(

@@ -152,11 +152,14 @@ export const contractDescriptionOperations = (
       : [
           {
             name: sessionTarget.opening,
+            // A member option names its object field by its first flag.
             flags: Object.fromEntries(
-              sessionTarget.options.map(({ field, key }) => [
-                field,
-                `--${optionFlagName(key)}`,
-              ]),
+              sessionTarget.options
+                .map(({ field, key }) => [
+                  field.split(".")[0] ?? field,
+                  `--${optionFlagName(key)}`,
+                ])
+                .reverse(),
             ),
           },
         ]),

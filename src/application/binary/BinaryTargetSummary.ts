@@ -4,6 +4,7 @@ import type {
 } from "../../domain/binaryTargetTypes.js";
 
 import { liveBinaryTargetSummarySchema } from "../../domain/liveBinaryTargetSummary.js";
+import { providerLanguageIdentity } from "../../domain/providerLanguage.js";
 import { isLegacyRawLoad } from "../../domain/rawBinary.js";
 
 /** A legacy-equivalent load reports only its entry, exactly as before. */
@@ -16,6 +17,15 @@ const rawLoadSummary = (load: RawBinaryLoad) => ({
         ...(load.architectureVariant === undefined
           ? {}
           : { architecture_variant: load.architectureVariant }),
+        // REA checks a provider language against its catalog, not its decoding.
+        ...(load.providerLanguage === undefined
+          ? {}
+          : {
+              provider_language: {
+                ...providerLanguageIdentity(load.providerLanguage),
+                verification: "unverified",
+              },
+            }),
         ...(load.entrySource.kind === "vector-table"
           ? { vector_table_address: load.entrySource.address }
           : {}),

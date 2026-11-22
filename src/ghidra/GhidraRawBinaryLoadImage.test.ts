@@ -4,13 +4,18 @@ import { describe, expect, it } from "vitest";
 
 import { cortexM0Fixture } from "../../tests/conformance/ghidra/cortexM.fixture.mjs";
 import { attestGhidraRawBinaryLoadImage } from "./GhidraLoadImageValues.js";
-import { fixtureRawBinaryLoadImage } from "./GhidraRawBinaryLoadImage.fixture.js";
+import {
+  familyRawTarget,
+  fixtureRawBinaryLoadImage,
+  m6809Image,
+} from "./GhidraRawBinaryLoadImage.fixture.js";
 import {
   GHIDRA_RAW_ENTRY_CONTEXT,
   GHIDRA_VARIANT_LANGUAGES,
   GHIDRA_VARIANT_LIMITATIONS,
   ghidraRawBinaryLanguage,
   ghidraRawBinaryLimitations,
+  ghidraRawProcessorLabels,
 } from "./GhidraRawBinaryLanguage.js";
 import {
   ARCHITECTURE_VARIANT_NAMES,
@@ -19,34 +24,35 @@ import {
 import type { RawBinaryLoad } from "../domain/binaryTargetTypes.js";
 import {
   admittedRawLoad,
+  providerLanguageRawTarget,
   rawLoadAtEntry,
 } from "../domain/rawBinary.fixture.js";
 
 describe("raw-binary Ghidra language binding", () => {
   it("maps the big-endian m68k family to the default 68000 language", () => {
-    expect(ghidraRawBinaryLanguage("m68k")).toEqual({
+    expect(ghidraRawBinaryLanguage(familyRawTarget("m68k"))).toEqual({
       languageId: "68000:BE:32:default",
       compilerSpecId: "default",
       defaultAddressSpace: "ram",
     });
   });
   it("maps the four admitted families to little-endian generic languages", () => {
-    expect(ghidraRawBinaryLanguage("x86")).toEqual({
+    expect(ghidraRawBinaryLanguage(familyRawTarget("x86"))).toEqual({
       languageId: "x86:LE:32:default",
       compilerSpecId: "gcc",
       defaultAddressSpace: "ram",
     });
-    expect(ghidraRawBinaryLanguage("x86_64")).toEqual({
+    expect(ghidraRawBinaryLanguage(familyRawTarget("x86_64"))).toEqual({
       languageId: "x86:LE:64:default",
       compilerSpecId: "gcc",
       defaultAddressSpace: "ram",
     });
-    expect(ghidraRawBinaryLanguage("arm")).toEqual({
+    expect(ghidraRawBinaryLanguage(familyRawTarget("arm"))).toEqual({
       languageId: "ARM:LE:32:v7",
       compilerSpecId: "default",
       defaultAddressSpace: "ram",
     });
-    expect(ghidraRawBinaryLanguage("arm64")).toEqual({
+    expect(ghidraRawBinaryLanguage(familyRawTarget("arm64"))).toEqual({
       languageId: "AARCH64:LE:64:v8A",
       compilerSpecId: "default",
       defaultAddressSpace: "ram",
@@ -59,7 +65,9 @@ describe("raw-binary variant Ghidra binding", () => {
     "binds %s to its little-endian ARM decoder and Thumb entry context",
     (variant) => {
       const row = ARCHITECTURE_VARIANTS[variant];
-      expect(ghidraRawBinaryLanguage(row.architecture, variant)).toEqual({
+      expect(
+        ghidraRawBinaryLanguage(familyRawTarget(row.architecture, variant)),
+      ).toEqual({
         languageId: GHIDRA_VARIANT_LANGUAGES[variant],
         compilerSpecId: "default",
         defaultAddressSpace: "ram",
@@ -72,7 +80,9 @@ describe("raw-binary variant Ghidra binding", () => {
     },
   );
   it("keeps the generic ARM decoder when no variant is named", () => {
-    expect(ghidraRawBinaryLanguage("arm").languageId).toBe("ARM:LE:32:v7");
+    expect(ghidraRawBinaryLanguage(familyRawTarget("arm")).languageId).toBe(
+      "ARM:LE:32:v7",
+    );
   });
   // Observed on real Ghidra 12.1.4; verify:ghidra:cortex-m checks it.
   it.each(ARCHITECTURE_VARIANT_NAMES)(
@@ -91,7 +101,7 @@ describe("raw-binary variant Ghidra binding", () => {
           entryPoint: "0x8000000",
           fileBytes: 4,
         }),
-        ghidraRawBinaryLanguage("arm", variant),
+        ghidraRawBinaryLanguage(familyRawTarget("arm", variant)),
       );
       expect(limitations).toEqual(
         expect.arrayContaining([...GHIDRA_VARIANT_LIMITATIONS[variant]]),
@@ -544,5 +554,96 @@ describe("raw-binary segments load image", () => {
     };
     expect(spelled("0x8000000")).toEqual(spelled("0x08000000"));
     expect(spelled("0x8000000")).toEqual(spelled("0x8000000", "0x08000000"));
+  });
+});
+
+describe("raw-binary provider-language load image", () => {
+  // One 6809 image mapped at a separate base with the entry at its branch; the
+  // load is admitted for these bytes.
+  const languageBytes = m6809Image();
+  const languageImage = () =>
+    fixtureRawBinaryLoadImage(
+      languageBytes,
+      providerLanguageRawTarget(
+        {
+          provider: "ghidra",
+          languageId: "6809:BE:16:default",
+          compilerSpecId: "default",
+        },
+        {
+          baseAddress: "0xe000",
+          entryPoint: "0xe002",
+          fileBytes: languageBytes.length,
+        },
+      ).rawLoad,
+    );
+
+  it("verifies the caller-selected language in its own default space", () => {
+    const f = languageImage();
+    const result = attestGhidraRawBinaryLoadImage(
+      f.snapshot,
+      f.target,
+      f.observation,
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        status: "verified",
+        layout: "segments",
+        architecture: null,
+        language_id: "6809:BE:16:default",
+        compiler_spec_id: "default",
+        segments: [{ address: "0xe000", size: 4 }],
+        entries: [{ address: "0xe002", role: "entry", basis: "caller" }],
+      },
+    });
+    if (!result.ok || !("checks" in result.value))
+      throw new Error("expected a verified load image");
+    expect(result.value).not.toHaveProperty("architecture_variant");
+    expect(result.value.checks.map((check) => check.name)).not.toContain(
+      "default_address_space",
+    );
+  });
+
+  it.each([
+    [
+      "an entry from the language's labels",
+      { entry_points: ["0xe002", "0xfffe"] },
+    ],
+    ["another language", { language_id: "6800:BE:16:default" }],
+    ["a mapping outside the default space", { default_address_space: "io" }],
+  ])("reports a mismatch for %s", (_name, change) => {
+    const f = languageImage();
+    const result = attestGhidraRawBinaryLoadImage(f.snapshot, f.target, {
+      ...f.observation,
+      ...change,
+    });
+    expect(result).toMatchObject({ ok: true, value: { status: "mismatch" } });
+  });
+
+  it("imports without processor-defined labels, like a variant load", () => {
+    expect(ghidraRawProcessorLabels(rawLoadAtEntry("0x0"))).toBeUndefined();
+    expect(
+      ghidraRawProcessorLabels({
+        ...rawLoadAtEntry("0x0"),
+        architectureVariant: "armv7-m",
+      }),
+    ).toBe("not-applied");
+    expect(ghidraRawProcessorLabels(languageImage().target.rawLoad)).toBe(
+      "not-applied",
+    );
+  });
+
+  it("says the language is caller-selected and unverified", () => {
+    const f = languageImage();
+    const limitations = ghidraRawBinaryLimitations(
+      f.target.rawLoad,
+      ghidraRawBinaryLanguage(f.target),
+    );
+    expect(limitations).toEqual([
+      "Headerless raw-binary analysis maps file offset 0 at 0xe000 and seeds the entry 0xe002. Headers are not discovered from file bytes.",
+      "The caller selected the Ghidra language 6809:BE:16:default with compiler spec default (verification: unverified). REA checked that the installation defines it, that the image fits its declared address size, and that its default address space is byte-addressed and its only loaded space, but not that it decodes this image. Entry alignment is left to the language's decoder.",
+      "Only the file is mapped, in the language's default address space. Ghidra's processor-defined labels and entries are not applied, and reset, memory-mapped I/O, and boot sequences are not emulated.",
+    ]);
   });
 });

@@ -1,4 +1,8 @@
-import type { RawBinaryLoad } from "./binaryTargetTypes.js";
+import type {
+  ProviderLanguageRawBinaryTarget,
+  RawBinaryLoad,
+} from "./binaryTargetTypes.js";
+import type { ProviderLanguageSelection } from "./providerLanguage.js";
 import { admitRawBinary, parseRawBinaryEntryPoint } from "./rawBinary.js";
 
 /** The load raw-binary admission yields for a caller entry: file offset 0 maps at the entry. */
@@ -37,4 +41,37 @@ export const admittedRawLoad = (
   const finished = admitted.value.admit(words);
   if (!finished.ok) throw new Error(finished.error.reason);
   return finished.value.load;
+};
+
+/** A provider-language target as admission yields it for a 32-byte file by default. */
+export const providerLanguageRawTarget = (
+  providerLanguage: ProviderLanguageSelection,
+  selection: {
+    readonly entryPoint: string;
+    readonly baseAddress?: string;
+    readonly fileBytes?: number;
+    readonly path?: string;
+    readonly sha256?: string;
+  },
+): ProviderLanguageRawBinaryTarget => {
+  const admitted = admitRawBinary({
+    architecture: undefined,
+    entryPoint: selection.entryPoint,
+    ...(selection.baseAddress === undefined
+      ? {}
+      : { baseAddress: selection.baseAddress }),
+    providerLanguage,
+    fileBytes: selection.fileBytes ?? 32,
+  });
+  if (!admitted.ok) throw new Error(admitted.error.reason);
+  if ("admit" in admitted.value || admitted.value.architecture !== null)
+    throw new Error("expected a provider-language load");
+  return {
+    path: selection.path ?? "/fixture/firmware.bin",
+    sha256: selection.sha256 ?? "a".repeat(64),
+    kind: "executable",
+    format: "raw-binary",
+    availableArchitectures: [],
+    rawLoad: admitted.value.load,
+  };
 };

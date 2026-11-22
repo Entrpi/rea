@@ -53,6 +53,7 @@ const ESP_PREPARATION: GhidraRiscvLoadPreparation = {
     size: "0x18000",
   },
 };
+import { GHIDRA_LANGUAGE_DEFINITION_FILES } from "../../../../src/ghidra/GhidraLanguageCatalog.js";
 import { waitFor } from "../../../support/testWait.js";
 
 const fixturePath = fileURLToPath(
@@ -336,6 +337,69 @@ describe("Ghidra header-selected import with a pinned language", () => {
         _tag: "GhidraAdmissionError",
         code: "processor_labels_scope",
       }),
+    );
+  });
+});
+
+describe("Ghidra caller-selected raw language", () => {
+  const digest = (role: string) => role.padEnd(64, "0").slice(0, 64);
+  it("passes the committed definition to the prepare script after the entry context", () => {
+    const arguments_ = ghidraHeadlessArguments({
+      projectRoot: "/tmp/project",
+      targetPath: "/tmp/firmware.bin",
+      bridgeScriptPath: "/package/bridge/ReaGhidraBridge.java",
+      descriptorPath: "/tmp/session.json",
+      ghidraLogPath: "/tmp/ghidra.log",
+      scriptLogPath: "/tmp/script.log",
+      rawBinary: {
+        languageId: "SuperH4:LE:32:default",
+        compilerSpecId: "default",
+        baseAddr: "0x8c000000",
+        entryPoint: "0x8c000010",
+        applyProcessorLabels: false,
+        languageDefinition: {
+          version: 1,
+          address_bits: 32,
+          files: Object.fromEntries(
+            GHIDRA_LANGUAGE_DEFINITION_FILES.map(({ role }) => [
+              role,
+              {
+                path: `Ghidra/Processors/SuperH4/${role}`,
+                sha256: digest(role),
+              },
+            ]),
+          ) as never,
+        },
+      },
+    });
+    expectOptions(arguments_, [
+      ["-loader", "BinaryLoader"],
+      ["-loader-baseAddr", "0x8c000000"],
+      ["-loader-applyLabels", "false"],
+      ["-processor", "SuperH4:LE:32:default"],
+      ["-cspec", "default"],
+    ]);
+    const prepare = arguments_.indexOf("-preScript");
+    expect(arguments_.slice(prepare + 1, prepare + 7)).toEqual([
+      join("/package/bridge", "ReaGhidraPrepareRaw.java"),
+      "SuperH4:LE:32:default",
+      "0x8c000000",
+      "0x8c000010",
+      "language-default",
+      `bits=32;${GHIDRA_LANGUAGE_DEFINITION_FILES.map(({ role }) => `${role}=${digest(role)}`).join(";")}`,
+    ]);
+  });
+
+  it("names every definition role the prepare script checks", async () => {
+    const source = await readFile(
+      join(process.cwd(), "bridge/ghidra/ReaGhidraPrepareRaw.java"),
+      "utf8",
+    );
+    const checked = [
+      ...source.matchAll(/requireDigest\(language, "([a-z]+)"/gu),
+    ].map((match) => match[1]);
+    expect(checked).toEqual(
+      GHIDRA_LANGUAGE_DEFINITION_FILES.map(({ role }) => role),
     );
   });
 });

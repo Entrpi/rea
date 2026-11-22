@@ -366,6 +366,9 @@ const readOpenedBinaryTarget = async (
       baseAddress: loadSelection.baseAddress,
       architectureVariant: loadSelection.architectureVariant,
       vectorTableAddress: loadSelection.vectorTableAddress,
+      ...(loadSelection.providerLanguage === undefined
+        ? {}
+        : { providerLanguage: loadSelection.providerLanguage }),
       fileBytes: metadata.size,
     });
     let admitted: Result<RawBinaryAdmission, RawBinaryAdmissionRejection>;
@@ -397,9 +400,14 @@ const readOpenedBinaryTarget = async (
       ...(await identity()),
       kind: "executable",
       format: "raw-binary",
-      architecture: admitted.value.architecture,
-      availableArchitectures: [admitted.value.architecture],
-      rawLoad: admitted.value.load,
+      // A provider-language load names no family.
+      ...(admitted.value.architecture === null
+        ? { availableArchitectures: [] as const, rawLoad: admitted.value.load }
+        : {
+            architecture: admitted.value.architecture,
+            availableArchitectures: [admitted.value.architecture],
+            rawLoad: admitted.value.load,
+          }),
     });
   }
   const pairing = rawBinarySelectionError(loadSelection);

@@ -538,10 +538,10 @@ it.skipIf(process.platform !== "darwin")(
       if (name === undefined) throw new Error(`Missing ${family} slice`);
       return name;
     };
-    const selectedArchitecture = toolName(target.architecture);
     const universal = target.format === "mach-o-universal";
     if (!universal && target.format !== "mach-o")
       throw new Error(`Unexpected Mach-O format ${target.format}`);
+    const selectedArchitecture = toolName(target.architecture);
     const selector = (command: readonly string[], required: boolean) => {
       const index = command.indexOf("-a");
       if (!required) {

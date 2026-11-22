@@ -366,10 +366,21 @@ export interface CliOpeningFieldProjection extends CliFieldProjection {
    * target itself.
    */
   readonly callerPath?: true;
+  /**
+   * An optional object field spelled as one option per member. `fixed`
+   * members take their value from the command, such as the provider that
+   * option names carry. Any given member opens the object; the contract then
+   * admits it, so a missing member is refused under its own option.
+   */
+  readonly members?: {
+    readonly options: Readonly<Record<string, CliFieldProjection>>;
+    readonly fixed?: Readonly<Record<string, string>>;
+  };
 }
 
 /** An option that supplies one field of the opening contract. */
 export interface ContractCliOpeningOption {
+  /** The contract field, or `field.member` for a member option. */
   readonly field: string;
   readonly key: string;
   readonly description: string | undefined;
@@ -1382,38 +1393,45 @@ const describeTargetOpening = (
     string,
     z.ZodType
   >;
+  const memberFields = new Map<
+    string,
+    { readonly fixed: Readonly<Record<string, string>> }
+  >();
   const options: readonly ContractCliOpeningOption[] = Object.entries(
     opening?.fields ?? {},
-  ).map(([field, projected]) => {
+  ).flatMap(([field, projected]): ContractCliOpeningOption[] => {
     const declared = shape[field];
     if (declared === undefined || field === SESSION_TARGET_KEY)
       throw new Error(`${opener} has no option field ${field}`);
     if (!admitsOmission(declared))
       throw new Error(`${opener}.${field} is required`);
-    let schema: z.ZodType;
-    if (projected.callerPath === true) {
-      if (!(core(declared) instanceof z.ZodString))
-        throw new Error(`${opener}.${field} is not a path`);
-      schema = localPathStringSchema.optional();
-    } else if (projected.values === undefined) {
-      assertArgvField(opener, field, declared);
-      schema = argvDecimal(argvOptional(declared));
-    } else {
-      for (const value of projected.values)
-        if (!declared.safeParse(value).success)
-          throw new Error(`${opener}.${field} does not admit ${value}`);
-      schema = z.enum(projected.values).optional();
+    if (projected.members !== undefined) {
+      const object = core(declared);
+      if (!(object instanceof z.ZodObject))
+        throw new Error(`${opener}.${field} is not an object`);
+      const memberShape = object.shape as Record<string, z.ZodType>;
+      memberFields.set(field, { fixed: projected.members.fixed ?? {} });
+      return Object.entries(projected.members.options).map(
+        ([member, memberProjection]) => {
+          const memberSchema = memberShape[member];
+          if (memberSchema === undefined)
+            throw new Error(`${opener}.${field} has no member ${member}`);
+          const description =
+            memberProjection.description ??
+            describedThroughWrappers(memberSchema);
+          const schema = argvOptional(memberSchema.optional());
+          return {
+            field: `${field}.${member}`,
+            key: memberProjection.name ?? camelCase(member),
+            description,
+            schema:
+              description === undefined ? schema : schema.describe(description),
+            callerPath: false,
+          };
+        },
+      );
     }
-    const description =
-      projected.description ?? describedThroughWrappers(declared);
-    if (description !== undefined) schema = schema.describe(description);
-    return {
-      field,
-      key: projected.name ?? camelCase(field),
-      description,
-      schema,
-      callerPath: projected.callerPath === true,
-    };
+    return [describeOpeningOption(opener, field, declared, projected)];
   });
   const keyOf = new Map(options.map(({ field, key }) => [field, key]));
   const callerPaths: ReadonlySet<string> = new Set(
@@ -1423,11 +1441,19 @@ const describeTargetOpening = (
     options,
     admit: (operation, values, target) => {
       if (opening === undefined) return ok({});
-      const selected = Object.fromEntries(
-        options.flatMap(({ field, key }) =>
-          values[key] === undefined ? [] : [[field, values[key]]],
-        ),
-      );
+      const selected: Record<string, unknown> = {};
+      for (const { field, key } of options) {
+        if (values[key] === undefined) continue;
+        const [parent, member] = field.split(".");
+        if (member === undefined || parent === undefined) {
+          selected[field] = values[key];
+          continue;
+        }
+        const object = (selected[parent] ??= {
+          ...memberFields.get(parent)?.fixed,
+        }) as Record<string, unknown>;
+        object[member] = values[key];
+      }
       // The target itself was admitted as its positional.
       if (Object.keys(selected).length === 0) return ok({});
       const candidate = {
@@ -1447,12 +1473,25 @@ const describeTargetOpening = (
           analysisInputErrorFromIssues(
             operation,
             admitted.error.issues.map((issue) => {
-              const [field, ...rest] = issue.path;
+              const [field, member, ...rest] = issue.path;
+              const memberKey =
+                typeof field === "string" && typeof member === "string"
+                  ? keyOf.get(`${field}.${member}`)
+                  : undefined;
+              if (memberKey !== undefined)
+                return { ...issue, path: [memberKey, ...rest] };
               const key =
                 typeof field === "string" ? keyOf.get(field) : undefined;
               return key === undefined
                 ? issue
-                : { ...issue, path: [key, ...rest] };
+                : {
+                    ...issue,
+                    path: [
+                      key,
+                      ...(member === undefined ? [] : [member]),
+                      ...rest,
+                    ],
+                  };
             }),
             selected,
           ),
@@ -1467,6 +1506,39 @@ const describeTargetOpening = (
         ),
       );
     },
+  };
+};
+
+/** One opening field spelled as one option. */
+const describeOpeningOption = (
+  opener: string,
+  field: string,
+  declared: z.ZodType,
+  projected: CliOpeningFieldProjection,
+): ContractCliOpeningOption => {
+  let schema: z.ZodType;
+  if (projected.callerPath === true) {
+    if (!(core(declared) instanceof z.ZodString))
+      throw new Error(`${opener}.${field} is not a path`);
+    schema = localPathStringSchema.optional();
+  } else if (projected.values === undefined) {
+    assertArgvField(opener, field, declared);
+    schema = argvDecimal(argvOptional(declared));
+  } else {
+    for (const value of projected.values)
+      if (!declared.safeParse(value).success)
+        throw new Error(`${opener}.${field} does not admit ${value}`);
+    schema = z.enum(projected.values).optional();
+  }
+  const description =
+    projected.description ?? describedThroughWrappers(declared);
+  if (description !== undefined) schema = schema.describe(description);
+  return {
+    field,
+    key: projected.name ?? camelCase(field),
+    description,
+    schema,
+    callerPath: projected.callerPath === true,
   };
 };
 

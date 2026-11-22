@@ -5,6 +5,7 @@ import type {
   ArchitectureVariant,
   RawEntryIsaMode,
 } from "./architectureVariant.js";
+import type { ProviderLanguageSelection } from "./providerLanguage.js";
 import type { TargetFormatsOfKind } from "./targetFormats.js";
 
 /** Provider-neutral CPU families detected from headers or explicitly selected raw loads. */
@@ -57,6 +58,17 @@ export interface RawBinaryLoad {
   readonly baseAddress: string;
   /** Caller-named profile variant; absent for the family's generic decoder. */
   readonly architectureVariant?: ArchitectureVariant;
+  /**
+   * Provider decoder the caller named instead of a family. It excludes an
+   * architecture and a variant, and only its provider may load it.
+   */
+  readonly providerLanguage?: ProviderLanguageSelection;
+  /**
+   * Canonical address of the last file byte. Present with a provider
+   * language, whose address width only the provider knows, so the provider
+   * checks the mapping against it.
+   */
+  readonly lastAddress?: string;
   /** Canonical code entry. */
   readonly entryPoint: string;
   /** Instruction set at the entry, when the variant fixes one. */
@@ -80,6 +92,21 @@ export type RawBinaryEntrySource =
       /** Word 0 as read; observed and not validated. */
       readonly initialStackPointer: string;
     };
+
+/** A headerless target: a family load, or a provider-language load with no family. */
+export type RawBinaryTarget = Extract<BinaryTarget, { format: "raw-binary" }>;
+
+/** A headerless target decoded by a provider-neutral family. */
+export type FamilyRawBinaryTarget = Extract<
+  RawBinaryTarget,
+  { readonly architecture: BinaryArchitecture }
+>;
+
+/** A headerless target decoded by a caller-named provider language. */
+export type ProviderLanguageRawBinaryTarget = Exclude<
+  RawBinaryTarget,
+  FamilyRawBinaryTarget
+>;
 
 /** Prefix shared by CodeView RVA mapping and both payload readers. */
 export const PE_CODEVIEW_PREFIX_BYTES = 4096;
@@ -454,6 +481,22 @@ export type BinaryTarget =
         | RawOnlyArchitecture
       )[];
       readonly rawLoad: RawBinaryLoad;
+      readonly executableRole?: never;
+      readonly managed?: never;
+    })
+  | (BinaryTargetIdentity & {
+      readonly kind: "executable";
+      readonly format: "raw-binary";
+      /**
+       * A provider language replaces the provider-neutral family, so there is
+       * none; summaries, snapshots and Evidence report it as null.
+       */
+      readonly architecture?: never;
+      readonly availableArchitectures: readonly [];
+      readonly rawLoad: RawBinaryLoad & {
+        readonly providerLanguage: ProviderLanguageSelection;
+        readonly lastAddress: string;
+      };
       readonly executableRole?: never;
       readonly managed?: never;
     })

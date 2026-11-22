@@ -206,7 +206,7 @@ export const analysisErrorRemediationAction = (
     error instanceof BinaryTargetError &&
     error.constraint === "load_selection_rejected"
   )
-    return "Correct the reported load argument (format, architecture, architecture_variant, entry_point, base_address, or vector_table_address) and retry.";
+    return "Correct the reported load argument (format, architecture, architecture_variant, entry_point, base_address, vector_table_address, provider_language, or provider_id) and retry.";
   if (
     error instanceof BinaryTargetError &&
     error.constraint === "file_format_rejected"
@@ -615,6 +615,8 @@ const presentedRelatedInputs = (
           "entry_point",
           "base_address",
           "vector_table_address",
+          "provider_language",
+          "provider_id",
         ],
       };
     if (error.constraint === "wasm_requires_static_inspection")

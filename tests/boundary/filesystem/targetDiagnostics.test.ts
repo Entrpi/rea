@@ -20,6 +20,8 @@ const RAW_LOAD_PARAMETERS = [
   "entry_point",
   "base_address",
   "vector_table_address",
+  "provider_language",
+  "provider_id",
 ];
 
 describe("executable format refusal diagnostics", () => {

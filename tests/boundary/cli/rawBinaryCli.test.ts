@@ -131,6 +131,8 @@ cliTest(
           "entry_point",
           "base_address",
           "vector_table_address",
+          "provider_language",
+          "provider_id",
         ],
         related_cli_flags: {
           format: "--target-format",
@@ -139,6 +141,8 @@ cliTest(
           entry_point: "--entry-point",
           base_address: "--base-address",
           vector_table_address: "--vector-table-address",
+          provider_language: "--ghidra-language-id",
+          provider_id: "--provider",
         },
       },
     });
@@ -182,6 +186,8 @@ cliTest.for([
           entry_point: "--entry-point",
           base_address: "--base-address",
           vector_table_address: "--vector-table-address",
+          provider_language: "--ghidra-language-id",
+          provider_id: "--provider",
         },
         field: "entry_point",
       },
@@ -259,6 +265,72 @@ cliTest(
     expect(JSON.stringify(result.json)).not.toMatch(
       /unsupported binary format/i,
     );
+  },
+);
+
+cliTest.for([
+  [
+    ["--ghidra-language-id", "SuperH4:LE:32:default", "--provider", "ghidra"],
+    "ghidra-compiler-spec-id",
+  ],
+  [
+    [
+      "--ghidra-language-id",
+      "SuperH4:LE:32:default",
+      "--ghidra-compiler-spec-id",
+      "default",
+    ],
+    "provider_language names ghidra; provider_id must select ghidra explicitly, not automatic selection",
+  ],
+  [
+    [
+      "--ghidra-language-id",
+      "SuperH4:LE:32:default",
+      "--ghidra-compiler-spec-id",
+      "default",
+      "--architecture",
+      "arm",
+      "--provider",
+      "ghidra",
+    ],
+    "provider_language replaces architecture; omit architecture",
+  ],
+  [
+    [
+      "--ghidra-language-id",
+      "SuperH4:LE:32:default",
+      "--ghidra-compiler-spec-id",
+      "default",
+      "--base-address",
+      "0x8c000000",
+      "--entry-point",
+      "0x8c000004",
+      "--provider",
+      "ghidra",
+    ],
+    "raw-binary entry_point 0x8c000004 must lie inside the image mapped at 0x8c000000..0x8c000003",
+  ],
+] as const)(
+  "refuses a Ghidra language selection before provider startup: %s",
+  async ([flags, message], { cli }) => {
+    const root = await createTestTempDirectory("rea-raw-cli-language-");
+    const path = join(root, "firmware.bin");
+    await writeFile(path, Buffer.from("0b000900", "hex"));
+    const result = await cli.run({
+      arguments: [
+        "inspect",
+        path,
+        "--target-format",
+        "raw-binary",
+        "--entry-point",
+        "0x0",
+        ...flags,
+        "--json",
+      ],
+      environment: { HOME: root, XDG_CONFIG_HOME: root, XDG_CACHE_HOME: root },
+    });
+    expect(result.exitCode).toBe(1);
+    expect(JSON.stringify(result.json)).toContain(message);
   },
 );
 

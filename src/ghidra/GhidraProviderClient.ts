@@ -46,6 +46,7 @@ import {
   ghidraSeedFailure,
   ghidraSeedLimitations,
 } from "./GhidraAnalysisSeeds.js";
+import { ghidraLanguageDefinitionSchema } from "./GhidraLanguageCatalog.js";
 import {
   ghidraEffectiveLanguageOverride,
   ghidraPinnedLanguage,
@@ -554,6 +555,24 @@ export const createGhidraProviderClient = (input: {
       ),
     );
   const seeds = seedProfile.data;
+  // A caller-selected language loads only the definition its profile committed.
+  const definitionProfile = ghidraLanguageDefinitionSchema
+    .optional()
+    .safeParse(committedProfile.parameters.language_definition);
+  if (
+    !definitionProfile.success ||
+    (target.format === "raw-binary" && target.architecture === undefined) !==
+      (definitionProfile.data !== undefined)
+  )
+    return err(
+      new ProviderAdapterError("ghidra", "open_binary", {
+        diagnostics: {
+          reason:
+            "A caller-selected language opens only with the language definition that its analysis profile committed; resolve the profile again.",
+        },
+      }),
+    );
+  const languageDefinition = definitionProfile.data;
   const parameterLanguage = ghidraProfileLanguageOverride(
     committedProfile.parameters,
   );
@@ -667,10 +686,7 @@ export const createGhidraProviderClient = (input: {
   const armDwarfLimitations: string[] = [];
   const rawLanguage =
     target.format === "raw-binary"
-      ? ghidraRawBinaryLanguage(
-          target.architecture,
-          target.rawLoad.architectureVariant,
-        )
+      ? ghidraRawBinaryLanguage(target)
       : undefined;
   const targetLimitations = [
     ...(target.format === "dos-mz"
@@ -792,11 +808,15 @@ export const createGhidraProviderClient = (input: {
                     entryContext:
                       GHIDRA_RAW_ENTRY_CONTEXT[target.rawLoad.entryIsaMode],
                   }),
-              // The committed profile owns the label policy.
+              // The committed profile owns the label policy and the language
+              // definition that the import must load.
               ...(committedProfile.parameters.processor_labels ===
               GHIDRA_PROCESSOR_LABELS_NOT_APPLIED
                 ? { applyProcessorLabels: false as const }
                 : {}),
+              ...(languageDefinition === undefined
+                ? {}
+                : { languageDefinition }),
             },
           }),
       ...(target.format === "gamecube-dol"

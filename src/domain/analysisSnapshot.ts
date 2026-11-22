@@ -71,13 +71,19 @@ const SNAPSHOT_SELECTION_KINDS: Partial<
   "mach-o-universal": "universal-slice",
 };
 const RAW_ONLY = new Set<string>(RAW_ONLY_ARCHITECTURES);
-/** Whether a format admits an architecture, as `binaryTargetIdentity` produces it. */
+/**
+ * Whether a format admits an architecture, as `binaryTargetIdentity` produces
+ * it. A raw load has a family, or a provider language in its place.
+ */
 const snapshotArchitectureAllowed = (
   format: SnapshotFormat,
   architecture: string | null,
+  selection: FileTargetSelection | null,
 ): boolean =>
   format === "raw-binary"
-    ? architecture !== null
+    ? (architecture === null) ===
+      (selection?.kind === "entry-point" &&
+        selection.raw_load?.provider_language !== undefined)
     : format === "gamecube-dol"
       ? architecture === "powerpc"
       : format === "esp-flash-image"
@@ -104,7 +110,13 @@ const targetSchema = z
         path: ["kind"],
         message: `Snapshot target kind ${kind} does not match format ${identity.format}`,
       });
-    if (!snapshotArchitectureAllowed(identity.format, identity.architecture))
+    if (
+      !snapshotArchitectureAllowed(
+        identity.format,
+        identity.architecture,
+        identity.selection,
+      )
+    )
       context.addIssue({
         code: "custom",
         path: ["identity", "architecture"],
