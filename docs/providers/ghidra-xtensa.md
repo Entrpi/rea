@@ -59,13 +59,13 @@ windowed calls; the specification also defines a `__call0` prototype. `xtensa.op
 maps ELF machine 94 to this processor. Header
 selection should therefore choose the same language, but REA does not rely on
 that. It pins `Xtensa:LE:32:default`
-with `default`, records `language_selection: provider-pinned-v1`, and checks that
+with `default`, records `language_selection: provider-pinned`, and checks that
 the import reports that language and compiler specification. A session that
 reports anything else fails instead of returning results.
 
 A caller-selected `REA_GHIDRA_LANGUAGE_ID` or `REA_GHIDRA_COMPILER_SPEC_ID` that
 disagrees with the pin is a configuration error, and the requested settings are
-not changed. A selection that matches the pin is recorded as `configured-v1`. A
+not changed. A selection that matches the pin is recorded as `configured`. A
 selection that names only `Xtensa:LE:32:default` keeps the `default` compiler
 specification, so the import and the post-import check still commit to it.
 
@@ -109,8 +109,8 @@ Auto-analysis also runs with the default prototype, before REA assigns
 
 ## Evidence
 
-The lane identity is `elf32-le-exec-windowed-generic-v1`, or
-`elf32-le-exec-call0-generic-v1` with `xtensa_call0_prototype` for call0 images,
+The lane identity is `elf32-le-exec-windowed-generic`, or
+`elf32-le-exec-call0-generic` with `xtensa_call0_prototype` for call0 images,
 and `xtensa_elf` retains `elf_class`, `byte_order`, `type`, the raw `flags` and
 the declared `abi`. These fields report what the image declares. They are not
 evidence of the core configuration, the compiler, or instruction conformance.
