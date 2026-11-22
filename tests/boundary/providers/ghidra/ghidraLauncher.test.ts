@@ -296,7 +296,10 @@ describe("Ghidra header-selected import with a pinned language", () => {
     expect(() =>
       ghidraHeadlessArguments({
         ...unpinned,
-        existingProject: { programName: "firmware.elf" },
+        existingProject: {
+          projectName: "rea-project",
+          programName: "firmware.elf",
+        },
         dwarfCallingConvention: "__stdcall_softfp",
       }),
     ).toThrow(
