@@ -52,6 +52,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.regex.Pattern;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.transform.OutputKeys;
@@ -115,8 +116,20 @@ public final class ReaGhidraRiscvCallingConvention extends GhidraScript {
     FLOAT_INTEGER,
     OTHER,
     /** The psABI's class cannot be known, so it matches no storage the prototype gives. */
-    UNKNOWN
+    UNKNOWN,
+    /**
+     * Two fields in registers, one of which does not start a 4-byte part of the value. The psABI
+     * puts each field at bit 0 of its own register; the prototype's join gives each register the
+     * part as laid out in memory, so it shifts that field. It matches no storage the prototype
+     * gives.
+     */
+    SHIFTED
   }
+
+  /** One flattened field: whether it is a float, and its first bit within the outer value. */
+  private record Field(boolean floating, long bit) {}
+
+  private static final int PART_BITS = 32;
 
   /**
    * The bytes a value's fields hold, and whether Ghidra left any untyped. Ghidra's DWARF import
@@ -133,10 +146,13 @@ public final class ReaGhidraRiscvCallingConvention extends GhidraScript {
   private final Map<DataType, Kind> parameterKinds = new HashMap<>();
   private final Map<DataType, Kind> returnKinds = new HashMap<>();
   private final Map<DataType, Boolean> erasedUnions = new HashMap<>();
-  // Entry points of old-style C definitions, read from DWARF when first needed.
-  private Set<Address> oldStyleEntries;
+  // Entry points of old-style C definitions, read from DWARF before any policy applies.
+  private Set<Address> oldStyleEntries = Set.of();
 
-  /** DW_AT_language values of C, where a definition may be old-style (K&R); 0x2c is C17. */
+  /**
+   * DW_AT_language values of C, where a definition may be old-style (K&R); 0x2c is C17 and 0x3e
+   * C23, which Ghidra names no constant for.
+   */
   private static final Set<Integer> C_LANGUAGES =
       Set.of(
           DWARFSourceLanguage.DW_LANG_C89,
@@ -144,7 +160,43 @@ public final class ReaGhidraRiscvCallingConvention extends GhidraScript {
           DWARFSourceLanguage.DW_LANG_C99,
           DWARFSourceLanguage.DW_LANG_ObjC,
           DWARFSourceLanguage.DW_LANG_C11,
-          0x2c);
+          0x2c,
+          0x3e);
+
+  /**
+   * DW_AT_language values whose functions follow the C psABI the policies model: C, and C++,
+   * whose Itanium ABI defers to the C psABI except for classes passed by hidden reference (a
+   * limitation REA reports), and assembly, whose functions declare no source types. 0x2a and 0x2b
+   * are C++17 and C++20, 0x31 is DWARF 6's DW_LANG_Assembly.
+   */
+  private static final Set<Integer> PSABI_LANGUAGES = psabiLanguages();
+
+  private static Set<Integer> psabiLanguages() {
+    Set<Integer> languages = new HashSet<>(C_LANGUAGES);
+    languages.addAll(
+        List.of(
+            DWARFSourceLanguage.DW_LANG_C_plus_plus,
+            DWARFSourceLanguage.DW_LANG_C_plus_plus_03,
+            DWARFSourceLanguage.DW_LANG_C_plus_plus_11,
+            DWARFSourceLanguage.DW_LANG_C_plus_plus_14,
+            0x2a,
+            0x2b,
+            DWARFSourceLanguage.DW_LANG_ObjC_plus_plus,
+            DWARFSourceLanguage.DW_LANG_Mips_Assembler,
+            0x31));
+    return Set.copyOf(languages);
+  }
+
+  /** Names of languages a refusal is likely to cite; any other is named by its value alone. */
+  private static final Map<Integer, String> LANGUAGE_NAMES =
+      Map.of(
+          DWARFSourceLanguage.DW_LANG_Rust, "Rust",
+          DWARFSourceLanguage.DW_LANG_Go, "Go",
+          DWARFSourceLanguage.DW_LANG_Swift, "Swift",
+          DWARFSourceLanguage.DW_LANG_D, "D",
+          DWARFSourceLanguage.DW_LANG_Ada95, "Ada 95",
+          DWARFSourceLanguage.DW_LANG_Fortran95, "Fortran 95",
+          0x27, "Zig");
 
   @Override
   public void run() throws Exception {
@@ -164,6 +216,13 @@ public final class ReaGhidraRiscvCallingConvention extends GhidraScript {
       throw new IllegalStateException(
           "REA " + policy.id() + " requires a 32-bit RISC-V program, not "
               + language.getLanguageID());
+    // Every policy models the C psABI, so functions compiled from another language refuse the
+    // image before any prototype is installed.
+    String foreign = readDwarf();
+    if (foreign != null) {
+      refuse(policy, foreign);
+      return;
+    }
     CompilerSpec spec = currentProgram.getCompilerSpec();
     new SpecExtension(currentProgram)
         .addReplaceCompilerSpecExtension(
@@ -214,12 +273,7 @@ public final class ReaGhidraRiscvCallingConvention extends GhidraScript {
     if (policy.splitsStructures()) {
       String refusal = misplacedSignatures(model, policy, callables, pointed);
       if (refusal != null) {
-        // Written instead of the outcome: REA refuses the session with this reason.
-        JsonObject report = new JsonObject();
-        report.addProperty("policy", policy.id());
-        report.addProperty("refused", refusal);
-        currentProgram.getOptions(Program.PROGRAM_INFO).setString(REPORT_KEY, report.toString());
-        println("REA RISC-V " + policy.prototype() + " refused: " + refusal);
+        refuse(policy, refusal);
         return;
       }
     }
@@ -231,6 +285,72 @@ public final class ReaGhidraRiscvCallingConvention extends GhidraScript {
     println(
         "REA RISC-V " + policy.prototype() + ": functions=" + functions
             + " definitions=" + definitions);
+  }
+
+  /** Written instead of the outcome: REA refuses the session with this reason. */
+  private void refuse(Policy policy, String refusal) {
+    JsonObject report = new JsonObject();
+    report.addProperty("policy", policy.id());
+    report.addProperty("refused", refusal);
+    currentProgram.getOptions(Program.PROGRAM_INFO).setString(REPORT_KEY, report.toString());
+    println("REA RISC-V " + policy.prototype() + " refused: " + refusal);
+  }
+
+  /** Languages of the function definitions a refusal names: how many, and one of them. */
+  private record Foreign(int functions, String example) {}
+
+  /**
+   * Read the image's DWARF once: the entry points of old-style C definitions, and the refusal for
+   * function definitions in a language whose ABI is not the C psABI, or null. A compile unit
+   * without DW_AT_language is not assumed to be C. An image without DWARF has nothing to read;
+   * REA reports that its functions' languages are unchecked.
+   */
+  private String readDwarf() throws Exception {
+    if (!DWARFProgram.hasDWARFData(currentProgram, monitor)) return null;
+    Set<Address> entries = new HashSet<>();
+    Map<Integer, Foreign> foreign = new TreeMap<>();
+    try (DWARFProgram dwarf = new DWARFProgram(currentProgram, new DWARFImportOptions(), monitor)) {
+      dwarf.init(monitor);
+      for (DIEAggregate die : dwarf.allAggregates()) {
+        if (die.getTag() != DWARFTag.DW_TAG_subprogram) continue;
+        DWARFRange range = die.getPCRange();
+        if (range == null || range.isEmpty()) continue;
+        int language = die.getCompilationUnit().getLanguage();
+        if (!PSABI_LANGUAGES.contains(language)) {
+          String name = die.getName();
+          foreign.merge(
+              language,
+              new Foreign(1, name == null ? "an unnamed function" : name),
+              (seen, next) -> new Foreign(seen.functions() + 1, seen.example()));
+          continue;
+        }
+        if (!C_LANGUAGES.contains(language) || die.getBool(DWARFAttributeId.DW_AT_prototyped, false))
+          continue;
+        AddressRange code = dwarf.getAddressRange(range, true);
+        if (code != null) entries.add(code.getMinAddress());
+      }
+    }
+    oldStyleEntries = entries;
+    if (foreign.isEmpty()) return null;
+    List<String> parts = new ArrayList<>();
+    for (Map.Entry<Integer, Foreign> entry : foreign.entrySet()) {
+      if (parts.size() == REFUSAL_EXAMPLES) break;
+      parts.add(
+          shortened(
+              counted(entry.getValue().functions(), "function") + " in "
+                  + languageLabel(entry.getKey()) + ", such as " + entry.getValue().example()));
+    }
+    return "DWARF compile units define " + String.join("; ", parts)
+        + (foreign.size() > parts.size() ? "; and others" : "")
+        + ". Their calling convention is not the C psABI this lane models, so REA cannot verify"
+        + " their storage.";
+  }
+
+  private static String languageLabel(int language) {
+    if (language < 0) return "a compile unit without DW_AT_language";
+    String value = String.format("DW_AT_language 0x%x", language);
+    String name = LANGUAGE_NAMES.get(language);
+    return name == null ? value : name + " (" + value + ")";
   }
 
   /** The default ilp32d prototype changed as the policy states. */
@@ -384,7 +504,7 @@ public final class ReaGhidraRiscvCallingConvention extends GhidraScript {
       for (Parameter parameter : function.getParameters()) {
         DataType type = parameter.getFormalDataType();
         if (misplacedParameter(model, type)
-            || (promotedFloat(type) && oldStyleEntries().contains(function.getEntryPoint())))
+            || (promotedFloat(type) && oldStyleEntries.contains(function.getEntryPoint())))
           misplaced.add(type.getName());
       }
       if (misplaced.isEmpty()) continue;
@@ -429,33 +549,11 @@ public final class ReaGhidraRiscvCallingConvention extends GhidraScript {
     return strip(type) instanceof AbstractFloatDataType && type.getLength() == 4;
   }
 
-  /**
-   * Entry points of C definitions without DW_AT_prototyped: old-style (K&R) definitions. Clang 19
-   * passes their float parameters as doubles in a0 and a1, while DWARF still declares float.
-   * Ghidra's DWARF import drops the flag, so DWARF is read again here, and only when a typed
-   * signature has a float parameter. C++ and other languages never mark the attribute.
+  /*
+   * Old-style (K&R) C definitions lack DW_AT_prototyped. Clang 19 passes their float parameters
+   * as doubles in a0 and a1, while DWARF still declares float. Ghidra's DWARF import drops the
+   * flag, so readDwarf reads it again. C++ and other languages never mark the attribute.
    */
-  private Set<Address> oldStyleEntries() throws Exception {
-    if (oldStyleEntries != null) return oldStyleEntries;
-    Set<Address> entries = new HashSet<>();
-    if (DWARFProgram.isDWARF(currentProgram)) {
-      try (DWARFProgram dwarf =
-          new DWARFProgram(currentProgram, new DWARFImportOptions(), monitor)) {
-        dwarf.init(monitor);
-        for (DIEAggregate die : dwarf.allAggregates()) {
-          if (die.getTag() != DWARFTag.DW_TAG_subprogram
-              || die.getBool(DWARFAttributeId.DW_AT_prototyped, false)
-              || !C_LANGUAGES.contains(die.getCompilationUnit().getLanguage())) continue;
-          DWARFRange range = die.getPCRange();
-          if (range == null || range.isEmpty()) continue;
-          AddressRange code = dwarf.getAddressRange(range, true);
-          if (code != null) entries.add(code.getMinAddress());
-        }
-      }
-    }
-    oldStyleEntries = entries;
-    return entries;
-  }
 
   /**
    * Whether a parameter of this type may take storage the prototype does not give it: another
@@ -526,21 +624,38 @@ public final class ReaGhidraRiscvCallingConvention extends GhidraScript {
   private Kind psabiKind(DataType type) {
     Held held = held(type);
     if (held.bytes() <= 8 && held.untyped()) return Kind.UNKNOWN;
-    List<Boolean> fields = new ArrayList<>();
+    List<Field> fields = new ArrayList<>();
     // C passes no array by value, so an array here is a GNU vector, which Ghidra imports as one.
     DataType value = strip(type);
-    if (!(value instanceof Union) && !(value instanceof Array) && flatten(type, fields)) {
-      long floats = fields.stream().filter(Boolean::booleanValue).count();
+    if (!(value instanceof Union) && !(value instanceof Array) && flatten(type, 0, fields)) {
+      long floats = fields.stream().filter(Field::floating).count();
       // DWARF omits unnamed bit-fields of nonzero width, which the psABI still counts:
       // `struct { float f; unsigned : 1; }` takes fa0 and a0, yet Ghidra sees one float.
       // Bytes that natural alignment does not explain may hold one, so a float there has no
       // known class. An unnamed bit-field inside a named one's storage unit leaves no trace.
       if (floats > 0 && unexplainedBytes(type)) return Kind.UNKNOWN;
+      // A C++ empty member before a field, a packed layout or a bit-field above bit 0 of its part
+      // moves a field off the start of its part, where the psABI's register holds it at bit 0.
+      if (floats > 0 && !partAligned(fields)) return Kind.SHIFTED;
       if (fields.size() == 1 && floats == 1) return Kind.FLOAT;
       if (fields.size() == 2 && floats == 2) return Kind.FLOAT_PAIR;
       if (fields.size() == 2 && floats == 1) return Kind.FLOAT_INTEGER;
     }
     return type.getLength() > 8 ? Kind.REFERENCE : Kind.INTEGER;
+  }
+
+  /**
+   * Whether the fields that take registers start the 4-byte parts the prototype reads them from:
+   * one field at bit 0, or two fields that each start their own part.
+   */
+  private static boolean partAligned(List<Field> fields) {
+    if (fields.size() == 1) return fields.get(0).bit() == 0;
+    if (fields.size() != 2) return true;
+    long first = fields.get(0).bit();
+    long second = fields.get(1).bit();
+    return first % PART_BITS == 0
+        && second % PART_BITS == 0
+        && first / PART_BITS != second / PART_BITS;
   }
 
   /**
@@ -585,9 +700,11 @@ public final class ReaGhidraRiscvCallingConvention extends GhidraScript {
    * imports a flexible array member, which uses the integer convention, and a trailing `[0]`,
    * which is ignored, alike, so both are treated as the flexible array and fail closed. Either
    * can start inside the structure's padding, so the position among the members decides. Other
-   * empty members, zero-length arrays and zero-width bit-fields are ignored.
+   * empty members, zero-length arrays and zero-width bit-fields are ignored. Each field records
+   * its first bit within the outer value, starting from {@code bit}: a C++ empty member is
+   * ignored as a field but keeps its byte, so the next field starts after it.
    */
-  private static boolean flatten(DataType type, List<Boolean> fields) {
+  private static boolean flatten(DataType type, long bit, List<Field> fields) {
     type = strip(type);
     if (type instanceof Structure structure) {
       DataTypeComponent[] components = structure.getDefinedComponents();
@@ -597,12 +714,14 @@ public final class ReaGhidraRiscvCallingConvention extends GhidraScript {
               && component == components[components.length - 1]) return false;
           continue;
         }
+        long start = bit + 8L * component.getOffset();
         if (component.getDataType() instanceof BitFieldDataType bitField) {
           if (bitField.getBitSize() == 0) continue;
           // The width counts, not the declared type: `unsigned long long b : 1` is one word.
           if (bitField.getBitSize() > 32) return false;
-          fields.add(false);
-        } else if (!flatten(component.getDataType(), fields)) return false;
+          // RISC-V is little-endian: the offset counts from the component's first byte.
+          fields.add(new Field(false, start + bitField.getBitOffset()));
+        } else if (!flatten(component.getDataType(), start, fields)) return false;
         if (fields.size() > 2) return false;
       }
       return true;
@@ -611,22 +730,26 @@ public final class ReaGhidraRiscvCallingConvention extends GhidraScript {
       int count = array.getNumElements();
       if (count == 0) return true;
       // One element's fields stand for every element, so a long array costs one visit.
-      List<Boolean> element = new ArrayList<>();
-      if (!flatten(array.getDataType(), element) || element.isEmpty()) return false;
+      List<Field> element = new ArrayList<>();
+      if (!flatten(array.getDataType(), 0, element) || element.isEmpty()) return false;
       if (fields.size() + (long) count * element.size() > 2) return false;
-      for (int index = 0; index < count; index += 1) fields.addAll(element);
+      long stride = 8L * array.getElementLength();
+      for (int index = 0; index < count; index += 1)
+        for (Field field : element)
+          fields.add(new Field(field.floating(), bit + index * stride + field.bit()));
       return true;
     }
     if (type instanceof Union union) return union.getNumDefinedComponents() == 0;
     if (type instanceof AbstractComplexDataType) {
       if (type.getLength() > 8) return false;
-      fields.add(true);
-      fields.add(true);
+      long half = 4L * type.getLength();
+      fields.add(new Field(true, bit));
+      fields.add(new Field(true, bit + half));
       return true;
     }
     if (type instanceof AbstractFloatDataType) {
       if (type.getLength() > 4) return false;
-      fields.add(true);
+      fields.add(new Field(true, bit));
       return true;
     }
     if (type instanceof Pointer
@@ -634,7 +757,7 @@ public final class ReaGhidraRiscvCallingConvention extends GhidraScript {
         || type instanceof FunctionDefinition
         || type.getLength() <= 0
         || type.getLength() > 4) return false;
-    fields.add(false);
+    fields.add(new Field(false, bit));
     return true;
   }
 

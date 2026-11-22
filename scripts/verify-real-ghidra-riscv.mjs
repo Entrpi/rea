@@ -17,6 +17,7 @@ import { inspectVerifierGhidraInstallation } from "./lib/ghidra-installation-ins
 import { SUPPORTED_GHIDRA_VERSION } from "../dist/ghidra/GhidraReleasePolicy.js";
 import {
   buildRiscvFixture,
+  relabelRiscvFixtureLanguage,
   stripRiscvFixture,
 } from "../tests/conformance/ghidra/riscv-fixture.mjs";
 import {
@@ -158,6 +159,56 @@ const OUTCOME =
  * analysis, and the first analysis call over MCP and the CLI fail with the
  * bridge's reason. The source bytes stay unchanged.
  */
+/**
+ * The same C build with its C compile units labelled Rust: both policies model
+ * the C psABI, so each refuses the image and names the language. The unlabelled
+ * builds above are the controls.
+ */
+const verifyForeignLanguageRefusal = async (variant) => {
+  const built = await buildRiscvFixture(workspace, 32, {
+    variant,
+    execute: execOwned,
+  });
+  const fixture = await relabelRiscvFixtureLanguage(workspace, built, 0x1c);
+  const resolved = await parseBinaryTarget(fixture.path);
+  if (!resolved.ok) throw resolved.error;
+  assert.deepEqual(resolved.value.riscv, fixture.riscv);
+  const policy =
+    variant === "soft" ? "ilp32-prototype-v1" : "ilp32f-prototype-v1";
+  const reasons = [
+    `policy ${policy} refused this image`,
+    "in Rust (DW_AT_language 0x1c), such as ",
+  ];
+  const callTool = async (name, args = {}) => {
+    throwIfInterrupted();
+    return client.callTool(
+      { name, arguments: args },
+      { timeout: 240000, signal: commandInterruption.signal },
+    );
+  };
+  const opened = requireMcpLifecycleResult(
+    await callTool("open_binary", {
+      path: fixture.path,
+      provider_id: "ghidra",
+    }),
+    "open_binary",
+  );
+  assert.equal(opened.sha256, fixture.sha256);
+  const error = JSON.stringify(
+    requireMcpToolError(await callTool("list_procedures")),
+  );
+  for (const reason of reasons) assert.ok(error.includes(reason), error);
+  requireMcpLifecycleResult(await callTool("close_binary"), "close_binary");
+  return {
+    foreign_language: {
+      variant,
+      policy,
+      sha256: fixture.sha256,
+      relabelled: fixture.relabelled,
+    },
+  };
+};
+
 const verifyUnmodelledRefusal = async () => {
   const fixture = await buildRiscvFixture(workspace, 32, {
     variant: "unmodelled",
@@ -168,7 +219,7 @@ const verifyUnmodelledRefusal = async () => {
   assert.deepEqual(resolved.value.riscv, fixture.riscv);
   const reasons = [
     "policy ilp32f-prototype-v1 refused this image",
-    "7 functions and 1 function-pointer type pass by-value types whose psABI storage __rea_ilp32f cannot express",
+    "8 functions and 1 function-pointer type pass by-value types whose psABI storage __rea_ilp32f cannot express",
     "rea_riscv_abi_spread (returns rea_riscv_abi_spread, rea_riscv_abi_spread)",
     "rea_riscv_abi_half (returns _Float16, _Float16)",
     "rea_riscv_abi_empties (returns rea_riscv_abi_empties, rea_riscv_abi_empties)",
@@ -176,8 +227,41 @@ const verifyUnmodelledRefusal = async () => {
     "rea_riscv_abi_padded (rea_riscv_abi_padded, rea_riscv_abi_unnamed, float)",
     "rea_riscv_abi_vector (rea_riscv_abi_lanes)",
     "rea_riscv_abi_complex (complex, rea_riscv_abi_wrapped, rea_riscv_abi_aligned)",
-    "function-pointer type _func_void_rea_riscv_abi_spread_int (rea_riscv_abi_spread)",
+    "rea_riscv_abi_member (returns rea_riscv_abi_member, rea_riscv_abi_member)",
+    // Eight functions fill the eight examples; the count names the
+    // function-pointer type.
+    "; and others.",
   ];
+  // The compiler passes the char after the empty member in bits 0-7 of a0,
+  // not where its byte lies in memory, and the float in fa0.
+  const memberCalls = await inspectRiscvCallSites(
+    fixture.path,
+    ["rea_riscv_abi_member_caller"],
+    execOwned,
+  );
+  const memberCall = memberCalls.calls.filter(
+    (call) => call.target === "rea_riscv_abi_member",
+  );
+  assert.equal(
+    memberCall.length,
+    1,
+    "Expected one call to rea_riscv_abi_member",
+  );
+  assert.equal(
+    memberCall[0].words.a0?.word,
+    0x5a,
+    "The char is not at bit 0 of a0",
+  );
+  assert.equal(
+    memberCall[0].words.fa0?.word,
+    0x3fc00000,
+    "The float is not in fa0",
+  );
+  assert.equal(
+    memberCall[0].words.a1?.word,
+    7,
+    "The int does not follow in a1",
+  );
   const callTool = async (name, args = {}) => {
     throwIfInterrupted();
     return client.callTool(
@@ -202,9 +286,6 @@ const verifyUnmodelledRefusal = async () => {
   assert.ok(!error.includes("rea_riscv_abi_elements"), error);
   assert.ok(!error.includes("rea_riscv_abi_bits"), error);
   assert.ok(!error.includes("rea_riscv_abi_complexes"), error);
-  // A direct C++ empty-class member is ignored when flattening, so its byte
-  // is storage, not an omitted field.
-  assert.ok(!error.includes("rea_riscv_abi_member"), error);
   // Clang ignores transparent_union for a float first member and for members
   // of another size, and an integer first member keeps a0: ordinary unions.
   assert.ok(!error.includes("rea_riscv_abi_float_first"), error);
@@ -817,6 +898,8 @@ try {
     });
   }
   reports.push(await verifyUnmodelledRefusal());
+  for (const variant of ["soft", "single"])
+    reports.push(await verifyForeignLanguageRefusal(variant));
   for (const sites of callSites)
     reports.push({
       call_sites: {

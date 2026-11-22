@@ -114,6 +114,24 @@ ilp32d does, but `double` values in integer registers, and a structure of one
 `float` and one integer in `fa0` and `a0`; the stock model joined that
 structure into `a1:a0`.
 
+### Source languages
+
+Both policies model the C psABI. C++ follows it under the Itanium C++ ABI,
+except for the classes in the [ilp32f limits](#ilp32f) that compilers pass
+through a hidden pointer. Other languages need not follow it: Rust's default
+ABI, for example, passes some small aggregates by reference or as two scalars
+where the C psABI joins them into integer registers. Before either policy
+installs its prototype, the script reads the image's DWARF once. It refuses
+the image when a compile unit whose `DW_AT_language` is not C, C++ or assembly
+defines a function with code, and names each such language with a count and an
+example. A compile unit without `DW_AT_language` is refused the same way. This
+applies to the ilp32 policy too, which until this check admitted such images.
+
+The check reads only DWARF. Functions that no compile unit describes, such as
+every function of a stripped image, or library code built without debug
+information, are not checked and are taken to follow the C psABI. A limitation
+states this on every session that applies a policy.
+
 ### Decision record: D3, RISC-V float ABIs
 
 Decided in [#7477](https://github.com/morluto/rea/issues/7477).
@@ -319,8 +337,15 @@ passes a type the prototype misplaces:
   Refusing every padded value with a float would also refuse common layouts
   such as `struct { char c; float f; }`, which takes `a0` and `fa0`. A C++
   empty class, which Ghidra imports as a one-byte structure without members,
-  is its own storage: GCC 14.2 and Clang 21.1.8 ignore it as a member and pass
-  `struct { E e; char c; float f; }` in `a0` and `fa0`, so it is admitted.
+  is its own storage, not an omitted field.
+- a value whose float-register fields do not start the 4-byte parts the
+  prototype reads them from. The psABI puts each flattened field at bit 0 of
+  its own register, while the prototype gives each register a 4-byte part of
+  the value as laid out in memory. GCC 14.2 and Clang 21.1.8 ignore a C++ empty
+  class as a member, but it keeps its byte, so `struct { E e; char c; float f; }`
+  passes `c` in bits 0-7 of `a0` although it lies in byte 1, where the
+  prototype would read it from bits 8-15. A packed layout or a bit-field above
+  bit 0 of its part moves a field the same way.
 - a union parameter that may be a transparent union taking a float register.
   A transparent union passes as its first member, and DWARF does not record
   the attribute, so Ghidra sees an ordinary union in integer registers: Clang
@@ -535,7 +560,7 @@ REA_RISCV_OBJDUMP=/path/to/llvm/bin/llvm-objdump \
 npm run verify:ghidra:riscv
 ```
 
-The lane builds thirteen fixtures from committed freestanding C and assembly sources:
+The lane builds fifteen fixtures from committed freestanding C and assembly sources:
 
 - RV32 and RV64 double-float builds (`rv{32,64}imafdc`) of `riscv.c`,
   each linked as `ET_EXEC` and as a PIE.
@@ -554,10 +579,12 @@ The lane builds thirteen fixtures from committed freestanding C and assembly sou
   the structure and inside its padding, the second beside a structure whose
   unnamed bit-field DWARF omits, a function that passes a GNU vector, a
   function that passes `float _Complex` alone, in a structure and in an over-aligned structure, and, from `riscv-float-abi-empty.cpp`, a function that passes a structure with an
-  array of one empty class. It also adds functions that pass a structure of one
-  `float[2]`, a `float` beside a one-bit field of a 64-bit type, two
-  `float _Complex` fields, and, from `riscv-float-abi-empty.cpp`, an empty
-  class beside a `char` and a `float`, which the policy admits.
+  array of one empty class, a function that passes an empty class beside a
+  `char` and a `float`, and a caller that passes it known values. It also adds functions that pass a structure of one
+  `float[2]`, a `float` beside a one-bit field of a 64-bit type, and two
+  `float _Complex` fields, which the policy admits.
+- The typed soft- and single-float builds with each C compile unit's
+  `DW_AT_language` rewritten to Rust (`0x1c`). The assembly units keep theirs.
 - An RV32 soft-float build of `riscv-esp-layout.c` with ESP32-C6's
   `-march=rv32imac_zicsr_zifencei -mabi=ilp32`, linked with
   `tests/conformance/esp/esp32c6-shared-window.ld`. As ESP-IDF does, it places
@@ -610,6 +637,13 @@ For the soft- and single-float builds the lane also checks:
 - The unmodelled build is admitted by its headers, then refused over MCP and
   the CLI with the bridge's reason, which names its refused signatures and not
   the `float[2]` or bit-field functions.
+  An LLVM objdump reading of its caller finds the empty-class structure's
+  `char` at bit 0 of `a0`, its `float` in `fa0` and the following `int` in
+  `a1`.
+- The Rust-labelled builds are admitted by their headers, then refused over
+  MCP by each policy with a reason that names Rust and `DW_AT_language 0x1c`.
+  The unlabelled typed builds, with C, C++ and assembly units, are the
+  controls.
 - An LLVM objdump reading finds the call from `rea_riscv_stop_caller` to
   `rea_riscv_stop`, which DWARF declares no-return, as one `auipc`+`jalr` pair,
   as in ESP-IDF's calls between flash and IRAM. In the typed build, Ghidra's
