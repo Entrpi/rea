@@ -1,12 +1,12 @@
 import generic.jar.ResourceFile;
 import ghidra.app.plugin.processors.sleigh.SleighCompilerSpecDescription;
+import ghidra.app.plugin.processors.sleigh.SleighLanguageDescription;
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.lang.CompilerSpecDescription;
 import ghidra.program.model.lang.LanguageDescription;
 import ghidra.program.model.lang.Register;
-import ghidra.program.model.lang.SleighLanguageDescription;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.mem.MemoryBlockSourceInfo;
@@ -113,7 +113,8 @@ public final class ReaGhidraPrepareRaw extends GhidraScript {
             throw new IllegalStateException("Raw binary language " + language + " is not a SLEIGH language definition");
         }
         requireDigest(language, "ldefs", sleigh.getDefsFile(), values.get("ldefs"));
-        requireDigest(language, "sla", sleigh.getSlaFile(), values.get("sla"));
+        // Ghidra 12.2 locates the .sla through its language file, beside the .slaspec.
+        requireDigest(language, "sla", sleigh.getLanguageFile().getSlaFile(), values.get("sla"));
         requireDigest(language, "pspec", sleigh.getSpecFile(), values.get("pspec"));
         requireDigest(language, "cspec", cspec.getFile(), values.get("cspec"));
         AddressSpace space = currentProgram.getLanguage().getAddressFactory().getDefaultAddressSpace();
