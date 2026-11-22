@@ -1419,7 +1419,7 @@ const describeTargetOpening = (
           const description =
             memberProjection.description ??
             describedThroughWrappers(memberSchema);
-          const schema = argvOptional(memberSchema);
+          const schema = argvOptional(memberSchema.optional());
           return {
             field: `${field}.${member}`,
             key: memberProjection.name ?? camelCase(member),
