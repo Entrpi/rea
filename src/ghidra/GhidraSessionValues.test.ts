@@ -142,6 +142,41 @@ describe("Ghidra MIPS soft-float storage report", () => {
   });
 });
 
+describe("Ghidra DWARF calling convention report", () => {
+  it.each(["applied", "not_applicable"])("accepts the %s outcome", (status) => {
+    const report = { calling_convention: "__stdcall_softfp", status };
+    const parsed = parseGhidraSessionInfo(
+      { ...session(), dwarf_calling_convention: report },
+      expected,
+    );
+    if (!parsed.ok) throw parsed.error;
+    expect(parsed.value.dwarf_calling_convention).toEqual(report);
+  });
+  it.each([
+    [
+      "an unknown status",
+      { calling_convention: "__stdcall_softfp", status: "skipped" },
+    ],
+    ["an empty name", { calling_convention: "", status: "applied" }],
+    [
+      "an undeclared field",
+      {
+        calling_convention: "__stdcall_softfp",
+        status: "applied",
+        functions: 1,
+      },
+    ],
+    ["a non-object report", "__stdcall_softfp"],
+  ])("rejects %s", (_label, report) => {
+    expect(
+      parseGhidraSessionInfo(
+        { ...session(), dwarf_calling_convention: report },
+        expected,
+      ).ok,
+    ).toBe(false);
+  });
+});
+
 describe("Ghidra Xtensa call0 prototype report", () => {
   const valid = {
     policy: "call0-prototype-v1",
@@ -215,41 +250,6 @@ describe("Ghidra RISC-V calling-convention report", () => {
     expect(
       parseGhidraSessionInfo(
         { ...session(), riscv_calling_convention: report },
-        expected,
-      ).ok,
-    ).toBe(false);
-  });
-});
-
-describe("Ghidra DWARF calling convention report", () => {
-  it.each(["applied", "not_applicable"])("accepts the %s outcome", (status) => {
-    const report = { calling_convention: "__stdcall_softfp", status };
-    const parsed = parseGhidraSessionInfo(
-      { ...session(), dwarf_calling_convention: report },
-      expected,
-    );
-    if (!parsed.ok) throw parsed.error;
-    expect(parsed.value.dwarf_calling_convention).toEqual(report);
-  });
-  it.each([
-    [
-      "an unknown status",
-      { calling_convention: "__stdcall_softfp", status: "skipped" },
-    ],
-    ["an empty name", { calling_convention: "", status: "applied" }],
-    [
-      "an undeclared field",
-      {
-        calling_convention: "__stdcall_softfp",
-        status: "applied",
-        functions: 1,
-      },
-    ],
-    ["a non-object report", "__stdcall_softfp"],
-  ])("rejects %s", (_label, report) => {
-    expect(
-      parseGhidraSessionInfo(
-        { ...session(), dwarf_calling_convention: report },
         expected,
       ).ok,
     ).toBe(false);
@@ -424,6 +424,24 @@ describe("Ghidra mutation handshake", () => {
         ).ok,
       ).toBe(false);
     }
+  });
+});
+
+describe("Ghidra ELF image base commitment", () => {
+  it("rejects a session Ghidra placed away from the committed link base", () => {
+    // Ghidra's default moves base-0 shared images to 0x10000.
+    const shifted = session();
+    shifted.target.image_base = "0x10000";
+    expect(
+      parseGhidraSessionInfo(session(), {
+        ...expected,
+        expectedImageBase: "0x0",
+      }).ok,
+    ).toBe(true);
+    expect(
+      parseGhidraSessionInfo(shifted, { ...expected, expectedImageBase: "0x0" })
+        .ok,
+    ).toBe(false);
   });
 });
 

@@ -574,7 +574,6 @@ const SINGLE_ADDRESSES = {
   rea_riscv_abi_flagged: "0x1161a",
   rea_riscv_abi_fill: "0x11666",
 };
-
 // The same tool's listing of rea_riscv_stop_caller, whose object -mno-relax
 // built. rea_riscv_stop is at 0x11644.
 const FAR_LISTING = `

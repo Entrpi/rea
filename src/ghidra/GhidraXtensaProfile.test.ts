@@ -32,7 +32,7 @@ import {
   ghidraXtensaProfileMismatchReason,
 } from "./GhidraXtensaProfile.js";
 
-// Abbreviated from Ghidra 12.1.4 Processors/Xtensa/data/languages/xtensa.ldefs:
+// Abbreviated from Ghidra 12.2 Processors/Xtensa/data/languages/xtensa.ldefs:
 // one compiler specification per language, with id `default` and no `gcc`.
 const XTENSA_LDEFS = `<?xml version="1.0" encoding="UTF-8"?>
 <language_definitions>
@@ -109,7 +109,7 @@ const session = (languageId: string, compilerSpecId: string) => ({
   name: "REA Ghidra bridge" as const,
   run_id: "11111111-1111-4111-8111-111111111111",
   profile_digest: "b".repeat(64),
-  provider: { id: "ghidra" as const, version: "12.1.4" },
+  provider: { id: "ghidra" as const, version: "12.2" },
   read_only: false as const,
   analysis_complete: true,
   analysis_timed_out: false,
@@ -161,7 +161,7 @@ const registerPinCases = () => {
       loader: "auto-from-header",
       language_id: "Xtensa:LE:32:default",
       compiler_spec_id: "default",
-      language_selection: "provider-pinned-v1",
+      language_selection: "provider-pinned",
       xtensa_elf: {
         elf_class: 32,
         byte_order: "little",
@@ -170,7 +170,7 @@ const registerPinCases = () => {
         abi: "windowed",
         literals: "pc-relative",
       },
-      xtensa_support_lane: "elf32-le-exec-windowed-generic-v1",
+      xtensa_support_lane: "elf32-le-exec-windowed-generic",
     });
     expect(ghidraProfileLanguageOverride(parameters)).toEqual(PINNED);
   });
@@ -226,7 +226,7 @@ const registerPinCases = () => {
     // The bridge handshake enforces the expectation above after import.
     const expected = {
       runId: "11111111-1111-4111-8111-111111111111",
-      providerVersion: "12.1.4",
+      providerVersion: "12.2",
       profileDigest: "b".repeat(64),
       targetSha256: "a".repeat(64),
       expectedLanguageId: PINNED.languageId,
@@ -367,7 +367,7 @@ const registerOverrideCases = () => {
     expect(resolved.value.profile?.parameters).toMatchObject({
       language_id: "Xtensa:LE:32:default",
       compiler_spec_id: "default",
-      language_selection: "configured-v1",
+      language_selection: "configured",
     });
   });
 
@@ -388,7 +388,7 @@ const registerOverrideCases = () => {
     expect(parameters).toMatchObject({
       language_id: "Xtensa:LE:32:default",
       compiler_spec_id: "default",
-      language_selection: "configured-v1",
+      language_selection: "configured",
     });
     expect(ghidraProfileLanguageOverride(parameters)).toEqual(PINNED);
     const client = provider.createClient(target(), resolved.value.profile);
@@ -449,7 +449,7 @@ const registerProviderCases = () => {
       expect.stringContaining(PINNED.languageId),
     );
     expect(delivered).toContainEqual(
-      expect.stringMatching(/^Measured by REA: .*\bSALT\b.*\bSALTU\b/su),
+      expect.stringMatching(/^Measured by REA\b.*\bSALT\b.*\bSALTU\b/su),
     );
     expect(
       ghidraXtensaLimitations({
@@ -551,7 +551,7 @@ const registerCall0Cases = () => {
       language_id: "Xtensa:LE:32:default",
       compiler_spec_id: "default",
       xtensa_elf: { abi: "call0" },
-      xtensa_support_lane: "elf32-le-exec-call0-generic-v1",
+      xtensa_support_lane: "elf32-le-exec-call0-generic",
       xtensa_call0_prototype: "call0-prototype-v1",
     });
     const windowed = await call0Session(target(), undefined);

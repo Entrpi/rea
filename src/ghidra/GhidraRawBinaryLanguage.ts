@@ -24,7 +24,7 @@ export interface GhidraRawBinaryLanguage {
  * Ghidra decoder for each caller-named variant. `ARM:LE:32:Cortex` (the ARMv7
  * decoder with Thumb as the default state) has no ARMv8-M encodings such as
  * the MSPLIM and PSPLIM system registers, so v8-M and v8.1-M variants use
- * `ARM:LE:32:v8-m`, which Ghidra 12.1.4's `ARM.ldefs` also lists for
+ * `ARM:LE:32:v8-m`, which Ghidra 12.2's `ARM.ldefs` also lists for
  * `armv8.1-m.main`. Both languages share `ARMCortex.pspec`.
  */
 export const GHIDRA_VARIANT_LANGUAGES = {
@@ -38,13 +38,14 @@ export const GHIDRA_VARIANT_LANGUAGES = {
 
 /**
  * Observed with Ghidra 12.1.4, where WLS and LE decode with LLVM's mnemonics.
- * In the raw verifier's Cortex-M55 image, WLS branched 2 bytes short, LE
- * branched 4 bytes past the loop start, and LE had no fall-through, so the code
- * after the loop was not disassembled. In the ELF verifier's, WLS branched to
- * its target and LE 2 bytes past the loop start, again without a fall-through.
+ * In the raw verifier's Cortex-M55 image, on 12.1.4 and 12.2, WLS branched 2
+ * bytes short, LE branched 4 bytes past the loop start, and LE had no
+ * fall-through, so the code after the loop was not disassembled. In the ELF
+ * verifier's, WLS branched to its target and LE 2 bytes past the loop start,
+ * again without a fall-through.
  */
 const GHIDRA_LOW_OVERHEAD_LOOPS =
-  "Ghidra 12.1.4 decodes the ARMv8.1-M low-overhead-loop branches WLS and LE, but their targets can be wrong and LE has no fall-through, so code after such a loop may be left undisassembled.";
+  "Ghidra 12.2 decodes the ARMv8.1-M low-overhead-loop branches WLS and LE, but their targets can be wrong and LE has no fall-through, so code after such a loop may be left undisassembled.";
 
 /**
  * Limitations of each variant's Ghidra decoder, whatever container holds the
@@ -68,7 +69,7 @@ export const GHIDRA_RAW_ENTRY_CONTEXT = {
   thumb: {
     register: "TMode",
     value: "0x1",
-    commitment: "thumb-tmode-1-before-analysis-v1",
+    commitment: "thumb-tmode-1-before-analysis",
   },
 } as const satisfies Record<
   RawEntryIsaMode,
@@ -80,7 +81,7 @@ export const GHIDRA_RAW_ENTRY_CONTEXT = {
 >;
 
 /** Profile `processor_labels` value: the import does not apply the language's labels. */
-export const GHIDRA_PROCESSOR_LABELS_NOT_APPLIED = "not-applied-v1";
+export const GHIDRA_PROCESSOR_LABELS_NOT_APPLIED = "not-applied";
 
 /**
  * Profile commitment that a variant load is imported without the language's

@@ -3,11 +3,12 @@ import {
   processInspectionFailure,
   retainProcessInspectionCleanup,
 } from "../providers/OwnedCommandCleanup.js";
+import { HOST_PLATFORM } from "../platform/HostPlatform.js";
 import { GhidraAdmissionError } from "./GhidraAdmissionError.js";
 import { copyExistingGhidraProject } from "./GhidraProjectSnapshot.js";
 import { hashGhidraPackedProgram } from "./GhidraCheckpoint.js";
 import { constants as fsConstants } from "node:fs";
-import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
+import type { ArtifactResourceScope } from "../resources/index.js";
 import { GHIDRA_BRIDGE_SOURCES } from "./GhidraBridgeSources.js";
 import {
   snapshotGhidraAnalysisSeeds,
@@ -40,7 +41,12 @@ import {
   primaryAnalysisError,
 } from "../domain/analysisErrorBase.js";
 import { DarwinProcessOwnershipInspectionError } from "../process/DarwinProcessRunTokenReader.js";
-import { AnalysisCancelledError } from "../domain/analysisErrorCore.js";
+import {
+  AnalysisCancelledError,
+  isAborted,
+  cancelledBy,
+  carriedReason,
+} from "../domain/analysisErrorCore.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
 import { err, ok, type Result } from "../domain/result.js";
 import type { AnalysisCapturedOutput } from "../domain/analysisErrorBase.js";
@@ -48,8 +54,8 @@ import {
   execFileOutputFailure,
   execFileFailureCapturedOutput,
 } from "../process/ExecFileOutput.js";
-import { boundedUtf8Text } from "../process/boundedUtf8Text.js";
-import { redactCapturedTransportCredential } from "../process/ProviderDiagnosticRedaction.js";
+import { utf8HeadExcerpt } from "../domain/utf8HeadExcerpt.js";
+import { redactExplicitText } from "../domain/explicitSensitiveValues.js";
 import {
   cleanupOwnedProcessGroup,
   type ProcessCleanupResult,
@@ -75,6 +81,7 @@ import {
   inspectGhidraPspExtension,
   type GhidraPspExtension,
 } from "./GhidraPspExtension.js";
+import { errorMessage } from "../kernel/errorMessage.js";
 
 export interface GhidraLaunchSession {
   readonly runtimeRoot: string;
@@ -269,7 +276,8 @@ export interface GhidraHeadlessLauncherOptions {
   readonly comSpec?: string;
   /** Select the admitted 16-bit real-mode MZ import instead of auto-detection. */
   readonly dosMz?: true;
-  readonly dosCom?: true;
+  /** DOS COM import selected from the committed analysis profile. */
+  readonly dosCom?: { readonly loader: "ComLoader" | "BinaryLoader" };
   readonly rawBinary?: GhidraRawBinaryImport;
   /** GameCube DOL import: committed language and the canonical section table text. */
   readonly gamecubeDol?: {
@@ -295,6 +303,8 @@ export interface GhidraHeadlessLauncherOptions {
   readonly mipsSoftFloat?: true;
   /** Assign the call0 prototype to every function after analysis. */
   readonly xtensaCall0?: true;
+  /** ELF image base (bare hex) committed by the analysis profile. */
+  readonly elfImageBase?: string;
   /** Apply this committed RISC-V calling-convention policy after analysis. */
   readonly riscvCallingConvention?: GhidraRiscvCallingConvention;
   /** Prepare the memory map for this committed RISC-V section overlap before analysis. */
@@ -311,7 +321,10 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
   constructor(options: GhidraHeadlessLauncherOptions) {
     this.options = {
       ...options,
-      environment: snapshotEnvironment(options.environment, options.platform),
+      environment: snapshotEnvironment(
+        options.environment,
+        options.platform ?? HOST_PLATFORM.platform,
+      ),
     };
   }
 
@@ -323,13 +336,9 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
     },
   ): Promise<Result<GhidraLaunch, GhidraLaunchError | AnalysisCancelledError>> {
     if (isAborted(options.signal))
-      return err(
-        new AnalysisCancelledError("open_binary", {
-          cause: options.signal?.reason,
-        }),
-      );
+      return err(cancelledBy("open_binary", options.signal));
     const paths = ghidraRuntimePaths(session.runtimeRoot);
-    const platform = this.options.platform ?? process.platform;
+    const platform = this.options.platform ?? HOST_PLATFORM.platform;
     const existingProject = this.options.existingProject;
     let started: SpawnedOwnedProviderProcess | undefined;
     let configuredMaxHeap: string | undefined;
@@ -469,11 +478,7 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
         );
       }
       if (isAborted(options.signal))
-        return err(
-          new AnalysisCancelledError("open_binary", {
-            cause: options.signal?.reason,
-          }),
-        );
+        return err(cancelledBy("open_binary", options.signal));
       const headlessArguments = ghidraHeadlessArguments({
         platform,
         ...(psp === undefined ? {} : { psp: true as const }),
@@ -508,6 +513,9 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
         ...(this.options.rawBinary === undefined
           ? {}
           : { rawBinary: this.options.rawBinary }),
+        ...(this.options.elfImageBase === undefined
+          ? {}
+          : { elfImageBase: this.options.elfImageBase }),
         ...(this.options.gamecubeDol === undefined ||
         gamecubeDolSectionPath === undefined
           ? {}
@@ -575,20 +583,15 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
         environment,
         onStderr: (mode, stderr) => {
           if (stderr === "") return;
-          const bytes = Buffer.byteLength(stderr);
-          const redacted = redactCapturedTransportCredential(
-            { text: stderr, bytes, observedBytes: bytes },
-            session.token,
-            "[REDACTED]",
-          );
-          const bounded = boundedUtf8Text(
+          const redacted = redactExplicitText(stderr, [session.token]);
+          const bounded = utf8HeadExcerpt(
             redacted,
             GHIDRA_LAUNCH_COMMAND_OUTPUT_BYTES,
           );
           launchSupport.push({
             mode,
             stderr: bounded.text,
-            stderr_bytes: bytes,
+            stderr_bytes: Buffer.byteLength(stderr),
             stderr_truncated: bounded.truncated,
           });
         },
@@ -652,9 +655,7 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
         platform,
       );
       if (isAborted(options.signal)) {
-        throw new AnalysisCancelledError("open_binary", {
-          cause: options.signal?.reason,
-        });
+        throw cancelledBy("open_binary", options.signal);
       }
       return ok(partialLaunch);
     } catch (cause: unknown) {
@@ -664,9 +665,10 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
           ? cause
           : cause instanceof GhidraLaunchSupportError &&
               cause.cancellation !== undefined
-            ? new AnalysisCancelledError("open_binary", {
-                cause: cause.cancellation.reason,
-              })
+            ? cancelledBy(
+                "open_binary",
+                carriedReason(cause.cancellation.reason),
+              )
             : undefined);
       const capturedOutput = ghidraLaunchCommandOutput(cause);
       const primary =
@@ -714,7 +716,7 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
         const primaryMessage =
           cancellation !== undefined
             ? cancellation.message
-            : `Ghidra headless launch failed: ${cause instanceof Error ? cause.message : String(cause)}`;
+            : `Ghidra headless launch failed: ${errorMessage(cause)}`;
         return err(
           new GhidraLaunchError(
             `${primaryMessage}; process cleanup remains incomplete`,
@@ -859,7 +861,7 @@ export interface GhidraHeadlessArgumentOptions {
   readonly riscvCallingConvention?: GhidraRiscvCallingConvention;
   readonly riscvLoadPreparation?: GhidraRiscvLoadPreparation;
   readonly dosMz?: true;
-  readonly dosCom?: true;
+  readonly dosCom?: { readonly loader: "ComLoader" | "BinaryLoader" };
   readonly rawBinary?: GhidraRawBinaryImport;
   readonly gamecubeDol?: {
     readonly languageId: string;
@@ -871,6 +873,8 @@ export interface GhidraHeadlessArgumentOptions {
   readonly applyProcessorLabels?: false;
   /** Prototype the DWARF analyzer gives the signatures it imports. */
   readonly dwarfCallingConvention?: string;
+  /** Bare-hex ElfLoader image base; the loader's default may shift the image. */
+  readonly elfImageBase?: string;
   /** Auto-analyzers disabled by the pre-analysis options script. */
   readonly disabledAnalyzers?: readonly string[];
   /** Canonical seed snapshot passed to the pre-analysis seed script. */
@@ -890,6 +894,7 @@ type ExistingProjectOptions = Pick<
   | "xtensaCall0"
   | "riscvCallingConvention"
   | "riscvLoadPreparation"
+  | "elfImageBase"
   | "seedPath"
   | "disabledAnalyzers"
   | "dwarfCallingConvention"
@@ -905,13 +910,13 @@ const validateExistingProjectOptions = (
   if (existing !== undefined) {
     // The pre-imported project carries its own analysis; every import-time
     // selection is therefore rejected instead of silently ignored.
-    if ((options.platform ?? process.platform) === "win32")
+    if ((options.platform ?? HOST_PLATFORM.platform) === "win32")
       throw new GhidraAdmissionError("existing_project_windows");
     if (existing.programName.trim() === "")
       throw new GhidraAdmissionError("existing_project_program_name");
     if (options.psp === true)
       throw new GhidraAdmissionError("existing_project_psp");
-    if (options.dosMz === true || options.dosCom === true)
+    if (options.dosMz === true || options.dosCom !== undefined)
       throw new GhidraAdmissionError("existing_project_dos");
     if (rawBinary !== undefined)
       throw new GhidraAdmissionError("existing_project_raw_binary");
@@ -927,6 +932,8 @@ const validateExistingProjectOptions = (
       throw new GhidraAdmissionError("existing_project_riscv_load_preparation");
     if (options.xtensaCall0 === true)
       throw new GhidraAdmissionError("existing_project_xtensa_call0");
+    if (options.elfImageBase !== undefined)
+      throw new GhidraAdmissionError("existing_project_elf_image_base");
     if (
       options.seedPath !== undefined ||
       options.analysisSeeds !== undefined ||
@@ -944,7 +951,7 @@ export const ghidraHeadlessArguments = (
   // Bridge script paths use the target platform's syntax, which differs from
   // the host when building a cross-platform invocation.
   const scriptPath =
-    (options.platform ?? process.platform) === "win32" ? win32 : posix;
+    (options.platform ?? HOST_PLATFORM.platform) === "win32" ? win32 : posix;
   const bridgeDirectory = scriptPath.dirname(options.bridgeScriptPath);
   const override = options.languageOverride;
   const rawBinary = options.rawBinary;
@@ -955,7 +962,7 @@ export const ghidraHeadlessArguments = (
     gamecubeDol !== undefined &&
     (options.psp === true ||
       options.dosMz === true ||
-      options.dosCom === true ||
+      options.dosCom !== undefined ||
       options.mipsSoftFloat === true ||
       options.xtensaCall0 === true ||
       options.riscvCallingConvention !== undefined ||
@@ -967,7 +974,7 @@ export const ghidraHeadlessArguments = (
   if (
     options.psp === true &&
     (options.dosMz === true ||
-      options.dosCom === true ||
+      options.dosCom !== undefined ||
       override !== undefined)
   )
     throw new GhidraAdmissionError("psp_combined");
@@ -977,7 +984,7 @@ export const ghidraHeadlessArguments = (
     options.mipsSoftFloat === true &&
     (options.psp === true ||
       options.dosMz === true ||
-      options.dosCom === true ||
+      options.dosCom !== undefined ||
       rawBinary !== undefined)
   )
     throw new GhidraAdmissionError("mips_soft_float_scope");
@@ -986,7 +993,7 @@ export const ghidraHeadlessArguments = (
     (options.psp === true ||
       options.mipsSoftFloat === true ||
       options.dosMz === true ||
-      options.dosCom === true ||
+      options.dosCom !== undefined ||
       rawBinary !== undefined)
   )
     throw new GhidraAdmissionError("riscv_calling_convention_scope");
@@ -995,7 +1002,8 @@ export const ghidraHeadlessArguments = (
     (options.psp === true ||
       options.mipsSoftFloat === true ||
       options.dosMz === true ||
-      options.dosCom === true ||
+      options.dosCom !== undefined ||
+      options.elfImageBase !== undefined ||
       rawBinary !== undefined)
   )
     throw new GhidraAdmissionError("riscv_load_preparation_scope");
@@ -1003,7 +1011,8 @@ export const ghidraHeadlessArguments = (
     options.xtensaCall0 === true &&
     (options.psp === true ||
       options.dosMz === true ||
-      options.dosCom === true ||
+      options.dosCom !== undefined ||
+      options.elfImageBase !== undefined ||
       options.mipsSoftFloat === true ||
       options.riscvCallingConvention !== undefined ||
       rawBinary !== undefined)
@@ -1011,7 +1020,7 @@ export const ghidraHeadlessArguments = (
     throw new GhidraAdmissionError("xtensa_call0_scope");
   if (
     override !== undefined &&
-    (options.dosMz === true || options.dosCom === true)
+    (options.dosMz === true || options.dosCom !== undefined)
   )
     throw new GhidraAdmissionError("language_override_dos");
   if (override !== undefined && rawBinary !== undefined)
@@ -1022,9 +1031,25 @@ export const ghidraHeadlessArguments = (
     throw new GhidraAdmissionError("dwarf_calling_convention_scope");
   if (
     rawBinary !== undefined &&
-    (options.dosMz === true || options.dosCom === true)
+    (options.dosMz === true || options.dosCom !== undefined)
   )
     throw new GhidraAdmissionError("raw_binary_dos");
+  if (
+    options.elfImageBase !== undefined &&
+    (gamecubeDol !== undefined ||
+      options.psp === true ||
+      options.dosMz === true ||
+      options.dosCom !== undefined ||
+      options.riscvCallingConvention !== undefined ||
+      options.packedProgramPath !== undefined ||
+      rawBinary !== undefined)
+  )
+    throw new GhidraAdmissionError("elf_image_base_scope");
+  if (
+    options.elfImageBase !== undefined &&
+    !/^[0-9a-f]{1,8}$/u.test(options.elfImageBase)
+  )
+    throw new GhidraAdmissionError("elf_image_base_format");
   return [
     options.projectRoot,
     existing?.projectName ?? "rea-project",
@@ -1054,12 +1079,15 @@ export const ghidraHeadlessArguments = (
                   "-cspec",
                   "default",
                 ]
-              : options.dosCom === true
+              : options.dosCom !== undefined
                 ? [
                     "-loader",
-                    "BinaryLoader",
-                    "-loader-baseAddr",
-                    "1000:0100",
+                    options.dosCom.loader,
+                    // ComLoader owns 0000:0100. BinaryLoader is the explicit
+                    // fallback and still needs the real-mode segment base.
+                    ...(options.dosCom.loader === "BinaryLoader"
+                      ? ["-loader-baseAddr", "1000:0100"]
+                      : []),
                     "-processor",
                     "x86:LE:16:Real Mode",
                     "-cspec",
@@ -1075,18 +1103,28 @@ export const ghidraHeadlessArguments = (
                         "-cspec",
                         "default",
                       ]
-                    : override !== undefined
-                      ? [
-                          ...(options.applyProcessorLabels === false
-                            ? ["-loader-applyLabels", "false"]
-                            : []),
-                          "-processor",
-                          override.languageId,
-                          ...(override.compilerSpecId === undefined
-                            ? []
-                            : ["-cspec", override.compilerSpecId]),
-                        ]
-                      : []
+                    : [
+                        ...(options.elfImageBase === undefined
+                          ? []
+                          : [
+                              "-loader",
+                              "ElfLoader",
+                              "-loader-imagebase",
+                              options.elfImageBase,
+                            ]),
+                        ...(override === undefined
+                          ? []
+                          : [
+                              ...(options.applyProcessorLabels === false
+                                ? ["-loader-applyLabels", "false"]
+                                : []),
+                              "-processor",
+                              override.languageId,
+                              ...(override.compilerSpecId === undefined
+                                ? []
+                                : ["-cspec", override.compilerSpecId]),
+                            ]),
+                      ]
                   : [
                       "-loader",
                       "BinaryLoader",
@@ -1117,7 +1155,7 @@ export const ghidraHeadlessArguments = (
     options.scriptLogPath,
     "-scriptPath",
     bridgeDirectory,
-    ...(options.dosCom === true
+    ...(options.dosCom !== undefined
       ? [
           "-preScript",
           scriptPath.join(bridgeDirectory, GHIDRA_BRIDGE_SOURCES.prepareCom),
@@ -1195,7 +1233,7 @@ export const ghidraHeadlessArguments = (
           options.dwarfCallingConvention,
         ]),
     ...(existing !== undefined ||
-    (options.platform ?? process.platform) === "win32"
+    (options.platform ?? HOST_PLATFORM.platform) === "win32"
       ? []
       : [
           "-postScript",
@@ -1340,5 +1378,3 @@ export const ghidraHeadlessJavaOptions = (
   // argv items instead of the shell-split analyzeHeadless option list.
   return { JDK_JAVA_OPTIONS: "", GHIDRA_HEADLESS_JAVA_OPTIONS: "" };
 };
-
-const isAborted = (signal?: AbortSignal): boolean => signal?.aborted === true;

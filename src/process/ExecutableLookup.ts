@@ -1,12 +1,14 @@
 import type { Stats } from "node:fs";
 import { constants as fsConstants } from "node:fs";
 import { access as accessPath, stat as statPath } from "node:fs/promises";
-import { delimiter, isAbsolute, sep } from "node:path";
+import { isAbsolute, sep } from "node:path";
 
 import {
   absoluteCallerPath,
   appendCallerPath,
 } from "../filesystem/callerPath.js";
+import { HOST_PLATFORM } from "../platform/HostPlatform.js";
+import { posixPathCandidates } from "./executableSearch.js";
 import { fileDeadline } from "./FileDeadline.js";
 
 /** Where a command resolves through an effective PATH, or why it does not. */
@@ -68,6 +70,8 @@ export interface ExecutableLookupBounds {
   readonly timeoutMs?: number | undefined;
   readonly stat?: (path: string) => Promise<Stats>;
   readonly access?: (path: string, mode: number) => Promise<void>;
+  /** The host whose native search the lookup follows; defaults to this one. */
+  readonly platform?: NodeJS.Platform;
 }
 
 /**
@@ -96,25 +100,26 @@ export const lookupExecutable = async (
   searchPath: string | undefined,
   bounds: ExecutableLookupBounds = {},
 ): Promise<ExecutableLookup> => {
-  const { signal, timeoutMs, stat = statPath, access = accessPath } = bounds;
+  const {
+    signal,
+    timeoutMs,
+    stat = statPath,
+    access = accessPath,
+    platform = HOST_PLATFORM.platform,
+  } = bounds;
+  const pathMax = PATH_MAX[platform];
   let cwd: string | undefined;
   const readCwd = (): string => (cwd ??= workingDirectory());
-  // An empty PATH component selects the working directory. Windows resolves
-  // even an absolute path against the working directory's drive.
+  // Windows resolves even an absolute path against the working directory's
+  // drive.
   const located = (path: string): string =>
-    path === ""
-      ? readCwd()
-      : process.platform !== "win32" && isAbsolute(path)
-        ? absoluteCallerPath(path)
-        : absoluteCallerPath(path, { cwd: readCwd() });
+    platform !== "win32" && isAbsolute(path)
+      ? absoluteCallerPath(path)
+      : absoluteCallerPath(path, { cwd: readCwd() });
   const explicit =
     isAbsolute(command) ||
     command.includes("/") ||
     (sep === "\\" && command.includes("\\"));
-  // Match Node's Unix default search path when PATH is absent.
-  const entries = explicit
-    ? [command]
-    : (searchPath ?? "/usr/bin:/bin").split(delimiter);
   const deadline = fileDeadline(signal, timeoutMs);
   try {
     const checked: string[] = [];
@@ -146,27 +151,19 @@ export const lookupExecutable = async (
             },
           }),
     });
-    for (const entry of entries) {
+    for (const { candidate, entry, unnamed } of searchCandidates(
+      command,
+      explicit,
+      searchPath,
+      readCwd,
+      located,
+    )) {
+      if (candidate === undefined)
+        return { status: "no-working-directory", cause: unnamed.cause };
       const entryBytes = Buffer.byteLength(entry);
-      if (!explicit && PATH_MAX !== undefined && entryBytes >= PATH_MAX) {
+      if (!explicit && pathMax !== undefined && entryBytes >= pathMax) {
         checked.push(`a PATH entry of ${entryBytes} bytes (skipped)`);
         continue;
-      }
-      // Resolved only when reached: a match in an earlier entry never needs
-      // the working directory that a later relative entry would read.
-      let candidate: string;
-      // Set when the working directory could not be read, so the candidate
-      // is the relative path as written.
-      let unnamed: { readonly cause: unknown } | undefined;
-      try {
-        candidate = explicit
-          ? located(entry)
-          : appendCallerPath(located(entry), command);
-      } catch (cause) {
-        // An explicit relative command has no other candidate.
-        if (explicit) return { status: "no-working-directory", cause };
-        candidate = appendCallerPath(entry === "" ? "." : entry, command);
-        unnamed = { cause };
       }
       if (explicit) selectedPath = candidate;
       const metadata = await deadline.run(() => stat(candidate));
@@ -215,6 +212,55 @@ export const lookupExecutable = async (
 };
 
 /**
+ * The selected path, or the files a spawned search tries in PATH order, from
+ * the shared search owner. A relative entry whose working directory cannot be
+ * read is kept as written and marked `unnamed`; an explicit relative command
+ * then has no candidate at all.
+ */
+function* searchCandidates(
+  command: string,
+  explicit: boolean,
+  searchPath: string | undefined,
+  readCwd: () => string,
+  located: (path: string) => string,
+): Generator<
+  | {
+      readonly candidate: string;
+      readonly entry: string;
+      readonly unnamed?: { readonly cause: unknown };
+    }
+  | {
+      readonly candidate: undefined;
+      readonly entry: string;
+      readonly unnamed: { readonly cause: unknown };
+    }
+> {
+  if (explicit) {
+    try {
+      yield { candidate: located(command), entry: command };
+    } catch (cause) {
+      yield { candidate: undefined, entry: command, unnamed: { cause } };
+    }
+    return;
+  }
+  // Match Node's Unix default search path when PATH is absent.
+  for (const { path, entry, unresolved } of posixPathCandidates(
+    command,
+    searchPath ?? "/usr/bin:/bin",
+    {
+      relativeEntries: "resolve",
+      workingDirectory: readCwd,
+      unreadableWorkingDirectory: "as-written",
+    },
+  ))
+    yield {
+      candidate: path,
+      entry,
+      ...(unresolved === undefined ? {} : { unnamed: unresolved }),
+    };
+}
+
+/**
  * The errors every native PATH search moves past: glibc's and musl's execvp,
  * Android's bionic and libuv's own search on macOS. At any other error, such
  * as a symlink loop, a stale NFS handle or an I/O error, some of them stop,
@@ -237,9 +283,10 @@ export const searchesDiffer = (code: string | undefined): boolean =>
  * libuv on macOS. A shorter entry with an over-long component still fails
  * with ENAMETOOLONG. Elsewhere, as on Android, nothing is skipped by length.
  */
-const PATH_MAX = (
-  { linux: 4096, darwin: 1024 } as Partial<Record<NodeJS.Platform, number>>
-)[process.platform];
+const PATH_MAX: Partial<Record<NodeJS.Platform, number>> = {
+  linux: 4096,
+  darwin: 1024,
+};
 
 const systemErrorCode = (cause: unknown): string | undefined =>
   typeof cause === "object" &&

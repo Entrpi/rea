@@ -6,7 +6,7 @@ import type {
   RawBinaryLoad,
   RawOnlyArchitecture,
 } from "./binaryTargetTypes.js";
-import type { ExecutableFormatHint } from "./dosCom.js";
+import type { TargetFormatHint } from "./targetFormats.js";
 import type { JsonValue } from "./jsonValue.js";
 import {
   ARCHITECTURE_VARIANT_NAMES,
@@ -22,6 +22,7 @@ import {
   providerLanguageIdentitySchema,
   type ProviderLanguageSelection,
 } from "./providerLanguage.js";
+import { BinaryReader } from "./binaryContainer.js";
 import { err, ok, type Result } from "./result.js";
 
 /** Caller-visible CPU families admitted for headerless raw binaries. */
@@ -94,7 +95,7 @@ const validateRawBinaryLength = (length: number): Result<null, string> =>
  * CLI and MCP boundaries build it once; it reaches target admission unchanged.
  */
 export interface NativeLoadSelection {
-  readonly format?: ExecutableFormatHint;
+  readonly format?: TargetFormatHint;
   readonly architecture?: BinaryArchitecture;
   readonly entryPoint?: string;
   readonly baseAddress?: string;
@@ -285,6 +286,14 @@ const parseRawBinaryAddress = (
       );
 
 /**
+ * An odd 32-bit ARM address is how a Thumb function pointer is spelled, but
+ * the raw ARM lane without an architecture variant decodes ARM state only.
+ * Name that without assuming the caller's mode or adjusting the entry.
+ */
+const armThumbEntryNote =
+  "; an odd address can be a Thumb function pointer with bit 0 set, but raw-binary arm without architecture_variant decodes ARM state only, so the entry was not adjusted";
+
+/**
  * Validate the selected family, variant, base and entry, and that the mapped
  * image fits the CPU width. Without an entry, an M-profile load asks the
  * caller to read the vector table and finishes from its first two words.
@@ -363,7 +372,11 @@ export const admitRawBinary = (input: {
       entry.value % 4n !== 0n
     )
       return selectionRejected(
-        `raw-binary ${architecture.data} entry_point ${entry.canonical} must be 4-byte aligned`,
+        `raw-binary ${architecture.data} entry_point ${entry.canonical} must be 4-byte aligned${
+          architecture.data === "arm" && entry.value % 2n === 1n
+            ? armThumbEntryNote
+            : ""
+        }`,
         "entry_point",
         // An odd ARM entry is most often a Cortex-M Reset vector.
         architecture.data === "arm" && entry.value % 2n !== 0n
@@ -465,13 +478,14 @@ export const admitRawBinary = (input: {
           reason: `raw-binary vector table at ${table.canonical} could not be read in full`,
           constraint: "file_format_rejected",
         });
-      const view = new DataView(
-        words.buffer,
-        words.byteOffset,
-        words.byteLength,
+      // M-profile vector-table words are little-endian.
+      const reader = new BinaryReader(
+        Buffer.from(words.buffer, words.byteOffset, words.byteLength),
+        true,
+        "raw-binary",
       );
-      const stackPointer = hexWord(view.getUint32(0, true));
-      const resetWord = view.getUint32(4, true);
+      const stackPointer = hexWord(reader.u32(0));
+      const resetWord = reader.u32(4);
       const reset = hexWord(resetWord);
       const observed = {
         vector_table_address: table.canonical,
@@ -714,7 +728,7 @@ const PROVIDER_LANGUAGE_RAW_ONLY =
 
 /** Describe the pairing of the selected load inputs without performing I/O. */
 export const rawBinarySelectionError = (
-  input: RawSelectionInput & { readonly format?: ExecutableFormatHint },
+  input: RawSelectionInput & { readonly format?: TargetFormatHint },
 ): LoadSelectionIssue | undefined => {
   const hasArchitecture = input.architecture !== undefined;
   const hasEntry = input.entryPoint !== undefined;

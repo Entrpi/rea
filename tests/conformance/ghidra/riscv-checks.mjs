@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { FIXTURE_TOOLS, fixtureCommand } from "./fixture-toolchain.mjs";
 
 const execute = promisify(execFile);
 
@@ -608,15 +609,15 @@ export function parseRiscvFarCalls(listing) {
 }
 
 /** Disassemble fixture symbols with an independent LLVM tool. */
-const disassembleRiscvSymbols = async (path, symbols) => {
-  const command = process.env.REA_RISCV_OBJDUMP ?? "llvm-objdump";
+const disassembleRiscvSymbols = async (path, symbols, run) => {
+  const command = fixtureCommand(FIXTURE_TOOLS.riscvObjdump);
   const options = {
     env: { ...process.env, LC_ALL: "C" },
     timeout: 10000,
     maxBuffer: 1024 * 1024,
   };
-  const version = await execute(command, ["--version"], options);
-  const { stdout, stderr } = await execute(
+  const version = await run(command, ["--version"], options);
+  const { stdout, stderr } = await run(
     command,
     [
       "-d",
@@ -635,16 +636,22 @@ const disassembleRiscvSymbols = async (path, symbols) => {
 };
 
 /** Disassemble the typed fixture's callers with an independent LLVM tool. */
-export async function inspectRiscvCallSites(path, callers) {
-  const { listing, ...tool } = await disassembleRiscvSymbols(path, callers);
+export async function inspectRiscvCallSites(path, callers, run = execute) {
+  const { listing, ...tool } = await disassembleRiscvSymbols(
+    path,
+    callers,
+    run,
+  );
   return { ...tool, calls: parseRiscvCallSites(listing) };
 }
 
 /** Find the unrelaxed calls of the soft-float fixture's no-return caller. */
-export async function inspectRiscvFarCalls(path) {
-  const { listing, ...tool } = await disassembleRiscvSymbols(path, [
-    "rea_riscv_stop_caller",
-  ]);
+export async function inspectRiscvFarCalls(path, run = execute) {
+  const { listing, ...tool } = await disassembleRiscvSymbols(
+    path,
+    ["rea_riscv_stop_caller"],
+    run,
+  );
   return { ...tool, calls: parseRiscvFarCalls(listing) };
 }
 

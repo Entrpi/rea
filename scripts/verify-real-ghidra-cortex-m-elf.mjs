@@ -1,17 +1,11 @@
 #!/usr/bin/env node
 // Real-Ghidra lane for M-profile ARM ELF executables: each variant's pinned
 // decoder, float passing, header-selected images, and the language override.
+import { VerifierFixture } from "./lib/verifier-fixture.mjs";
+import { canonicalOutputSchema } from "./lib/canonical-output-schema.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import {
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  rm,
-  writeFile,
-} from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -35,6 +29,7 @@ import {
   buildCortexMElfFixtures,
   llvmFunctionInstructions,
 } from "../tests/conformance/ghidra/cortex-m-elf-fixture.mjs";
+import { SUPPORTED_GHIDRA_VERSION } from "../dist/ghidra/GhidraReleasePolicy.js";
 import { inspectVerifierGhidraInstallation } from "./lib/ghidra-installation-inspection.mjs";
 import { sameThumbMnemonic } from "./lib/llvm-thumb-oracle.mjs";
 import {
@@ -64,7 +59,7 @@ const installation = await inspectVerifierGhidraInstallation({
     : { javaHome: process.env.JAVA_HOME }),
 });
 assert.equal(installation.status, "available", JSON.stringify(installation));
-assert.equal(installation.providerVersion, "12.1.4");
+assert.equal(installation.providerVersion, SUPPORTED_GHIDRA_VERSION);
 
 const tools = {
   clang: process.env.REA_CLANG ?? "clang",
@@ -77,7 +72,10 @@ const entrypoint = fileURLToPath(new URL("./rea.mjs", import.meta.url));
 const run = createVerifierRun();
 // Every LLVM and CLI command runs as an owned process tree with a deadline.
 const commands = await createVerifierCommands();
-const workspace = await mkdtemp(join(tmpdir(), "rea-cortex-m-elf-proof-"));
+const workspaceFixture = await VerifierFixture.open({
+  prefix: "rea-cortex-m-elf-proof-",
+});
+const workspace = workspaceFixture.path;
 const runtime = join(workspace, "runtime");
 const fixtureDirectory = join(workspace, "fixtures");
 await mkdir(runtime);
@@ -142,7 +140,7 @@ const call = async (name, args, expected) => {
     `${name}: ${JSON.stringify(validate.errors)}`,
   );
   if (!lifecycle && expected !== undefined) {
-    assert.equal(admitted.subject.digest.sha256, expected.sha256);
+    assert.equal(admitted.subject.identity.sha256, expected.sha256);
     // Provider operations may commit their own options, but the import lane
     // stays the session's; inspect_native_api reports its workflow profile.
     if (name !== "inspect_native_api")
@@ -169,15 +167,13 @@ try {
   addFormats(ajv);
   validators = new Map();
   for (const tool of (await client.listTools()).tools) {
-    assert.ok(
-      ajv.validateSchema(tool.outputSchema),
-      `${tool.name}: invalid schema`,
-    );
+    const outputSchema = canonicalOutputSchema(tool.name);
+    assert.ok(ajv.validateSchema(outputSchema), `${tool.name}: invalid schema`);
     const existing =
-      typeof tool.outputSchema.$id === "string"
-        ? ajv.getSchema(tool.outputSchema.$id)
+      typeof outputSchema.$id === "string"
+        ? ajv.getSchema(outputSchema.$id)
         : undefined;
-    validators.set(tool.name, existing ?? ajv.compile(tool.outputSchema));
+    validators.set(tool.name, existing ?? ajv.compile(outputSchema));
   }
   const built = await buildCortexMElfFixtures(fixtureDirectory, {
     ...tools,
@@ -252,7 +248,7 @@ assert.deepEqual(
   [],
   `Owned Ghidra runtime survived close; retained workspace: ${workspace}`,
 );
-await rm(workspace, { recursive: true, force: true });
+await workspaceFixture.release();
 console.log(
   JSON.stringify(
     { verifier_run: completed, ...summary, cleanup: "complete" },
@@ -310,9 +306,9 @@ async function verifyImage(fixture, stripped) {
       {
         language_id: language,
         compiler_spec_id: "default",
-        language_selection: "provider-pinned-v1",
+        language_selection: "provider-pinned",
         arm_support_lane: GHIDRA_ARM_ELF_LANES[fixture.variant],
-        processor_labels: "not-applied-v1",
+        processor_labels: "not-applied",
         arm_elf: {
           elf_class: 32,
           byte_order: "little",
@@ -600,7 +596,7 @@ async function verifyIdentity(fixture) {
   const snapshot = parseAnalysisSnapshot(
     JSON.parse(await readFile(snapshotPath, "utf8")),
   );
-  assert.equal(snapshot.target.sha256, fixture.sha256);
+  assert.equal(snapshot.target.identity.sha256, fixture.sha256);
   assert.equal(
     snapshot.binding.analysis_profile.parameters.arm_support_lane,
     GHIDRA_ARM_ELF_LANES[fixture.variant],
@@ -631,7 +627,7 @@ async function verifyIdentity(fixture) {
   assert.equal(configured.analysis_profile.parameters.language_id, override);
   assert.equal(
     configured.analysis_profile.parameters.language_selection,
-    "configured-v1",
+    "configured",
   );
   assert.equal(
     configured.analysis_profile.parameters.arm_support_lane,
@@ -688,7 +684,7 @@ async function verifyMatchingOverride(fixture) {
   });
   const { parameters } = evidence.analysis_profile;
   assert.equal(parameters.language_id, language);
-  assert.equal(parameters.language_selection, "configured-v1");
+  assert.equal(parameters.language_selection, "configured");
   assert.equal(
     parameters.arm_support_lane,
     GHIDRA_ARM_ELF_LANES[fixture.variant],

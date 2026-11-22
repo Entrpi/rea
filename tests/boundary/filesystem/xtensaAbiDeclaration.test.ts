@@ -138,7 +138,7 @@ describe("Xtensa ELF target resolution", () => {
     expect(isGhidraXtensaCall0Target(target)).toBe(true);
     expect(ghidraXtensaProfileParameters(target)).toMatchObject({
       xtensa_elf: { abi: "call0" },
-      xtensa_support_lane: "elf32-le-exec-call0-generic-v1",
+      xtensa_support_lane: "elf32-le-exec-call0-generic",
       xtensa_call0_prototype: "call0-prototype-v1",
     });
     const windowed = await resolveFixture(xtensaElf());

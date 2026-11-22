@@ -28,7 +28,7 @@ export type GhidraRiscvCallingConvention =
  * pinned language's default `riscv32-fp.cspec` model, which is ilp32d;
  * docs/providers/ghidra-riscv.md states the rules of each ABI.
  */
-export const GHIDRA_RISCV_CALLING_CONVENTIONS: Readonly<
+const GHIDRA_RISCV_CALLING_CONVENTIONS: Readonly<
   Record<
     GhidraRiscvCallingConvention,
     { readonly abi: string; readonly prototype: string }
@@ -38,10 +38,14 @@ export const GHIDRA_RISCV_CALLING_CONVENTIONS: Readonly<
   "ilp32f-prototype-v1": { abi: "ilp32f", prototype: "__rea_ilp32f" },
 };
 
+/** Admitted load models for each lane. */
+type GhidraRiscvLoadModel = "exec" | "pie";
+
 /** One admitted ELF class and declared float ABI. */
-export interface GhidraRiscvLane {
+interface GhidraRiscvLane {
   readonly elfClass: 32 | 64;
   readonly floatAbi: RiscvFloatAbi;
+  readonly loadModels: readonly GhidraRiscvLoadModel[];
   /** Absent: Ghidra's stock double-float model applies unchanged. */
   readonly callingConvention?: GhidraRiscvCallingConvention;
   /** Extensions `Tag_RISCV_arch` must declare for the float ABI to exist. */
@@ -54,13 +58,19 @@ export interface GhidraRiscvLane {
 }
 
 /** Every class and float ABI pair the Ghidra lane admits; others are refused. */
-export const GHIDRA_RISCV_LANES: readonly GhidraRiscvLane[] = [
-  { elfClass: 64, floatAbi: "double" },
-  { elfClass: 32, floatAbi: "double" },
-  { elfClass: 32, floatAbi: "soft", callingConvention: "ilp32-prototype-v1" },
+const GHIDRA_RISCV_LANES: readonly GhidraRiscvLane[] = [
+  { elfClass: 64, floatAbi: "double", loadModels: ["exec", "pie"] },
+  { elfClass: 32, floatAbi: "double", loadModels: ["exec", "pie"] },
+  {
+    elfClass: 32,
+    floatAbi: "soft",
+    loadModels: ["exec"],
+    callingConvention: "ilp32-prototype-v1",
+  },
   {
     elfClass: 32,
     floatAbi: "single",
+    loadModels: ["exec"],
     callingConvention: "ilp32f-prototype-v1",
     requiredExtensions: ["f"],
     excludedExtensions: {
@@ -72,15 +82,19 @@ export const GHIDRA_RISCV_LANES: readonly GhidraRiscvLane[] = [
 ];
 
 /** Lane ids are built from their fields, so a new ABI or load model adds a value. */
-export const ghidraRiscvSupportLane = (lane: GhidraRiscvLane): string =>
-  `elf${lane.elfClass}-exec-le-${lane.floatAbi}-float-generic-v1`;
+const ghidraRiscvSupportLane = (lane: {
+  readonly elfClass: 32 | 64;
+  readonly floatAbi: RiscvFloatAbi;
+  readonly loadModel?: GhidraRiscvLoadModel;
+}): string =>
+  `elf${lane.elfClass}-${lane.loadModel ?? "exec"}-le-${lane.floatAbi}-float-generic-v1`;
 
 /**
  * Extensions Ghidra 12.1.4's generic RV32 language implements with p-code, by
  * the names `Tag_RISCV_arch` records. Lanes with a calling-convention policy
  * admit an image only when it declares an RV32I base and only these.
  */
-export const GHIDRA_RISCV32_DECODED_EXTENSIONS: ReadonlySet<string> = new Set([
+const GHIDRA_RISCV32_DECODED_EXTENSIONS: ReadonlySet<string> = new Set([
   "m",
   "a",
   "f",
@@ -263,18 +277,21 @@ const witnessLabel = (witness: ElfSectionWitness): string =>
 
 /**
  * Every lane needs the section table: a section that shares an executable
- * section's addresses decides where Ghidra 12.1.4 loads that code.
+ * section's addresses decides where Ghidra 12.2 loads that code.
  */
 const ghidraRiscvSectionOverlapRefusal = (
   overlap: ElfSectionOverlap | undefined,
+  loadModel: GhidraRiscvLoadModel,
 ): string | null => {
   if (overlap === undefined)
     return "This RISC-V lane requires the image's section table, which was not inspected; overlapping sections decide where Ghidra loads code.";
   if (overlap.status === "unavailable")
     return `This RISC-V lane requires a readable section table: ${overlap.reason}.`;
+  if (overlap.status === "code-reservation" && loadModel === "pie")
+    return `Section ${sectionLabel(overlap.reservation)} reserves the addresses of executable section ${sectionLabel(overlap.code)}; this lane verifies that preparation for fixed-address ET_EXEC images only, so a position-independent executable (PIE) with it needs separate load verification.`;
   if (overlap.status !== "unsupported") return null;
   const [first, second] = overlap.witnesses;
-  return `Sections ${witnessLabel(first)} and ${witnessLabel(second)} share addresses, so Ghidra 12.1.4's ELF loader would put one of them in an overlay address space. This lane prepares only one NOBITS section that starts at an executable PROGBITS section's address and covers it, with no other section overlapping either; see docs/providers/ghidra-riscv.md.`;
+  return `Sections ${witnessLabel(first)} and ${witnessLabel(second)} share addresses, so Ghidra 12.2's ELF loader would put one of them in an overlay address space. This lane prepares only one NOBITS section that starts at an executable PROGBITS section's address and covers it, with no other section overlapping either; see docs/providers/ghidra-riscv.md.`;
 };
 
 /**
@@ -302,16 +319,18 @@ export const ghidraRiscvUnsupportedReason = (
     return "EF_RISCV_RVE declares the embedded 16-register ABI (x0-x15), which needs its own processor specification and compiler verification.";
   if ((metadata.flags & EF_RISCV_TSO) !== 0)
     return "EF_RISCV_TSO declares the total-store-order memory model; this lane verifies the baseline model only.";
-  if (metadata.type !== ET_EXEC)
-    return `This Ghidra RISC-V lane supports fixed-address ET_EXEC only; ${
-      metadata.type === ET_REL
-        ? "relocatable"
-        : metadata.type === ET_DYN
-          ? "shared and position-independent"
-          : `e_type ${metadata.type}`
-    } images need separate load verification. ET_EXEC alone does not establish static linkage, which this lane does not inspect.`;
+  if (metadata.type === ET_DYN && !metadata.hasInterpreter)
+    return "This Ghidra RISC-V lane supports fixed-address ET_EXEC and position-independent executables (PIE) only; shared libraries without PT_INTERP need separate load verification.";
+  if (metadata.type !== ET_EXEC && metadata.type !== ET_DYN)
+    return `This Ghidra RISC-V lane supports fixed-address ET_EXEC and position-independent executables (PIE) only; ${
+      metadata.type === ET_REL ? "relocatable" : `e_type ${metadata.type}`
+    } images need separate load verification.`;
   const lane = ghidraRiscvLane(metadata);
   if (lane === undefined) return ghidraRiscvFloatAbiRefusal(metadata);
+  const loadModel: GhidraRiscvLoadModel =
+    metadata.type === ET_DYN ? "pie" : "exec";
+  if (!lane.loadModels.includes(loadModel))
+    return `This Ghidra RISC-V ${lane.floatAbi}-float lane supports fixed-address ET_EXEC only; position-independent executables (PIE) need separate load verification.`;
   const unsupportedFlags = (metadata.flags & ~EF_RISCV_DECLARED_BITS) >>> 0;
   if (unsupportedFlags !== 0)
     return `RISC-V e_flags declares bits outside the verified lane (0x${unsupportedFlags.toString(16)}); reserved or newer declarations are not treated as compatible with this profile.`;
@@ -319,7 +338,9 @@ export const ghidraRiscvUnsupportedReason = (
     lane.callingConvention === undefined
       ? null
       : ghidraRiscvIsaRefusal(metadata.isa, lane);
-  return isa ?? ghidraRiscvSectionOverlapRefusal(metadata.sectionOverlap);
+  return (
+    isa ?? ghidraRiscvSectionOverlapRefusal(metadata.sectionOverlap, loadModel)
+  );
 };
 
 /** The memory-map preparation an admitted target's sections need, if any. */
@@ -400,6 +421,7 @@ export const ghidraRiscvProfileParameters = (
     target.riscv === undefined
   )
     return {};
+  const isPie = target.riscv.type === ET_DYN;
   const floatAbi = riscvFloatAbi(target.riscv.flags);
   const convention = ghidraRiscvCallingConvention(target);
   const preparation = ghidraRiscvLoadPreparation(target);
@@ -417,6 +439,14 @@ export const ghidraRiscvProfileParameters = (
       ...(convention === undefined || isa?.status !== "declared"
         ? {}
         : { float_abi: floatAbi, arch: isa.arch }),
+      ...(isPie
+        ? {
+            has_interpreter: true,
+            load_model: "pie",
+            expected_default_image_base:
+              target.riscv.elfClass === 32 ? "0x10000" : "0x100000",
+          }
+        : {}),
     },
     ...(convention === undefined
       ? {}
@@ -431,6 +461,7 @@ export const ghidraRiscvProfileParameters = (
     riscv_support_lane: ghidraRiscvSupportLane({
       elfClass: target.riscv.elfClass,
       floatAbi,
+      ...(isPie ? { loadModel: "pie" } : {}),
     }),
   };
 };
@@ -458,7 +489,9 @@ export const ghidraRiscvLimitations = (
           `\`.riscv.attributes\` declares \`${isa.arch}\`. Every declared extension is in the set this lane decodes; the declaration does not prove that every instruction belongs to it.`,
         ]
       : []),
-    "Admission reads `e_type` and section overlaps, not program headers: a fixed-address ET_EXEC declaration does not establish static linkage, and `PT_INTERP` and dynamic dependencies are not inspected by this lane.",
+    target.riscv.type === ET_DYN
+      ? `Position-independent executable (PIE): Ghidra assigns analysis coordinates from its default image base (${target.riscv.elfClass === 32 ? "0x10000" : "0x100000"}). Runtime load addresses and dynamic linker relocation are not executed or verified by this lane.`
+      : "Admission reads `e_type` and section overlaps: a fixed-address ET_EXEC declaration does not establish static linkage, and an ET_EXEC image's `PT_INTERP` and dynamic dependencies do not change its admission or analysis.",
   ];
 };
 
@@ -605,7 +638,7 @@ export const ghidraRiscvLoadPreparationLimitations = (
   const code = sectionLabel(expected.code);
   const reservation = sectionLabel(expected.reservation);
   return [
-    `RISC-V ELF load layout: NOBITS section ${reservation} reserves the addresses of executable section ${code} (${expected.code.address}, ${expected.code.size} bytes). When the reservation follows the code in the section table, Ghidra 12.1.4's ELF loader puts the code in an overlay address space, which its DWARF import, call-frame entries and default-space references do not reach; see docs/providers/ghidra-riscv.md.`,
+    `RISC-V ELF load layout: NOBITS section ${reservation} reserves the addresses of executable section ${code} (${expected.code.address}, ${expected.code.size} bytes). When the reservation follows the code in the section table, Ghidra 12.2's ELF loader puts the code in an overlay address space, which its DWARF import, call-frame entries and default-space references do not reach; see docs/providers/ghidra-riscv.md.`,
     report === undefined || "refused" in report
       ? `Before analysis REA moves ${code} out of such an overlay into the default address space, with the same file bytes and offsets, and keeps ${reservation} as an uninitialized overlay.`
       : report.outcome === "moved"

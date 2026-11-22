@@ -1,4 +1,5 @@
 import { createHash, type Hash } from "node:crypto";
+import { byteToHex } from "../../kernel/byteToHex.js";
 
 import type {
   Esp8266ImageMetadata,
@@ -159,7 +160,7 @@ export const admitEsp8266ImageHeader = (
   if (header[0] !== ESP_IMAGE_MAGIC)
     return err({
       kind: "format",
-      message: `ESP8266 image header needs magic 0xe9; the file begins with 0x${(header[0] ?? 0).toString(16).padStart(2, "0")}`,
+      message: `ESP8266 image header needs magic 0xe9; the file begins with 0x${byteToHex(header[0] ?? 0)}`,
     });
   const count = header[1] ?? 0;
   if (count > ESP_IMAGE_MAX_SEGMENTS)

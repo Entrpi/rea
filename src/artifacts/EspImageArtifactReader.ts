@@ -21,7 +21,7 @@ import {
   ESP_SIGNATURE_BLOCK_BYTES,
   offsetText,
 } from "../domain/firmware/espImageStructures.js";
-import { ArtifactReaderFailure } from "./ArtifactReader.js";
+import { ArtifactReaderFailure } from "../resources/index.js";
 import { readEspFlashRange } from "./EspFlashRegionReads.js";
 import {
   PositionalArtifactReader,
@@ -135,10 +135,7 @@ export class EspImageArtifactReader extends PositionalArtifactReader {
     }
     return {
       entries,
-      coverage:
-        image.coverage === "unknown" || limitations.length > 0
-          ? { status: image.coverage, limitations }
-          : undefined,
+      coverage: { status: image.coverage, limitations },
     };
   }
 

@@ -10,12 +10,13 @@ import { GHIDRA_INVENTORY_OPERATIONS } from "./GhidraInventoryOperations.js";
 import { GHIDRA_FUNCTION_OPERATIONS } from "./GhidraFunctionOperations.js";
 import { ghidraExtensionResultSchema } from "./extensions/GhidraExtensions.js";
 import { GHIDRA_MIPS_SOFT_FLOAT_STORAGE } from "./GhidraMipsProfile.js";
-import { GHIDRA_XTENSA_CALL0_PROTOTYPE } from "./GhidraXtensaProfile.js";
 import {
   GHIDRA_RISCV_CALLING_CONVENTION_IDS,
   GHIDRA_RISCV_LOAD_PREPARATION,
   GHIDRA_RISCV_REFUSAL_MAX_LENGTH,
 } from "./GhidraRiscvProfile.js";
+import { GHIDRA_XTENSA_CALL0_PROTOTYPE } from "./GhidraXtensaProfile.js";
+import { isRecord } from "../kernel/isRecord.js";
 
 /** Exact methods proved by the selected Program bridge handshake. */
 export const GHIDRA_SESSION_CAPABILITIES = [
@@ -121,6 +122,13 @@ const sessionInfoSchema = z
       })
       .strict()
       .optional(),
+    dwarf_calling_convention: z
+      .object({
+        calling_convention: z.string().min(1),
+        status: z.enum(["applied", "not_applicable"]),
+      })
+      .strict()
+      .optional(),
     riscv_calling_convention: z
       .union([
         z.strictObject({
@@ -133,13 +141,6 @@ const sessionInfoSchema = z
           refused: z.string().min(1).max(GHIDRA_RISCV_REFUSAL_MAX_LENGTH),
         }),
       ])
-      .optional(),
-    dwarf_calling_convention: z
-      .object({
-        calling_convention: z.string().min(1),
-        status: z.enum(["applied", "not_applicable"]),
-      })
-      .strict()
       .optional(),
     // Written by ReaGhidraPrepareElfLoad before auto-analysis.
     elf_load_preparation: z
@@ -235,6 +236,7 @@ export const parseGhidraSessionInfo = (
     readonly expectedExistingProject?: boolean;
     readonly expectedLanguageId?: string;
     readonly expectedCompilerSpecId?: string;
+    readonly expectedImageBase?: string;
   },
 ): Result<GhidraSessionInfo, Error> => {
   const parsed = sessionInfoSchema.safeParse(value);
@@ -255,6 +257,8 @@ export const parseGhidraSessionInfo = (
     (expected.expectedCompilerSpecId !== undefined &&
       parsed.data.target.compiler_spec_id !==
         expected.expectedCompilerSpecId) ||
+    (expected.expectedImageBase !== undefined &&
+      parsed.data.target.image_base !== expected.expectedImageBase) ||
     new Set(parsed.data.capabilities).size !== expectedCapabilities.length ||
     expectedCapabilities.some(
       (capability) => !parsed.data.capabilities.includes(capability),
@@ -273,8 +277,6 @@ export const parseGhidraSessionInfo = (
 
 /** Require acknowledgement that the private bridge loop has ended. */
 export const isGhidraShutdownAcknowledgement = (value: JsonValue): boolean =>
-  typeof value === "object" &&
-  value !== null &&
-  !Array.isArray(value) &&
+  isRecord(value) &&
   value.shutdown === true &&
   value.project_ephemeral === true;

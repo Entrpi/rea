@@ -628,9 +628,9 @@ describe("raw-binary provider-language load image", () => {
         ...rawLoadAtEntry("0x0"),
         architectureVariant: "armv7-m",
       }),
-    ).toBe("not-applied-v1");
+    ).toBe("not-applied");
     expect(ghidraRawProcessorLabels(languageImage().target.rawLoad)).toBe(
-      "not-applied-v1",
+      "not-applied",
     );
   });
 

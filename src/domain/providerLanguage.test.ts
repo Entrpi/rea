@@ -12,7 +12,7 @@ import {
   PROVIDER_LANGUAGE_PAIRING,
   rawBinarySelectionError,
 } from "./rawBinary.js";
-import { executableFormatHintSchema } from "./dosCom.js";
+import { TARGET_FORMAT_HINTS } from "./targetFormats.js";
 
 const analysisSnapshotTargetSchema = analysisSnapshotSchema.shape.target;
 
@@ -106,7 +106,7 @@ describe("provider language pairing", () => {
   });
 
   it.each(
-    [undefined, ...executableFormatHintSchema.options].filter(
+    [undefined, ...TARGET_FORMAT_HINTS].filter(
       (format) => format !== "raw-binary",
     ),
   )("refuses a provider language with format %s", (format) => {
@@ -163,49 +163,46 @@ describe("provider language persisted shapes", () => {
     ).toBe(false);
   });
 
-  it("identifies a snapshot target with a null architecture only by its provider language", () => {
-    const target = {
+  // A snapshot target is its file identity: a raw load selects its entry and,
+  // beyond a legacy load, its raw_load.
+  const snapshotTarget = (
+    architecture: string | null,
+    raw_load: Readonly<Record<string, unknown>>,
+  ) => ({
+    kind: "executable",
+    identity: {
+      kind: "file",
       sha256,
-      kind: "executable",
       format: "raw-binary",
-      entry_point: "0x8c000010",
-    } as const;
+      architecture,
+      selection: { kind: "entry-point", entry_point: "0x8c000010", raw_load },
+    },
+  });
+
+  it("identifies a snapshot target with a null architecture only by its provider language", () => {
     expect(
-      analysisSnapshotTargetSchema.safeParse({
-        ...target,
-        architecture: null,
-        raw_load: rawLoad,
-      }).success,
+      analysisSnapshotTargetSchema.safeParse(snapshotTarget(null, rawLoad))
+        .success,
     ).toBe(true);
     expect(
-      analysisSnapshotTargetSchema.safeParse({
-        ...target,
-        architecture: null,
-        raw_load: { ...rawLoad, provider_language: undefined },
-      }).success,
+      analysisSnapshotTargetSchema.safeParse(
+        snapshotTarget(null, { ...rawLoad, provider_language: undefined }),
+      ).success,
     ).toBe(false);
     expect(
-      analysisSnapshotTargetSchema.safeParse({
-        ...target,
-        architecture: "arm",
-        raw_load: rawLoad,
-      }).success,
+      analysisSnapshotTargetSchema.safeParse(snapshotTarget("arm", rawLoad))
+        .success,
     ).toBe(false);
   });
 
   it("keeps the provider language opaque in raw load identity", () => {
     expect(
-      analysisSnapshotTargetSchema.safeParse({
-        sha256,
-        kind: "executable",
-        format: "raw-binary",
-        architecture: null,
-        entry_point: "0x8c000010",
-        raw_load: {
+      analysisSnapshotTargetSchema.safeParse(
+        snapshotTarget(null, {
           ...rawLoad,
           provider_language: { ...providerLanguage, extra: true },
-        },
-      }).success,
+        }),
+      ).success,
     ).toBe(false);
   });
 

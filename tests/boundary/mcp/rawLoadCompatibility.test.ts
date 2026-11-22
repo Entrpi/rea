@@ -1,6 +1,3 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
-
 import { McpServer } from "@modelcontextprotocol/server";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
@@ -9,8 +6,6 @@ import { z } from "zod";
 import { parseConfig } from "../../../src/config/parseConfig.js";
 import { toolContract } from "../../../src/contracts/toolContracts.js";
 import {
-  parseAnalysisSnapshot,
-  snapshotBindingMismatch,
   snapshotMatchesTarget,
   snapshotTarget,
 } from "../../../src/domain/analysisSnapshot.js";
@@ -45,17 +40,6 @@ import { silentLogger } from "../../../src/logger.js";
 import { toolRegistrationOptions } from "../../../src/server/toolRegistrationOptions.js";
 import { cortexM0Fixture } from "../../conformance/ghidra/cortexM.fixture.mjs";
 import { mcpTest } from "../../support/mcp/mcpFixture.js";
-
-// Written by REA at d6f88becd, before base_address existed, from the raw ARM
-// load-image fixture with its Ghidra profile. Never regenerate it: it stands
-// for snapshots that callers already saved.
-const HISTORICAL_SNAPSHOT =
-  "tests/fixtures/snapshots/rawBinaryBeforeBaseAddress.json";
-
-const historicalSnapshot = async () =>
-  parseAnalysisSnapshot(
-    JSON.parse(await readFile(resolve(HISTORICAL_SNAPSHOT), "utf8")),
-  );
 
 const ghidraProfile = async (target: BinaryTarget) => {
   const config = parseConfig({ GHIDRA_INSTALL_DIR: "/ghidra" });
@@ -103,11 +87,10 @@ const segmentsImage = () => {
   return { target: f.target, image: image.value };
 };
 
-describe("raw-binary snapshots saved before base_address", () => {
-  it("keep their target and load-image facts for the same load admitted today", async () => {
-    const snapshot = await historicalSnapshot();
+describe("raw-binary loads without the M-profile inputs", () => {
+  it("keep the target selection and profile they had before those inputs", async () => {
     const bytes = armBxLrImage();
-    const f = fixtureRawBinaryLoadImage(
+    const { target } = fixtureRawBinaryLoadImage(
       bytes,
       admittedRawLoad({
         architecture: "arm",
@@ -115,95 +98,28 @@ describe("raw-binary snapshots saved before base_address", () => {
         fileBytes: bytes.length,
       }),
     );
-    const { target } = f;
-    const profile = await ghidraProfile(target);
-    expect(snapshotMatchesTarget(snapshot.target, target)).toBe(true);
-    // Upstream's instruction-status (#7823, #8777), load-image observation
-    // (#8531), procedure search (#8520), reference, byte-search (#8840,
-    // #8608), data-type (#8602), inventory-search (#8376), value-flow (#8651, #9706)
-    // and call-coverage (#8340) revisions keep every Ghidra snapshot saved
-    // before them from replaying, and on this integration branch so does
-    // Change 2's no-return revision. Apart from those parameters, the profile
-    // is the one this snapshot recorded.
-    const mismatch = snapshotBindingMismatch(snapshot, target, profile);
-    expect(mismatch).not.toHaveProperty("target");
-    expect(mismatch).toHaveProperty("profile_digest");
-    const {
-      instruction_status: status,
-      load_image_observations: observations,
-      procedure_search: search,
-      no_return_repair: repair,
-      function_references: functionReferences,
-      instruction_references: instructionReferences,
-      byte_search_boundary: byteSearch,
-      byte_search_coverage: byteSearchCoverage,
-      data_type_observations: dataTypes,
-      inventory_search_projection: inventorySearch,
-      value_flow_effect_scope: valueFlow,
-      native_value_flow_projection: valueFlowProjection,
-      call_relationship_coverage: callCoverage,
-      ...parameters
-    } = profile.parameters;
-    const {
-      call_relationship_coverage: recordedCallCoverage,
-      load_image_observations: recordedObservations,
-      no_return_repair: recordedRepair,
-      function_references: recordedFunctionReferences,
-      instruction_references: recordedInstructionReferences,
-      ...recorded
-    } = snapshot.binding.analysis_profile.parameters;
-    expect(status).toBe("unlisted-and-containing-code-data-v3");
-    expect(search).toBe("primary-and-exact-entry-symbol-names-v1");
-    expect(byteSearch).toBe("contiguous-eligible-initialized-blocks-v1");
-    expect(dataTypes).toBe("bit-field-base-and-lookup-v1");
-    expect(inventorySearch).toBe("provider-inventory-facts-v1");
-    expect(byteSearchCoverage).toBe("separate-loaded-overlays-v1");
-    expect(valueFlow).toBe("pcode-load-store-explicit-v1");
-    expect(valueFlowProjection).toBe("accepted-runtime-budgets-v1");
-    expect([recordedCallCoverage, callCoverage]).toEqual([
-      "function-body-call-coverage-v5",
-      "observed-call-inventory-and-discovery-v7",
-    ]);
-    expect([recordedObservations, observations]).toEqual([
-      "source-mappings-entry-context-v2",
-      "source-mappings-entry-context-relocation-symbol-v3",
-    ]);
-    expect([recordedRepair, repair]).toEqual([
-      "returning-imports-decoded-return-v2",
-      "returning-imports-decoded-return-v3",
-    ]);
-    expect([recordedFunctionReferences, functionReferences]).toEqual([
-      "complete-body-and-entry-reference-manager-v2",
-      "complete-body-and-entry-reference-manager-v3",
-    ]);
-    expect([recordedInstructionReferences, instructionReferences]).toEqual([
-      "exact-address-incoming-without-synthetic-entry-v2",
-      "exact-address-incoming-without-synthetic-entry-v3",
-    ]);
-    expect(parameters).toEqual(recorded);
-    // The saved image still parses, and its facts equal what this version
-    // produces. Limitation prose is not frozen; later versions may reword it.
-    const entry = snapshot.entries.find(
-      ({ operation }) => operation === "inspect_native_load_image",
-    );
-    if (entry === undefined) throw new Error("fixture has no load image");
-    const current = attestGhidraRawBinaryLoadImage(
-      f.snapshot,
-      f.target,
-      f.observation,
-    );
-    if (!current.ok) throw new Error(current.error);
-    const { limitations: _saved, ...saved } = nativeLoadImageSchema.parse(
-      entry.execution.result,
-    );
-    const { limitations: _produced, ...produced } = current.value;
-    expect(saved).toEqual(produced);
+    // A legacy load selects its entry only, as before these inputs.
+    expect(snapshotTarget(target).identity.selection).toStrictEqual({
+      kind: "entry-point",
+      entry_point: "0x8000000",
+    });
+    const parameters = (await ghidraProfile(target)).parameters;
+    expect(parameters).toMatchObject({ entry_point: "0x8000000" });
+    for (const key of ["raw_load", "entry_context", "processor_labels"])
+      expect(parameters).not.toHaveProperty(key);
   });
 
-  it("does not replay for an M-profile load of the same file", async () => {
-    const snapshot = await historicalSnapshot();
+  it("are not the target or profile of an M-profile load of the same file", async () => {
     const bytes = armBxLrImage();
-    const { target } = fixtureRawBinaryLoadImage(
+    const legacy = fixtureRawBinaryLoadImage(
+      bytes,
+      admittedRawLoad({
+        architecture: "arm",
+        entryPoint: "0x08000000",
+        fileBytes: bytes.length,
+      }),
+    ).target;
+    const variant = fixtureRawBinaryLoadImage(
       bytes,
       admittedRawLoad({
         architecture: "arm",
@@ -212,11 +128,11 @@ describe("raw-binary snapshots saved before base_address", () => {
         entryPoint: "0x8000000",
         fileBytes: bytes.length,
       }),
+    ).target;
+    expect(snapshotMatchesTarget(snapshotTarget(legacy), variant)).toBe(false);
+    expect((await ghidraProfile(variant)).digest).not.toBe(
+      (await ghidraProfile(legacy)).digest,
     );
-    expect(snapshotMatchesTarget(snapshot.target, target)).toBe(false);
-    expect(
-      snapshotBindingMismatch(snapshot, target, await ghidraProfile(target)),
-    ).toHaveProperty("target");
   });
 });
 
@@ -233,7 +149,7 @@ describe("raw-binary load-image Evidence shapes", () => {
   });
 
   mcpTest(
-    "advertises output that accepts saved and segments images",
+    "advertises output that accepts raw-binary and segments images",
     async ({ mcp }) => {
       const contract = toolContract("inspect_native_load_image");
       const server = new McpServer({ name: "raw-load-images", version: "1" });
@@ -254,12 +170,18 @@ describe("raw-binary load-image Evidence shapes", () => {
       );
       const evidence = (result: JsonValue) =>
         createEvidence(
-          undefined,
-          { id: "ghidra", name: "Ghidra", version: "12.1.4" },
+          fixtureRawBinaryLoadImage().target,
+          { id: "ghidra", name: "Ghidra", version: "12.2" },
           { operation: contract.name, parameters: {}, result },
         );
-      const saved = (await historicalSnapshot()).entries[0]?.execution.result;
-      if (saved === undefined) throw new Error("fixture has no entry");
+      const f = fixtureRawBinaryLoadImage();
+      const legacyImage = attestGhidraRawBinaryLoadImage(
+        f.snapshot,
+        f.target,
+        f.observation,
+      );
+      if (!legacyImage.ok) throw new Error(legacyImage.error);
+      const saved = jsonValueSchema.parse(legacyImage.value);
       const image = jsonValueSchema.parse(segmentsImage().image);
       expect(validate(evidence(saved))).toBe(true);
       expect(validate(evidence(image))).toBe(true);
@@ -353,13 +275,13 @@ describe("provider-language shapes beside earlier readers", () => {
         .extend({ architecture: binaryArchitectureSchema })
         .safeParse(image).success,
     ).toBe(false);
-    const identity = snapshotTarget(target);
-    if (identity.format !== "raw-binary" || identity.raw_load === undefined)
+    const selection = snapshotTarget(target).identity.selection;
+    if (selection?.kind !== "entry-point" || selection.raw_load === undefined)
       throw new Error("expected a raw load identity");
     expect(
       rawLoadIdentitySchema
         .omit({ provider_language: true })
-        .safeParse(identity.raw_load).success,
+        .safeParse(selection.raw_load).success,
     ).toBe(false);
   });
 
@@ -414,8 +336,8 @@ describe("provider-language shapes beside earlier readers", () => {
       expect(
         output(
           createEvidence(
-            undefined,
-            { id: "ghidra", name: "Ghidra", version: "12.1.4" },
+            providerLanguageImage().target,
+            { id: "ghidra", name: "Ghidra", version: "12.2" },
             {
               operation: "inspect_native_load_image",
               parameters: {},

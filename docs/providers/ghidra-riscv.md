@@ -15,20 +15,22 @@ supported. Existing PE, managed and Mach-O architecture sets are unchanged.
 Headerless inputs use the separate [raw-binary admission
 boundary](raw-binary.md); raw RISC-V images are not supported.
 
-The Ghidra lane admits little-endian `ET_EXEC` images with no `EF_RISCV_RVE`,
-`EF_RISCV_TSO`, or any bit outside `EF_RISCV_RVC | EF_RISCV_FLOAT_ABI`, in one
-of four lanes:
+The Ghidra lane admits little-endian `ET_EXEC` images and position-independent
+executables (`ET_DYN` with `PT_INTERP`) with no `EF_RISCV_RVE`, `EF_RISCV_TSO`,
+or any bit outside `EF_RISCV_RVC | EF_RISCV_FLOAT_ABI`, in one of the supported
+lanes:
 
 - ELF64 or ELF32 images that declare `EF_RISCV_FLOAT_ABI_DOUBLE` use Ghidra's
   stock double-float model unchanged. Their `.riscv.attributes` is not read for
   admission.
-- ELF32 images that declare the soft-float ABI (`e_flags` float-ABI bits `0`,
-  ilp32) use REA's [ilp32 calling-convention policy](#ilp32). They must also
-  declare an RV32I base and only [decoded extensions](#isa-declarations) in
-  `Tag_RISCV_arch`.
-- ELF32 images that declare `EF_RISCV_FLOAT_ABI_SINGLE` (ilp32f) use REA's
-  [ilp32f calling-convention policy](#ilp32f). They must declare an RV32I base,
-  the F extension, only decoded extensions, and not the D extension.
+- ELF32 `ET_EXEC` images that declare the soft-float ABI (`e_flags` float-ABI
+  bits `0`, ilp32) use REA's [ilp32 calling-convention policy](#ilp32). They
+  must also declare an RV32I base and only [decoded extensions](#isa-declarations)
+  in `Tag_RISCV_arch`. Soft-float PIE images remain refused.
+- ELF32 `ET_EXEC` images that declare `EF_RISCV_FLOAT_ABI_SINGLE` (ilp32f)
+  use REA's [ilp32f calling-convention policy](#ilp32f). They must declare an
+  RV32I base, the F extension, only decoded extensions, and not the D
+  extension. Single-float PIE images remain refused.
 
 These are header declarations, not proof that every instruction conforms to
 that ISA.
@@ -36,57 +38,66 @@ that ISA.
 Provider selection returns the specific unsupported constraint rather than
 guessing a compatible profile:
 
-| Declaration                                                                           | Outcome                                                                                                                 |
-| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Little-endian ELF64 `ET_EXEC`, double-float ABI                                       | admitted, `RISCV:LE:64:default` + `gcc`, lane `elf64-exec-le-double-float-generic-v1`                                   |
-| Little-endian ELF32 `ET_EXEC`, double-float ABI                                       | admitted, `RISCV:LE:32:default` + `gcc`, lane `elf32-exec-le-double-float-generic-v1`                                   |
-| Little-endian ELF32 `ET_EXEC`, soft-float ABI, decoded extensions only                | admitted, `RISCV:LE:32:default` + `gcc` with the `__rea_ilp32` prototype, lane `elf32-exec-le-soft-float-generic-v1`    |
-| Little-endian ELF32 `ET_EXEC`, single-float ABI, F and decoded extensions             | admitted, `RISCV:LE:32:default` + `gcc` with the `__rea_ilp32f` prototype, lane `elf32-exec-le-single-float-generic-v1` |
-| ELF32 soft- or single-float ABI without `Tag_RISCV_arch`, or with any other extension | refused; the reason names the extensions outside the decoded set                                                        |
-| ELF32 single-float ABI without the F extension                                        | refused; the ABI needs F                                                                                                |
-| ELF32 single-float ABI with the D extension                                           | refused; Ghidra's model preserves more of `fs0`–`fs11` than the ABI does                                                |
-| ELF32 single-float image whose signatures `__rea_ilp32f` cannot express               | refused after analysis; the reason names the signatures ([ilp32f](#ilp32f))                                             |
-| ELF64 soft- or single-float ABI (lp64, lp64f), or the quad-float ABI                  | refused; no verified calling-convention policy                                                                          |
-| Big-endian                                                                            | refused; Ghidra 12.1.4 ships no big-endian RISC-V language                                                              |
-| `ET_REL`, `ET_DYN`, other `e_type`                                                    | refused with the declared value                                                                                         |
-| `EF_RISCV_RVE`                                                                        | refused; the embedded 16-register profile (x0–x15) needs its own processor specification                                |
-| `EF_RISCV_TSO`                                                                        | refused; the total-store-order memory model is unverified here                                                          |
-| Reserved or newer `e_flags` bits                                                      | refused with the offending bits named                                                                                   |
-| One NOBITS section covering a code section from its start                             | admitted if no other section overlaps either; REA prepares the [memory map](#load-layout) before analysis               |
-| Any other section overlap involving executable code                                   | refused; the reason names the two sections that cause the refusal, with their ranges                                    |
-| A section table that cannot be read, or with more than 65,280 allocated sections      | refused with the read failure or the count; REA rejects most malformed tables when it opens the file                    |
+| Declaration                                                                           | Outcome                                                                                                                         |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Little-endian ELF64 `ET_EXEC` or PIE (`ET_DYN`), double-float ABI                     | admitted, `RISCV:LE:64:default` + `gcc`, lane `elf64-exec-le-double-float-generic-v1` or `elf64-pie-le-double-float-generic-v1` |
+| Little-endian ELF32 `ET_EXEC` or PIE (`ET_DYN`), double-float ABI                     | admitted, `RISCV:LE:32:default` + `gcc`, lane `elf32-exec-le-double-float-generic-v1` or `elf32-pie-le-double-float-generic-v1` |
+| Little-endian ELF32 `ET_EXEC`, soft-float ABI, decoded extensions only                | admitted, `RISCV:LE:32:default` + `gcc` with the `__rea_ilp32` prototype, lane `elf32-exec-le-soft-float-generic-v1`            |
+| Little-endian ELF32 `ET_EXEC`, single-float ABI, F and decoded extensions             | admitted, `RISCV:LE:32:default` + `gcc` with the `__rea_ilp32f` prototype, lane `elf32-exec-le-single-float-generic-v1`         |
+| ELF32 soft-float PIE (`ET_DYN`)                                                       | refused; soft-float position-independent executables need separate load verification                                            |
+| ELF32 soft- or single-float ABI without `Tag_RISCV_arch`, or with any other extension | refused; the reason names the extensions outside the decoded set                                                                |
+| ELF32 single-float ABI without the F extension                                        | refused; the ABI needs F                                                                                                        |
+| ELF32 single-float ABI with the D extension                                           | refused; Ghidra's model preserves more of `fs0`–`fs11` than the ABI does                                                        |
+| ELF32 single-float image whose signatures `__rea_ilp32f` cannot express               | refused after analysis; the reason names the signatures ([ilp32f](#ilp32f))                                                     |
+| ELF32 single-float PIE (`ET_DYN`)                                                     | refused; single-float position-independent executables need separate load verification                                          |
+| ELF64 soft- or single-float ABI (lp64, lp64f), or the quad-float ABI                  | refused; no verified calling-convention policy                                                                                  |
+| Big-endian                                                                            | refused; no big-endian RISC-V language (observed on 12.1.4; unverified on 12.2)                                                 |
+| `ET_DYN` without `PT_INTERP` (shared library)                                         | refused; shared libraries without PT_INTERP need separate load verification                                                     |
+| `ET_REL`, other `e_type`                                                              | refused with the declared value                                                                                                 |
+| `EF_RISCV_RVE`                                                                        | refused; the embedded 16-register profile (x0–x15) needs its own processor specification                                        |
+| `EF_RISCV_TSO`                                                                        | refused; the total-store-order memory model is unverified here                                                                  |
+| Reserved or newer `e_flags` bits                                                      | refused with the offending bits named                                                                                           |
+| One NOBITS section covering an `ET_EXEC` code section from its start                  | admitted if no other section overlaps either; REA prepares the [memory map](#load-layout) before analysis                       |
+| The same reservation in a position-independent executable (PIE)                       | refused; REA verifies that preparation for `ET_EXEC` images only                                                                |
+| Any other section overlap involving executable code                                   | refused; the reason names the two sections that cause the refusal, with their ranges                                            |
+| A section table that cannot be read, or with more than 65,280 allocated sections      | refused with the read failure or the count; REA rejects most malformed tables when it opens the file                            |
 
-`e_type` and the [section overlaps](#load-layout) are the load-shape
-declarations this lane reads; program headers are not. A fixed-address
-`ET_EXEC` declaration does **not** establish static linkage: `PT_INTERP` and
-dynamic dependencies are not inspected, and the session records that boundary as
-a limitation rather than inferring a load model.
+`e_type`, program headers and, for executables, the
+[section overlaps](#load-layout) decide the load model this lane reads. A
+fixed-address `ET_EXEC` declaration does **not** establish static linkage:
+dynamic dependencies are not inspected, and the session records that boundary
+as a limitation rather than inferring a load model. Position-independent
+executables (`ET_DYN` with `PT_INTERP`) are admitted using Ghidra's default
+analysis base (`0x10000` for RV32, `0x100000` for RV64); runtime load addresses
+and dynamic linker relocations are not executed or verified.
 
 ## Why the language is pinned
 
-Ghidra's header-based selection is not reliable for RV32. The 12.1.4
-`riscv.opinion` pins `variant="default"` for the 64-bit constraint and leaves the
-32-bit constraint unpinned with the comment that the loader "must choose between
-'default' and 'AndeStar' variants". Measured against the installed release tree:
+Ghidra's header-based selection is not reliable for RV32. Observed on 12.1.4;
+unverified on 12.2: `riscv.opinion` pins `variant="default"` for the 64-bit
+constraint and leaves the 32-bit constraint unpinned with the comment that the
+loader "must choose between 'default' and 'AndeStar' variants". Measured against
+that 12.1.4 release tree:
 
 | Fixture                                         | Ghidra auto-selection         |
 | ----------------------------------------------- | ----------------------------- |
 | RV64 ELF, `e_flags 0x5` (RVC, double-float ABI) | `RISCV:LE:64:default:gcc`     |
 | RV32 ELF, `e_flags 0x5`, no Andes declaration   | `RISCV:LE:32:AndeStar_v5:gcc` |
 
-So an ordinary RV32 image lands on an Andes processor model unless the language
-is stated. REA therefore pins `RISCV:LE:32:default` or `RISCV:LE:64:default`
-with the `gcc` compiler specification per class, records
-`language_selection: provider-pinned-v1`, and refuses a caller-selected
+So, on that 12.1.4 tree, an ordinary RV32 image lands on an Andes processor
+model unless the language is stated. REA therefore pins `RISCV:LE:32:default` or
+`RISCV:LE:64:default` with the `gcc` compiler specification per class, records
+`language_selection: provider-pinned`, and refuses a caller-selected
 `REA_GHIDRA_LANGUAGE_ID` or `REA_GHIDRA_COMPILER_SPEC_ID` that disagrees with the
 pin without changing the requested override. An override that matches the pin is
-accepted and recorded as `configured-v1`.
+accepted and recorded as `configured`.
 
-The soft-float lane pins the same `RISCV:LE:32:default` language. Every RV32
-language in Ghidra 12.1.4, including the deprecated soft-float `RV32I`, `RV32IC`
-and `RV32IMC` variants in `old/riscv_deprecated.ldefs`, uses the same
-`riscv.ilp32d.sla` decoder; only the compiler specification differs. REA keeps
-the generic language and corrects the calling convention instead.
+The soft-float lane pins the same `RISCV:LE:32:default` language. Observed on
+12.1.4; unverified on 12.2: every RV32 language, including the deprecated
+soft-float `RV32I`, `RV32IC` and `RV32IMC` variants in
+`old/riscv_deprecated.ldefs`, uses the same `riscv.ilp32d.sla` decoder; only the
+compiler specification differs. REA keeps the generic language and corrects the
+calling convention instead.
 
 ## Calling conventions
 
@@ -94,13 +105,14 @@ Ghidra's generic RV32 compiler specification, `riscv32-fp.cspec`, models the
 ilp32d ABI. Its default prototype passes `float` and `double` values in
 `fa0`–`fa7` and returns them in `fa0`, and it passes a structure of one or two
 floating-point members in floating-point registers. An ilp32 image passes all
-of these in integer registers. Measured on Ghidra 12.1.4 with an ilp32 build of
-the fixture in `tests/conformance/c/riscv-float-abi.c`, the stock model
-decompiles `rea_riscv_abi_pick(1.5f, 2.5f, sel)` as
-`rea_riscv_abi_pick(in_fa0,in_fa1,0x3fc00000)`. An ilp32f image passes `float`
-values as ilp32d does, but `double` values in integer registers, and a
-structure of one `float` and one integer in `fa0` and `a0`; the stock model
-joins that structure into `a1:a0`.
+of these in integer registers. Recorded on Ghidra 12.1.4 (no longer accepted);
+not yet re-run on 12.2. With an ilp32 build of the fixture in
+`tests/conformance/c/riscv-float-abi.c`, the stock model decompiled
+`rea_riscv_abi_pick(1.5f, 2.5f, sel)` as
+`rea_riscv_abi_pick(in_fa0,in_fa1,0x3fc00000)`. An ilp32f image passes `float` values as
+ilp32d does, but `double` values in integer registers, and a structure of one
+`float` and one integer in `fa0` and `a0`; the stock model joined that
+structure into `a1:a0`.
 
 ### Decision record: D3, RISC-V float ABIs
 
@@ -127,8 +139,9 @@ Decided in [#7477](https://github.com/morluto/rea/issues/7477).
     bridge reports the policy and its function and definition counts, and REA
     requires that report exactly when the profile commits the policy.
   - Admission requires a `Tag_RISCV_arch` declaration with an RV32I base and
-    only extensions that Ghidra 12.1.4's generic RV32 language implements with
-    p-code ([ISA declarations](#isa-declarations)).
+    only extensions that the generic RV32 language implements with p-code
+    (observed on 12.1.4; unverified on 12.2;
+    [ISA declarations](#isa-declarations)).
   - Soft- and single-float profiles add `float_abi` and `arch` to `riscv_elf`.
     Double-float profiles keep their exact parameters, so their digests,
     sessions and snapshots are unchanged.
@@ -138,9 +151,9 @@ Decided in [#7477](https://github.com/morluto/rea/issues/7477).
     also requires `f` in `Tag_RISCV_arch`.
   - `__rea_ilp32f`'s row limits the default floating-point entries to 4 bytes,
     keeps `fs0`–`fs11` preserved, and adds one rule ([ilp32f](#ilp32f)): a
-    structure of up to 8 bytes takes Ghidra 12.1.4's `join_dual_class`
-    assignment with `fillalternate`, which puts each 4-byte part that holds one
-    `float` in a float register and each other part in an integer register.
+    structure of up to 8 bytes takes Ghidra's `join_dual_class` assignment with
+    `fillalternate`, which puts each 4-byte part that holds one `float` in a
+    float register and each other part in an integer register.
   - That rule decides by 4-byte part, not by the psABI's count of flattened
     fields, so the prototype misplaces some shapes. After assigning it, the
     script compares the storage it gives each signature type with the
@@ -366,12 +379,13 @@ when the section is malformed, declares other vendors or scopes, or uses a
 non-canonical string. A missing section or tag is recorded as absent.
 
 Calling-convention lanes admit an image only when it declares an RV32I base
-and only extensions that Ghidra 12.1.4's generic RV32 language implements with
-p-code: `m`, `a`, `f`, `d`, `c`, `zicsr`, `zifencei`, and the subset names
-toolchains record, `zmmul`, `zaamo`, `zalrsc`, `zca`, `zcf` and `zcd`. Any
-other extension is refused. In particular:
+and only extensions the generic RV32 language was observed on 12.1.4 to
+implement with p-code; unverified on 12.2: `m`, `a`, `f`, `d`, `c`, `zicsr`,
+`zifencei`, and the subset names toolchains record, `zmmul`, `zaamo`, `zalrsc`,
+`zca`, `zcf` and `zcd`. Any other extension is refused. In particular, observed
+on 12.1.4; unverified on 12.2:
 
-- Ghidra 12.1.4 decodes no Zcb, Zcmp or Zcmt instruction.
+- Ghidra decodes no Zcb, Zcmp or Zcmt instruction.
 - Its bit-manipulation, cryptography and packed-SIMD files follow draft
   encodings and mark nearly every instruction unimplemented.
 - Vendor extensions, such as Espressif's `xesploop`, `xespv` and `xespdsp`,
@@ -383,24 +397,27 @@ ESP-IDF 5.5 builds ESP32-H4 images as `rv32imafc_zicsr_zifencei` with the ilp32f
 ABI. Those base strings are admitted. Builds that add `_zba_zbb_zbs`,
 `_zcb_zcmp_zcmt` or an `xesp` extension are refused. That includes ESP-IDF
 5.5's ESP32-P4 images, `rv32imafc_zicsr_zifencei_xesppie` with the ilp32f ABI,
-until the decoding of the vendor PIE extension is verified. ESP-IDF images for C5, C6, C61, H2, H21 and H4 also reserve
+until the decoding of the vendor PIE extension is verified. These images also reserve
 their flash text's addresses; [load layout](#load-layout) states which layouts
 the lane admits.
 
 ## Load layout
 
-Section addresses are load addresses in a fixed-address image, so the target
-reader also checks whether an executable section shares allocated addresses
-with another section. The check keeps at most 65,280 allocated sections
+Section addresses are load addresses in an `ET_EXEC` image and fixed offsets
+from the load base in a PIE, so an overlap does not depend on the base. The
+target reader checks both for an executable section that shares allocated
+addresses with another section; relocatable sections have no addresses yet. The check keeps at most 65,280 allocated sections
 (`SHN_LORESERVE`); a table with more is refused like a table that cannot be
 read. ESP-IDF builds such overlaps. For ESP32-C5, C6, C61, H2, H21
 and H4, flash text and rodata share one virtual window from `0x42000020`, and
 the linker script reserves the text's addresses in the rodata segment with the
 NOBITS section `.flash_rodata_dummy`. For C5 and C61, a second NOBITS section,
 `.ext_ram.dummy`, also reserves the text and rodata addresses for external RAM.
-Ghidra 12.1.4's ELF loader resolves overlapping sections in favour of the later
-one: the reservation takes the default address space and `.flash.text` goes
-into an overlay space. Ghidra's DWARF importer, its call-frame (FDE) processing
+Ghidra 12.2's ELF loader, like 12.1.4's, resolves overlapping sections in
+favour of the later one: the reservation takes the default address space and
+`.flash.text` goes into an overlay space. Ghidra 12.2 also gives each section the
+permissions of the first `PT_LOAD` that contains its address, so the reservation
+can be marked executable; REA tells it from the code by its missing bytes. Ghidra's DWARF importer, its call-frame (FDE) processing
 and references from other code and data resolve ELF virtual addresses in the
 default space only. Without
 preparation, code in that overlay gets no DWARF signature, local variables or
@@ -481,8 +498,11 @@ the copy, not the original image.
 The lane identity is one of the lane ids above, and `riscv_elf` retains
 `elf_class`, `byte_order`, `type`, and the raw `flags` alongside the read-only
 booleans `float_abi_double`, `rvc_declared`, `rve_declared`, and
-`tso_declared`. Soft- and single-float profiles also retain `float_abi` (`soft`
-or `single`), the declared `arch` string, and `riscv_calling_convention`
+`tso_declared`. For PIE images, `riscv_elf` also records
+`has_interpreter: true`, `load_model: "pie"`, and the expected default image
+base (`expected_default_image_base: "0x10000"` for RV32, `"0x100000"` for RV64).
+Soft- and single-float profiles also retain `float_abi` (`soft` or `single`),
+the declared `arch` string, and `riscv_calling_convention`
 (`ilp32-prototype-v1` or `ilp32f-prototype-v1`). Those fields report
 declarations the header and attributes make, and the policy REA applied; none
 of them is evidence of the original compiler or of instruction conformance.
@@ -493,19 +513,21 @@ index, name, address and size, and the code's file offset.
 
 ## Verification and limits
 
-Ghidra 12.1.4 PUBLIC with a 64-bit JDK 21+ is required, and on macOS the release
-tree ships no host decompiler binary, so `Decompiler/os/<platform>/decompile` and
-`sleigh` must come from your own build; see
-[installation](../getting-started/installation.md#ghidra).
+Use the [supported Ghidra and JDK range](../getting-started/installation.md#ghidra).
+On macOS the official release zip ships no host decompiler binary, so
+`Decompiler/os/<platform>/decompile` and `sleigh` must come from your own build;
+see that page and
+[#7018](https://github.com/morluto/rea/issues/7018) /
+[#7019](https://github.com/morluto/rea/issues/7019).
 
-Run `npm run verify:ghidra:riscv` with an existing Ghidra 12.1.4 installation,
-JDK 21+, and a RISC-V-capable Clang, LLD, LLVM readelf and LLVM objdump. The
-verifier acquires no tools and never executes target code. Select installed
-tools explicitly when they are not on `PATH`:
+Run `npm run verify:ghidra:riscv` with that installation and a RISC-V-capable
+Clang, LLD, LLVM readelf and LLVM objdump. The verifier acquires no tools and
+never executes target code. Select installed tools explicitly when they are not
+on `PATH`:
 
 ```sh
-GHIDRA_INSTALL_DIR=/path/to/ghidra_12.1.4_PUBLIC \
-JAVA_HOME=/path/to/jdk-21 \
+GHIDRA_INSTALL_DIR=/path/to/ghidra_12.2_PUBLIC \
+JAVA_HOME=/path/to/jdk-25 \
 REA_RISCV_CLANG=/path/to/llvm/bin/clang \
 REA_RISCV_LLD=/path/to/lld/bin/ld.lld \
 REA_RISCV_READELF=/path/to/llvm/bin/llvm-readelf \
@@ -513,14 +535,14 @@ REA_RISCV_OBJDUMP=/path/to/llvm/bin/llvm-objdump \
 npm run verify:ghidra:riscv
 ```
 
-The lane builds ten `ET_EXEC` fixtures from committed freestanding C and
-assembly sources:
+The lane builds thirteen fixtures from committed freestanding C and assembly sources:
 
-- RV32 and RV64 double-float builds (`rv{32,64}imafdc`) of `riscv.c`.
+- RV32 and RV64 double-float builds (`rv{32,64}imafdc`) of `riscv.c`,
+  each linked as `ET_EXEC` and as a PIE.
 - An RV32 soft-float build of `riscv-float-abi.c` with ESP32-C3's
   `-march=rv32imc_zicsr_zifencei -mabi=ilp32`, and an RV32 single-float build
   with ESP32-H4's `-march=rv32imafc_zicsr_zifencei -mabi=ilp32f`, both typed
-  with DWARF. The soft-float build also links `riscv-noreturn.c`, compiled
+  with DWARF. The ilp32 build also links `riscv-noreturn.c`, compiled
   separately with `-mno-relax`.
 - The same objects of each linked with `--strip-all`. Every allocated section
   keeps its address and bytes, so the typed build's symbols locate its
@@ -546,6 +568,13 @@ assembly sources:
   reservation before the code in the section table.
 - The same objects linked with `esp32c6-reservation-named-ram.ld`, which names
   the reservation `ram`, as the default address space is named.
+- The same objects linked with `esp32c6-edge-names.ld`, which names the
+  reservation and a disjoint section like the preparation's temporary blocks.
+
+PIE admission checks that the `PT_INTERP` declaration has an in-file range
+large enough for a pathname byte and its terminator. The verifier checks the
+real provider's load base and relocated probe bytes and checks refusal of
+`ET_DYN` without `PT_INTERP`. REA never invokes the target interpreter.
 
 Independent LLVM readelf observations establish ELF declarations,
 `Tag_RISCV_arch` and symbol addresses. Public CLI and stdio MCP workflows verify
@@ -583,8 +612,8 @@ For the soft- and single-float builds the lane also checks:
   the `float[2]` or bit-field functions.
 - An LLVM objdump reading finds the call from `rea_riscv_stop_caller` to
   `rea_riscv_stop`, which DWARF declares no-return, as one `auipc`+`jalr` pair,
-  as in ESP-IDF's calls between flash and IRAM. In the typed soft-float build,
-  Ghidra's Listing ends that computed call, its basic block has no successor, and the
+  as in ESP-IDF's calls between flash and IRAM. In the typed build, Ghidra's
+  Listing ends that computed call, its basic block has no successor, and the
   caller's terminal-call limitation names `rea_riscv_stop`.
 
 For the ESP layout build the lane checks:

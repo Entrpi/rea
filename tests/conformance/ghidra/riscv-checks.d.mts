@@ -52,15 +52,25 @@ export function riscvStorageLocations(storage: string): readonly string[];
 export function assertRiscvAbiTableConsistent(name: RiscvAbiName): void;
 export function parseRiscvCallSites(listing: string): readonly RiscvCallSite[];
 export function parseRiscvFarCalls(listing: string): readonly RiscvFarCall[];
+/** Runs a host command; the verifier passes its supervised owner. */
+export type RiscvCommandRunner = (
+  command: string,
+  args: readonly string[],
+  options: object,
+) => Promise<{ stdout: string; stderr: string }>;
 export function inspectRiscvCallSites(
   path: string,
   callers: readonly string[],
+  run?: RiscvCommandRunner,
 ): Promise<{
   command: string;
   version: string | undefined;
   calls: readonly RiscvCallSite[];
 }>;
-export function inspectRiscvFarCalls(path: string): Promise<{
+export function inspectRiscvFarCalls(
+  path: string,
+  run?: RiscvCommandRunner,
+): Promise<{
   command: string;
   version: string | undefined;
   calls: readonly RiscvFarCall[];

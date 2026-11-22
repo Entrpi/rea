@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { VerifierFixture } from "./lib/verifier-fixture.mjs";
+import { SUPPORTED_GHIDRA_VERSION } from "../dist/ghidra/GhidraReleasePolicy.js";
 import {
   appendFile,
   cp,
   mkdir,
-  mkdtemp,
   readFile,
   readdir,
   realpath,
-  rm,
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
@@ -79,7 +79,11 @@ const M6809 = {
 };
 
 await mkdir(join(root, "build"), { recursive: true });
-const workspace = await mkdtemp(join(root, "build", "rea-language-proof-"));
+const workspaceFixture = await VerifierFixture.open({
+  prefix: "rea-language-proof-",
+  parent: join(root, "build"),
+});
+const workspace = workspaceFixture.path;
 const runtime = join(workspace, "runtime");
 await mkdir(runtime);
 const sh4Path = join(workspace, "sh4.bin");
@@ -139,8 +143,8 @@ await withServer(ghidra, async ({ call, refuse, fail }) => {
     },
   ]);
   const parameters = image.analysis_profile.parameters;
-  assert.equal(parameters.language_selection, "caller-provider-language-v1");
-  assert.equal(parameters.processor_labels, "not-applied-v1");
+  assert.equal(parameters.language_selection, "caller-provider-language");
+  assert.equal(parameters.processor_labels, "not-applied");
   assert.equal(parameters.architecture, null);
   const definition = parameters.language_definition;
   assert.equal(definition.address_bits, 32);
@@ -312,7 +316,10 @@ await withServer(ghidra, async ({ call, refuse, fail }) => {
         provider_language: { ...SH4, language_id: "Absent:LE:32:default" },
         entry_point: "0x0",
       },
-      /Absent:LE:32:default is not a language defined by Ghidra 12\.1\.4/u,
+      new RegExp(
+        `Absent:LE:32:default is not a language defined by Ghidra ${SUPPORTED_GHIDRA_VERSION.replaceAll(".", "\\.")}`,
+        "u",
+      ),
     ],
     [
       {
@@ -463,7 +470,8 @@ await withServer(copy, async ({ call, refuse }) => {
       provider_id: "ghidra",
       snapshot_path: snapshot,
     },
-    /profile_mismatch/u,
+    // The changed definition changes the committed profile digest.
+    /binding_mismatch[^}]*profile_digest/u,
   );
   await open();
   const after = await profile();
@@ -505,7 +513,7 @@ const verifierRun = await completeVerifierRun(run);
 assert.equal(verifierRun.process_lineage.status, "verified");
 assert.deepEqual(verifierRun.process_lineage.descendants, []);
 // Keep the workspace for diagnosis unless verification and cleanup both pass.
-await rm(workspace, { recursive: true, force: true });
+await workspaceFixture.release();
 process.stdout.write(
   JSON.stringify({ verifier_run: verifierRun, ...report }) + "\n",
 );
@@ -563,9 +571,9 @@ async function withServer(installDir, body) {
 
 function evidence(value, bytes) {
   const result = parseEvidence(value);
-  assert.equal(result.subject.digest.sha256, sha256(bytes));
+  assert.equal(result.subject.identity.sha256, sha256(bytes));
   // A provider language names no family.
-  assert.equal(result.subject.architecture, null);
-  assert.equal(result.subject.format, "raw-binary");
+  assert.equal(result.subject.identity.architecture, null);
+  assert.equal(result.subject.identity.format, "raw-binary");
   return result;
 }

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { sha256Hex } from "../kernel/sha256Hex.js";
 import { readdir } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 import { z } from "zod";
@@ -7,8 +8,10 @@ import { err, ok, type Result } from "../domain/result.js";
 import { parseXmlDocument } from "../domain/xmlDocument.js";
 import { decodeXmlPlistText } from "../domain/propertyListXmlText.js";
 
-import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
-import { withArtifactRegularFile } from "../artifacts/ArtifactFileOperation.js";
+import {
+  type ArtifactResourceScope,
+  withArtifactRegularFile,
+} from "../resources/index.js";
 import type { GhidraLanguageOverride } from "../config/ghidraLanguageOverride.js";
 import { ConfigurationError } from "../domain/configurationErrors.js";
 import { RegularFileOperationCancelled } from "../filesystem/RegularFile.js";
@@ -247,8 +250,7 @@ export const admitGhidraLanguageOverride = (
   return null;
 };
 
-const sha256 = (bytes: Uint8Array): string =>
-  createHash("sha256").update(bytes).digest("hex");
+const sha256 = (bytes: Uint8Array): string => sha256Hex(bytes);
 
 // Ghidra 12.1.4 refuses a compiled SLEIGH file over 16 MiB (SlaFormat).
 const MAX_SLA_BYTES = 16 * 1024 * 1024;

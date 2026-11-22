@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
+import { ArtifactResourceScope } from "../resources/ArtifactResourceScope.js";
 import { parseConfig } from "../config/parseConfig.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import { functionCoordinateContextsEqual } from "../domain/native/functionCoordinateContext.js";
@@ -209,11 +209,10 @@ describe("Ghidra provider language profile", () => {
       target_format: "raw-binary",
       architecture: null,
       available_architectures: [],
-      load_image_evidence: "independent-raw-segments-v1",
       loader: "BinaryLoader",
       language_id: "F5SH:LE:32:community",
       compiler_spec_id: "default",
-      language_selection: "caller-provider-language-v1",
+      language_selection: "caller-provider-language",
       language_definition: {
         version: 1,
         address_bits: 32,
@@ -229,8 +228,7 @@ describe("Ghidra provider language profile", () => {
         },
         entries: [{ address: "0x8c000010", role: "entry", basis: "caller" }],
       },
-      processor_labels: "not-applied-v1",
-      entry_seed: "external-entry-and-function-before-analysis-v1",
+      processor_labels: "not-applied",
     });
     expect(committed.parameters).not.toHaveProperty("entry_context");
     // raw_load holds the base and entry; flat copies would only repeat it.
@@ -276,8 +274,7 @@ describe("Ghidra provider language profile", () => {
     expect(projectAnalysisError(resolved.error)).toMatchObject({
       code: "invalid_request",
       details: {
-        reason:
-          "Absent:LE:32:default is not a language defined by Ghidra 12.1.4",
+        reason: "Absent:LE:32:default is not a language defined by Ghidra 12.2",
         constraint: "load_selection_rejected",
         field: "provider_language",
       },

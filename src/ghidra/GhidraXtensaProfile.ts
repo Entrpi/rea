@@ -9,7 +9,7 @@ import type {
 import type { JsonValue } from "../domain/jsonValue.js";
 
 /**
- * Ghidra 12.1.4 `xtensa.ldefs` defines this language with a single compiler
+ * Ghidra 12.2 `xtensa.ldefs` defines this language with a single compiler
  * specification, id `default` (`xtensa.cspec`); there is no `gcc` id. Its
  * default prototype models windowed calls; it also defines `__call0`.
  */
@@ -54,7 +54,7 @@ const abiUnsupportedReason = (
   }
 };
 
-/** Ghidra 12.1.4 computes every L32R address from the instruction's own address. */
+/** Ghidra 12.2 computes every L32R address from the instruction's own address. */
 const literalsUnsupportedReason = (
   literals: XtensaLiteralDeclaration | undefined,
 ): string | null => {
@@ -64,7 +64,7 @@ const literalsUnsupportedReason = (
     case "declared":
       return literals.literals === "pc-relative"
         ? null
-        : "The image declares USE_ABSOLUTE_LITERALS=1 in .xtensa.info: its configuration addresses L32R literals from LITBASE (the Extended L32R option). Ghidra 12.1.4 decodes every L32R as PC-relative, so literal loads and the references derived from them could be wrong; this lane admits only PC-relative literals (0), as ESP-IDF builds declare.";
+        : "The image declares USE_ABSOLUTE_LITERALS=1 in .xtensa.info: its configuration addresses L32R literals from LITBASE (the Extended L32R option). Ghidra 12.2 decodes every L32R as PC-relative, so literal loads and the references derived from them could be wrong; this lane admits only PC-relative literals (0), as ESP-IDF builds declare.";
     case "unrecognized":
       return `The image declares USE_ABSOLUTE_LITERALS=${literals.value} in .xtensa.info, which binutils does not define; this lane admits only PC-relative literals (0).`;
     case "absent":
@@ -85,7 +85,7 @@ export const ghidraXtensaUnsupportedReason = (
     return null;
   const metadata = target.xtensa;
   if (metadata.elfClass !== 32)
-    return "This Ghidra Xtensa lane supports ELF32 only; Ghidra 12.1.4 ships 32-bit Xtensa languages only.";
+    return "This Ghidra Xtensa lane supports ELF32 only; Ghidra 12.2 ships 32-bit Xtensa languages only.";
   if (metadata.byteOrder !== "little")
     return "This Ghidra Xtensa lane supports little-endian images only; big-endian Xtensa cores need separate verification.";
   if (metadata.type !== ET_EXEC)
@@ -143,7 +143,7 @@ export const ghidraXtensaCall0Limitations = (
 ): readonly string[] =>
   expected
     ? [
-        "Call0 ABI: Ghidra 12.1.4's default Xtensa prototype lists a8-a11, not a12-a15, as preserved across a call. After analysis REA assigns Ghidra's `__call0` prototype, which preserves a12-a15, to every function, external function and function definition, so calls to them have call0 register effects.",
+        "Call0 ABI: Ghidra 12.2's default Xtensa prototype lists a8-a11, not a12-a15, as preserved across a call. After analysis REA assigns Ghidra's `__call0` prototype, which preserves a12-a15, to every function, external function and function definition, so calls to them have call0 register effects.",
         ...(report === undefined
           ? []
           : [
@@ -180,8 +180,8 @@ export const ghidraXtensaProfileParameters = (
       literals: literals?.status === "declared" ? literals.literals : null,
     },
     xtensa_support_lane: call0
-      ? "elf32-le-exec-call0-generic-v1"
-      : "elf32-le-exec-windowed-generic-v1",
+      ? "elf32-le-exec-call0-generic"
+      : "elf32-le-exec-windowed-generic",
     ...(call0 ? { xtensa_call0_prototype: GHIDRA_XTENSA_CALL0_PROTOTYPE } : {}),
   };
 };
@@ -211,14 +211,14 @@ export const ghidraXtensaLimitations = (
     return [];
   if (!isGhidraXtensaCall0Target(target))
     return [
-      "REA verifies this lane against Ghidra 12.1.4 with source-owned windowed-call fixtures (entry, call8, retw.n, l32r). Decompiled code for other images is not verified function by function; check call targets and arguments against the assembly when they matter.",
-      "REA pins Ghidra's generic `Xtensa:LE:32:default` language with the `default` compiler specification, whose default prototype models windowed calls according to Ghidra 12.1.4's xtensa.cspec. The language does not identify the ESP32, ESP32-S2 or ESP32-S3 core configuration or the producing compiler.",
-      "Measured by REA: Ghidra 12.1.4 does not decode SALT/SALTU, which ESP32-S3 builds use, so disassembly, calls and parameters after them are missing in that function. Reported upstream or derived from Ghidra 12.1.4 sources, not reproduced by REA: decompiled output approximates register-window rotation; FLIX bundles and ESP32-S3 `ee.*` vector instructions are not decoded; zero-overhead loops are mis-modeled.",
+      "REA verifies this lane against Ghidra 12.2 with source-owned windowed-call fixtures (entry, call8, retw.n, l32r). Decompiled code for other images is not verified function by function; check call targets and arguments against the assembly when they matter.",
+      "REA pins Ghidra's generic `Xtensa:LE:32:default` language with the `default` compiler specification, whose default prototype models windowed calls according to Ghidra 12.2's xtensa.cspec. The language does not identify the ESP32, ESP32-S2 or ESP32-S3 core configuration or the producing compiler.",
+      "Measured by REA on Ghidra 12.1.4, whose Xtensa language sources Ghidra 12.2 ships unchanged: SALT/SALTU, which ESP32-S3 builds use, are not decoded, so disassembly, calls and parameters after them are missing in that function. Reported upstream or derived from Ghidra 12.2 sources, not reproduced by REA: decompiled output approximates register-window rotation; FLIX bundles and ESP32-S3 `ee.*` vector instructions are not decoded; zero-overhead loops are mis-modeled.",
     ];
   return [
-    "REA verifies this lane against Ghidra 12.1.4 with source-owned call0 fixtures (call0, callx0, ret.n, l32r, a value kept in a12 across a call) and call0 builds from xtensa-lx106-elf-gcc 13.3.0 and xtensa-esp32-elf-gcc -mabi=call0. Decompiled code for other images is not verified function by function; check call targets and arguments against the assembly when they matter.",
+    "REA verifies this lane against Ghidra 12.2 with source-owned call0 fixtures (call0, callx0, ret.n, l32r, a value kept in a12 across a call) and an xtensa-esp32-elf-gcc -mabi=call0 build; its xtensa-lx106-elf-gcc 13.3.0 build was verified on Ghidra 12.1.4 only. Decompiled code for other images is not verified function by function; check call targets and arguments against the assembly when they matter.",
     "REA pins Ghidra's generic `Xtensa:LE:32:default` language with the `default` compiler specification. The language does not identify the ESP8266 or another core configuration, or the producing compiler.",
-    "Measured by REA: a call to an address with no function in the program, such as an ESP8266 mask-ROM routine outside the image, keeps Ghidra's default prototype: a value kept in a12 across it is computed before the call. Derived from Ghidra 12.1.4 sources, not reproduced by REA: the default prototype does not preserve a12-a15 at such a call, the same applies to a call through an untyped function pointer, and auto-analysis ran with the default prototype before REA assigned `__call0`.",
-    "Measured by REA: Ghidra 12.1.4 does not decode SALT/SALTU, so disassembly, calls and parameters after them are missing in that function. Reported upstream or derived from Ghidra 12.1.4 sources, not reproduced by REA: FLIX bundles and ESP32-S3 `ee.*` vector instructions are not decoded; zero-overhead loops are mis-modeled.",
+    "Measured by REA: a call to an address with no function in the program, such as an ESP8266 mask-ROM routine outside the image, keeps Ghidra's default prototype: a value kept in a12 across it is computed before the call. Derived from Ghidra 12.2 sources, not reproduced by REA: the default prototype does not preserve a12-a15 at such a call, the same applies to a call through an untyped function pointer, and auto-analysis ran with the default prototype before REA assigned `__call0`.",
+    "Measured by REA on Ghidra 12.1.4, whose Xtensa language sources Ghidra 12.2 ships unchanged: SALT/SALTU are not decoded, so disassembly, calls and parameters after them are missing in that function. Reported upstream or derived from Ghidra 12.2 sources, not reproduced by REA: FLIX bundles and ESP32-S3 `ee.*` vector instructions are not decoded; zero-overhead loops are mis-modeled.",
   ];
 };
