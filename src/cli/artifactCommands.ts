@@ -9,6 +9,7 @@ import {
   runOnSessionTarget,
 } from "./contractCommand.js";
 
+import { CALLER_SELECTED_ROOT_FORMATS } from "../domain/targetFormats.js";
 import type { DirectAnalysis } from "../composition/directAnalysis.js";
 import { createArtifactExtractionDestination } from "../application/artifacts/ArtifactExtractionDestination.js";
 import { registerArtifactComparisonCommand } from "./artifactComparisonCommand.js";
@@ -26,7 +27,8 @@ export const registerArtifactCommands = (
 };
 
 /**
- * The artifact as an MCP client opens it: an ESP flash dump is selected with
+ * The artifact as an MCP client opens it: an ESP flash dump or an ESP8266
+ * image, neither of which its bytes establish, is selected with
  * `open_binary`'s format and flash fields.
  */
 const artifactTarget = {
@@ -36,9 +38,9 @@ const artifactTarget = {
     fields: {
       format: {
         name: "targetFormat",
-        values: ["esp-flash-image"],
+        values: ["esp-flash-image", ...CALLER_SELECTED_ROOT_FORMATS],
         description:
-          "Read the target as an ESP flash dump; required with --flash-offset or --partition-table-offset",
+          "Read the target as an ESP flash dump (esp-flash-image; required with --flash-offset or --partition-table-offset) or as an ESP8266 firmware image (esp8266-image, never detected because it shares the ESP32 image magic)",
       },
       flash_offset: {
         description: "Flash address (0xhex) of the dump's first byte",

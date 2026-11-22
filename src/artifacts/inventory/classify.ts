@@ -59,6 +59,7 @@ import {
   zipRootPackageFormat,
 } from "../../domain/zipPackageFormat.js";
 import { artifactFormatDescriptor } from "../artifactFormats.js";
+import { admitEsp8266ImageHeader } from "../../domain/firmware/espImage.js";
 import { BinaryReader } from "../../domain/binaryContainer.js";
 import {
   classifyStableRootArtifactHandle,
@@ -106,6 +107,7 @@ export const classifyAndHashRootForInventory = async (
     | "selectedPath"
     | "expectedRootSha256"
     | "espFlashSelection"
+    | "selectedRootFormat"
     | "readerLimits"
   >,
   probeFacts?: ArtifactEmbeddedFormatProbeFacts,
@@ -187,6 +189,7 @@ export const classifyAndHashRootForInventory = async (
       options.asarHeaderAdmission,
       options.selectedPath,
       options.espFlashSelection,
+      options.selectedRootFormat,
       options.readerLimits,
     );
     const format =
@@ -303,6 +306,7 @@ const classifyRootFormat = async (
   asarHeaderAdmission?: AsarHeaderAdmission,
   selectedPath?: string,
   espFlashSelection?: EspFlashSelection,
+  selectedRootFormat?: ArtifactInventoryOptions["selectedRootFormat"],
   readerLimits: ArtifactReaderLimits = resolveArtifactReaderLimits(),
 ): Promise<ArtifactOccurrence["artifact_format"] | ArtifactFormatAdmission> => {
   const { handle } = source;
@@ -369,6 +373,15 @@ const classifyRootFormat = async (
         `ESP flash image layout is not recognized: ${selected.error}`,
       );
     return { kind: "esp-flash-image", source, location: selected.value };
+  }
+  if (selectedRootFormat === "esp8266-image") {
+    const admitted = admitEsp8266ImageHeader(evidence.prefix, archiveBytes);
+    if (!admitted.ok)
+      throw new ArtifactReaderFailure(
+        admitted.error.kind === "unsupported" ? "unavailable" : "format",
+        admitted.error.message,
+      );
+    return "esp8266-image";
   }
   if (nesContainerFormat(evidence.prefix) !== undefined) {
     const parsed = parseInesLayout(evidence.prefix, archiveBytes);

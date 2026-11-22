@@ -123,7 +123,9 @@ explicit path or endpoint and do not need it.
   Binwalk or Unblob. Extraction needs a caller-selected new absolute output
   directory. See the [firmware guide](https://github.com/morluto/rea/blob/main/docs/guides/firmware/firmware-analysis.md).
 - ESP32-family app or bootloader image (`0xE9` magic): `inspect_artifact`
-  without a provider; see the ESP section of `references/native-and-artifacts.md`.
+  without a provider. An ESP8266 image shares the magic: open it with
+  `format: "esp8266-image"`. See the ESP section of
+  `references/native-and-artifacts.md`.
 - .NET NativeAOT PE/ELF: native Ghidra analysis. Native code can yield pseudocode;
   consult the NativeAOT workflow in `references/native-and-artifacts.md` for
   optional metadata recovery and its supported host/layout boundary.

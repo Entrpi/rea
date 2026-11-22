@@ -5,6 +5,7 @@ import {
   type ArtifactReaderLimitsInput,
 } from "../domain/artifactReaderLimits.js";
 import type { AnalysisSettingsReader } from "../domain/analysisSettings.js";
+import { callerSelectedRootFormat } from "../domain/targetFormats.js";
 import { runtimeAsarHeaderAdmission } from "../config/runtimeAnalysisSettings.js";
 import { artifactTargetRefusal } from "../domain/apple/artifactTargetApplicability.js";
 import {
@@ -575,6 +576,7 @@ class ArtifactClient implements AnalysisClient {
         this.settings,
       ),
       espFlashSelection: espFlashSelection(this.target),
+      selectedRootFormat: callerSelectedRootFormat(this.target.format),
       ...(options?.signal === undefined ? {} : { signal: options.signal }),
       integrity: parsed.integrity_policy,
       ...(parsed.artifact_limits === undefined

@@ -34,6 +34,7 @@ export const BINARY_TARGET_FORMAT_KINDS = {
   dfuse: "archive",
   "esp-flash-image": "archive",
   fit: "archive",
+  "esp8266-image": "archive",
   "ntfs-mft": "archive",
   plist: "artifact",
   javascript: "artifact",
@@ -61,12 +62,34 @@ export const targetFormatsOfKind = <Kind extends TargetKind>(
       BINARY_TARGET_FORMAT_KINDS[format] === kind,
   );
 
-/** Formats for which the caller may select the interpretation explicitly. */
+/**
+ * Formats for which the caller may select the interpretation explicitly. DOL
+ * has no magic, so `gamecube-dol` is never auto-detected; an ESP8266 image
+ * shares the 0xE9 magic of ESP32-family images, so `esp8266-image` is never
+ * auto-detected.
+ */
 export const TARGET_FORMAT_HINTS = [
   "dos-com",
   "raw-binary",
   "gamecube-dol",
   "esp-flash-image",
+  "esp8266-image",
 ] as const satisfies readonly TargetFormat[];
 
 export type TargetFormatHint = (typeof TARGET_FORMAT_HINTS)[number];
+
+/**
+ * Explicit formats that select an archive reading the bytes cannot
+ * establish, so artifact inventory reads the root as the caller named it.
+ */
+export const CALLER_SELECTED_ROOT_FORMATS = [
+  "esp8266-image",
+] as const satisfies readonly TargetFormatHint[];
+export type CallerSelectedRootFormat =
+  (typeof CALLER_SELECTED_ROOT_FORMATS)[number];
+
+/** The caller-selected root format a target format names, if any. */
+export const callerSelectedRootFormat = (
+  format: string,
+): CallerSelectedRootFormat | undefined =>
+  CALLER_SELECTED_ROOT_FORMATS.find((selected) => selected === format);

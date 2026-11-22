@@ -251,6 +251,7 @@ export interface ArtifactReader {
     | "dfuse"
     | "esp-flash-image"
     | "fit"
+    | "esp8266-image"
     | "ntfs-mft"
     | "file";
   entries(
