@@ -42,8 +42,8 @@ specification is `default`.
 - ARMv7 spans the A, R and M profiles, so it selects `armv7-m` only with
   `Tag_CPU_arch_profile` M. The other architectures are M profiles; a profile
   other than M contradicts them.
-- Ghidra 12.1.4 decodes the ARMv8.1-M low-overhead-loop branches `wls` and
-  `le`, but gives `le` no fall-through, and their targets can be wrong, so code
+- Ghidra 12.2, like 12.1.4, decodes the ARMv8.1-M low-overhead-loop branches
+  `wls` and `le`, but gives `le` no fall-through, and their targets can be wrong, so code
   after such a loop can stay undisassembled, as for
   [raw images](raw-binary.md#limitations). `armv8.1-m.main` results say so.
 - REA reads the public `aeabi` attributes of the file scope. It skips other
@@ -133,8 +133,9 @@ change that import.
 
 ## Verification and limits
 
-Run `npm run verify:ghidra:cortex-m-elf` with Ghidra 12.1.4 PUBLIC, a 64-bit
-JDK 21 or later, and LLVM with Arm targets (`clang`, `ld.lld`, `llvm-strip`,
+Run `npm run verify:ghidra:cortex-m-elf` with the
+[supported Ghidra and JDK installation](../getting-started/installation.md#ghidra)
+and LLVM with Arm targets (`clang`, `ld.lld`, `llvm-strip`,
 `llvm-readelf` and `llvm-objdump`). Select installed tools with `REA_CLANG`,
 `REA_LLD`, `REA_LLVM_STRIP`, `REA_LLVM_READELF` and `REA_LLVM_OBJDUMP` when they
 are not on `PATH`. The lane builds committed C and assembly sources for each M
