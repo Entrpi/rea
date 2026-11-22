@@ -15,6 +15,7 @@ import {
   GHIDRA_RISCV_LOAD_PREPARATION,
   GHIDRA_RISCV_REFUSAL_MAX_LENGTH,
 } from "./GhidraRiscvProfile.js";
+import { GHIDRA_XTENSA_CALL0_PROTOTYPE } from "./GhidraXtensaProfile.js";
 import { isRecord } from "../kernel/isRecord.js";
 
 /** Exact methods proved by the selected Program bridge handshake. */
@@ -108,6 +109,14 @@ const sessionInfoSchema = z
     mips_soft_float_storage: z
       .object({
         policy: z.literal(GHIDRA_MIPS_SOFT_FLOAT_STORAGE),
+        functions: z.int().nonnegative(),
+        definitions: z.int().nonnegative(),
+      })
+      .strict()
+      .optional(),
+    xtensa_call0_prototype: z
+      .object({
+        policy: z.literal(GHIDRA_XTENSA_CALL0_PROTOTYPE),
         functions: z.int().nonnegative(),
         definitions: z.int().nonnegative(),
       })
