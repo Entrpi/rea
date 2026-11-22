@@ -6,13 +6,17 @@ const NATIVE_OPEN_HELP = {
   format:
     "Explicit interpretation: dos-com or raw-binary (headerless), or gamecube-dol (GameCube/Wii DOL, never auto-detected); omission preserves header-based detection",
   architecture:
-    "Caller-supplied CPU family; required with --target-format raw-binary, must be omitted with gamecube-dol",
+    "Caller-supplied CPU family; required with --target-format raw-binary unless --ghidra-language-id is given, must be omitted with gamecube-dol",
   entryPoint:
     "Caller-supplied code entry address (0xhex), also the load address without --base-address; required with --target-format raw-binary unless --architecture-variant is given, optional with gamecube-dol (must equal the DOL header entry)",
   baseAddress:
-    "Address of raw file offset 0 (0xhex), separate from --entry-point; only with --architecture-variant",
+    "Address of raw file offset 0 (0xhex), separate from --entry-point; only with --architecture-variant or --ghidra-language-id",
   architectureVariant:
     "ARM M-profile variant of a raw image, decoded in Thumb state; requires --architecture arm and --base-address",
+  ghidraLanguageId:
+    "Expert override for a raw image no --architecture describes: a Ghidra language ID from the installation's catalog, such as SuperH4:LE:32:default; needs --ghidra-compiler-spec-id and --provider ghidra, and replaces --architecture",
+  ghidraCompilerSpecId:
+    "Compiler spec ID that the --ghidra-language-id entry declares, such as default",
   vectorTableAddress:
     "Address of the M-profile vector table (0xhex) when --entry-point is omitted and the table is not at --base-address",
   provider:
@@ -65,6 +69,23 @@ export const nativeTarget = (
       vector_table_address: {
         name: "vector-table-address",
         description: NATIVE_OPEN_HELP.vectorTableAddress,
+      },
+      // The Ghidra member of MCP's provider_language: the flag names carry the
+      // provider, and --provider must still select it.
+      provider_language: {
+        members: {
+          options: {
+            language_id: {
+              name: "ghidra-language-id",
+              description: NATIVE_OPEN_HELP.ghidraLanguageId,
+            },
+            compiler_spec_id: {
+              name: "ghidra-compiler-spec-id",
+              description: NATIVE_OPEN_HELP.ghidraCompilerSpecId,
+            },
+          },
+          fixed: { provider: "ghidra" },
+        },
       },
       provider_id: { name: "provider", description: NATIVE_OPEN_HELP.provider },
     },

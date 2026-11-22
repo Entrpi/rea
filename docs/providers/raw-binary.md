@@ -292,7 +292,8 @@ Before Ghidra starts, REA reads the installation's language catalog: the
 request unless all of these are true:
 
 - Exactly one `.ldefs` entry defines the language ID, and the entry declares
-  the compiler spec.
+  the compiler spec. REA reads every `.ldefs` file up to 4 MiB; a larger one is
+  not examined and could define the same ID, so REA refuses the request.
 - The `.sla`, `.pspec` and `.cspec` files that the entry names exist beside its
   `.ldefs` file. REA refuses a missing `.sla`, because Ghidra would compile it
   into its installation when it loads the language.
