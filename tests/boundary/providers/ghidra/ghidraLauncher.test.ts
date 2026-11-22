@@ -660,6 +660,7 @@ describe("Ghidra RISC-V calling-convention policy", () => {
             languageId: "x86:LE:32:default",
             compilerSpecId: "default",
             baseAddr: "0x1000",
+            entryPoint: "0x1000",
           },
         },
       ])
@@ -791,6 +792,7 @@ describe("Ghidra RISC-V load preparation arguments", () => {
           languageId: "x86:LE:32:default",
           compilerSpecId: "default",
           baseAddr: "0x1000",
+          entryPoint: "0x1000",
         },
       },
     ])

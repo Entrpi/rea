@@ -739,7 +739,7 @@ describe("binary target I/O: image classification", () => {
       writeFile(other, Buffer.alloc(64, 0x5a)),
       writeFile(short, image.subarray(0, 7)),
     ]);
-    const selected = { formatHint: "esp8266-image" } as const;
+    const selected = { loadSelection: { format: "esp8266-image" } } as const;
     expect(await parseBinaryTarget(named, selected)).toMatchObject({
       ok: true,
       value: { kind: "archive", format: "esp8266-image" },
@@ -769,7 +769,9 @@ describe("binary target I/O: image classification", () => {
       error: { constraint: "load_selection_rejected" },
     });
     expect(
-      await parseBinaryTarget(named, { ...selected, architecture: "riscv" }),
+      await parseBinaryTarget(named, {
+        loadSelection: { format: "esp8266-image", architecture: "riscv" },
+      }),
     ).toMatchObject({
       ok: false,
       error: { constraint: "load_selection_rejected" },
