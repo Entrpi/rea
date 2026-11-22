@@ -72,7 +72,7 @@ specification, so the import and the post-import check still commit to it.
 ## Call0 images
 
 Under the call0 ABI, a callee preserves `a12`-`a15` and may change `a8`-`a11`.
-Ghidra 12.1.4's default Xtensa prototype, `__stdcall`, lists `a0`, `a1`,
+Ghidra 12.2's default Xtensa prototype, `__stdcall`, lists `a0`, `a1`,
 `a8`-`a11` and `t2`-`t7` as preserved instead, matching its window fixups, which
 save registers in `t2`-`t7`. `xtensa.cspec` defines the call0 model as
 `__call0`, with the same parameter and return registers, but a program cannot
@@ -92,7 +92,7 @@ result is returned. As for windowed images, the pinned language refuses a
 caller-supplied existing Ghidra project.
 
 Measured by REA: when a call0 caller keeps a value in `a12` across a call,
-Ghidra 12.1.4 with the default prototype computes it into a variable before the
+Ghidra 12.2 with the default prototype computes it into a variable before the
 call. With `__call0` it folds the value into the expression that uses it, for
 example `return iVar1 + param_1 + 5;` for the lane's fixture. Both forms compute
 the same value; the fold shows that the decompiler treats `a12` as preserved.
@@ -101,7 +101,7 @@ Measured by REA: a call to an address with no function in the program keeps the
 default prototype, even after REA assigns `__call0`. The lane's fixture calls
 the mask-ROM address `0x40002000` through `callx0`, as ESP8266 code calls ROM
 routines, and the value it keeps in `a12` is computed before that call. Derived
-from the Ghidra 12.1.4 sources, not reproduced by REA: the same applies to a call
+from the Ghidra 12.2 sources, not reproduced by REA: the same applies to a call
 through an untyped function pointer, because Ghidra has no program option for the
 model of a call it cannot resolve to a function or function definition.
 Auto-analysis also runs with the default prototype, before REA assigns
@@ -213,9 +213,10 @@ that `readelf` and REA read `ABI=1`, that the caller passes `value ^ 0x5a` and 5
 and adds `value ^ 0x5a` to the result without a copy made before the call, and
 that `analyze_function` reports `__call0`.
 
-The call0 lane ran on Linux x64 with Ghidra 12.1.4, JDK 21 and GNU readelf 2.44,
-with `xtensa-esp32-elf-gcc` 14.2.0 (crosstool-NG esp-14.2.0_20251107) and
-Debian's `xtensa-lx106-elf-gcc` 13.3.0 with binutils 2.44. These freestanding
+The call0 lane ran on Linux x64 with Ghidra 12.2, JDK 25 and GNU readelf 2.44,
+with `xtensa-esp32-elf-gcc` 14.2.0 (crosstool-NG esp-14.2.0_20251107). Its
+build with Debian's `xtensa-lx106-elf-gcc` 13.3.0 and binutils 2.44 ran on
+Ghidra 12.1.4 (no longer accepted) with JDK 21. These freestanding
 fixtures are the only call0 code it examines: no ESP8266 SDK or Arduino build
 and no firmware from a device.
 

@@ -308,7 +308,8 @@ describe("Xtensa lane decompiled dataflow", () => {
 });
 
 // Ghidra 12.1.4 decompiled the call0 fixture this way in verify:ghidra:xtensa,
-// and the same bytes declared windowed with the default prototype.
+// and the same bytes declared windowed with the default prototype; Ghidra 12.2
+// produced the same entry, windowed-control and -mabi=call0 output.
 const CALL0_ENTRY =
   "\nint __call0 rea_xtensa_call0_entry(int param_1)\n\n{\n  int iVar1;\n  \n  iVar1 = rea_xtensa_call0_leaf(0x12345678);\n  return iVar1 + param_1 + 5;\n}\n\n";
 const WINDOWED_DEFAULT_ENTRY =
