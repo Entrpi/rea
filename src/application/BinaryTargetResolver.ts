@@ -68,7 +68,7 @@ import {
   validateElfDeclaredRanges,
   type ElfDeclarationRead,
 } from "../domain/elfDeclaredRanges.js";
-import { readRiscvIsaDeclaration } from "../domain/riscvIsaDeclaration.js";
+import { readRiscvElfDeclarations } from "../domain/riscvIsaDeclaration.js";
 import {
   resolveAppleBundleExecutable,
   type ResolvedAppBundle,
@@ -1124,6 +1124,9 @@ const readExecutableMetadata = async (
   return parsed;
 };
 
+const ET_EXEC = 2;
+const ET_DYN = 3;
+
 /** ELF structure and family declarations share one descriptor before provider selection. */
 const readElfMetadata = async (
   handle: FileHandle,
@@ -1160,12 +1163,18 @@ const readElfMetadata = async (
       riscv: {
         ...parsed.value.riscv,
         ...(ranges.value.hasInterpreter ? { hasInterpreter: true } : {}),
-        isa: await readElfDeclarations(
+        ...(await readElfDeclarations(
           handle,
           bytes,
-          readRiscvIsaDeclaration(bytes, fileSize),
+          readRiscvElfDeclarations(bytes, fileSize, {
+            // Executable section addresses are load addresses, offset by the
+            // load base in a PIE; relocatable sections have no addresses yet.
+            sectionOverlap:
+              parsed.value.riscv.type === ET_EXEC ||
+              parsed.value.riscv.type === ET_DYN,
+          }),
           signal,
-        ),
+        )),
       },
     });
   if (parsed.value.architecture !== "mips" || parsed.value.mips.elfClass !== 32)
