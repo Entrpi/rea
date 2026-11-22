@@ -1,18 +1,11 @@
 #!/usr/bin/env node
 // Real-Ghidra lane for M-profile ARM ELF executables: each variant's pinned
 // decoder, float passing, header-selected images, and the language override.
+import { VerifierFixture } from "./lib/verifier-fixture.mjs";
 import { canonicalOutputSchema } from "./lib/canonical-output-schema.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import {
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  rm,
-  writeFile,
-} from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -79,7 +72,10 @@ const entrypoint = fileURLToPath(new URL("./rea.mjs", import.meta.url));
 const run = createVerifierRun();
 // Every LLVM and CLI command runs as an owned process tree with a deadline.
 const commands = await createVerifierCommands();
-const workspace = await mkdtemp(join(tmpdir(), "rea-cortex-m-elf-proof-"));
+const workspaceFixture = await VerifierFixture.open({
+  prefix: "rea-cortex-m-elf-proof-",
+});
+const workspace = workspaceFixture.path;
 const runtime = join(workspace, "runtime");
 const fixtureDirectory = join(workspace, "fixtures");
 await mkdir(runtime);
@@ -252,7 +248,7 @@ assert.deepEqual(
   [],
   `Owned Ghidra runtime survived close; retained workspace: ${workspace}`,
 );
-await rm(workspace, { recursive: true, force: true });
+await workspaceFixture.release();
 console.log(
   JSON.stringify(
     { verifier_run: completed, ...summary, cleanup: "complete" },
