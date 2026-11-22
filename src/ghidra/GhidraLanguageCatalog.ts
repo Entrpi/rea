@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { sha256Hex } from "../kernel/sha256Hex.js";
 import { readdir } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 import { z } from "zod";
@@ -249,8 +250,7 @@ export const admitGhidraLanguageOverride = (
   return null;
 };
 
-const sha256 = (bytes: Uint8Array): string =>
-  createHash("sha256").update(bytes).digest("hex");
+const sha256 = (bytes: Uint8Array): string => sha256Hex(bytes);
 
 // Ghidra 12.1.4 refuses a compiled SLEIGH file over 16 MiB (SlaFormat).
 const MAX_SLA_BYTES = 16 * 1024 * 1024;

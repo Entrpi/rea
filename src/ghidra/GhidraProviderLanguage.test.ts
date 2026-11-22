@@ -274,8 +274,7 @@ describe("Ghidra provider language profile", () => {
     expect(projectAnalysisError(resolved.error)).toMatchObject({
       code: "invalid_request",
       details: {
-        reason:
-          "Absent:LE:32:default is not a language defined by Ghidra 12.1.4",
+        reason: "Absent:LE:32:default is not a language defined by Ghidra 12.2",
         constraint: "load_selection_rejected",
         field: "provider_language",
       },

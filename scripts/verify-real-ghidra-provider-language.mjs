@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { VerifierFixture } from "./lib/verifier-fixture.mjs";
+import { SUPPORTED_GHIDRA_VERSION } from "../dist/ghidra/GhidraReleasePolicy.js";
 import {
   appendFile,
   cp,
@@ -315,7 +316,10 @@ await withServer(ghidra, async ({ call, refuse, fail }) => {
         provider_language: { ...SH4, language_id: "Absent:LE:32:default" },
         entry_point: "0x0",
       },
-      /Absent:LE:32:default is not a language defined by Ghidra 12\.1\.4/u,
+      new RegExp(
+        `Absent:LE:32:default is not a language defined by Ghidra ${SUPPORTED_GHIDRA_VERSION.replaceAll(".", "\\.")}`,
+        "u",
+      ),
     ],
     [
       {
