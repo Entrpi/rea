@@ -291,8 +291,16 @@ request unless all of these are true:
   the compiler spec.
 - The `.sla`, `.pspec` and `.cspec` files that the entry names exist beside its
   `.ldefs` file. REA refuses a missing `.sla`, because Ghidra would compile it
-  into its installation when it loads the language. REA does not change the
-  installation.
+  into its installation when it loads the language.
+
+REA writes nothing to the installation, but Ghidra 12.2 does when the analysis
+user can write it. Loading a language leaves an empty `<language>.sla.lock` file
+beside its `.sla`. Ghidra also recompiles, in place, a `.sla` that is older than
+its `.slaspec` or an included `.sinc` file, or that has an older format version.
+REA then refuses the request, because the `.sla` no longer matches the digest it
+committed. Make the installation read-only to the analysis user to prevent both:
+Ghidra then neither locks nor compiles there.
+
 - The mapped image fits in the address size that the entry declares (`size`).
 
 These are `load_selection_rejected` refusals. A catalog refusal names
@@ -313,14 +321,16 @@ these are true, and a refused import fails that call:
 - The default address space is the language's only loaded memory space.
 
 So REA's claims for a provider language are limited to byte-addressed,
-single-space targets. Of the 177 languages that Ghidra 12.1.4 lists, deprecated
-ones excluded, 128 meet these conditions. The others include Harvard processors such as AVR8, 8051 and PIC;
+single-space targets. Of the 177 languages that Ghidra 12.2 lists, deprecated ones excluded, 128 meet
+these conditions. The count was taken on Ghidra 12.1.4; 12.2 lists the same
+languages, and the only definitions it changes (AARCH64, PowerPC and x86)
+declare the same address spaces. The others include Harvard processors such as AVR8, 8051 and PIC;
 processors with a second loaded space, such as Z80 and 8085 (`io`), RISC-V
 (`csreg`) and V850 (`sysreg`); and languages whose default space differs from
 their declared size, such as x86 real mode and M16C.
 
 `npm run verify:ghidra:provider-language` checks this lane against real Ghidra
-12.1.4; see [testing](../development/testing.md).
+12.2; see [testing](../development/testing.md).
 
 ### Identity of a provider language
 
@@ -338,7 +348,7 @@ and the SHA-256 digests of the four definition files:
 - Session and snapshot identity: `raw_load` (`version: 1`) adds
   `provider_language`, with `provider`, `language_id` and `compiler_spec_id`.
 - The analysis profile commits `language_selection:
-  "caller-provider-language-v1"` and `language_definition` (`version: 1`): the
+  "caller-provider-language"` and `language_definition` (`version: 1`): the
   declared address size and, for each file, its path in the installation and
   its SHA-256.
 - Coordinate identity (`function_coordinate_context`) is keyed by the base, as
@@ -350,58 +360,6 @@ A change to any of the four files changes the analysis profile. Sessions,
 snapshots and function coordinates from the old definition then do not match
 the new one. The load image is the `segments` shape (`version: 1`) with
 `architecture: null`.
-
-### Decision record: the provider language
-
-This is decision F5 of the embedded-target work, option B in
-[#4246](https://github.com/morluto/rea/issues/4246).
-
-- **Choice.** `provider_language: { provider, language_id, compiler_spec_id }`
-  on raw targets, with Ghidra as the only provider. It is exclusive with
-  `architecture` and `architecture_variant`, needs `entry_point`, admits a
-  separate `base_address`, and is valid only when `provider_id` selects its
-  provider. REA checks it against the installed catalog and the image extent
-  before launch, and against the definition Ghidra loaded at import. Claims are
-  limited to byte-addressed, single-space languages. Results record it as
-  caller-selected and unverified, with `architecture: null`. Session, snapshot
-  and coordinate identity cover the definition digests, not only the ID.
-- **Alternatives.** A language beside an `architecture`, checked by byte order
-  and address size only, would admit `x86:LE:32:default` for an `arm` image; a
-  sound override needs a processor table per family, which is additive later.
-  `REA_GHIDRA_LANGUAGE_ID` for raw targets is process-wide, not per target.
-  Identity by language ID alone would replay sessions and snapshots of a
-  module that changed in place. A digest of the `<language>` element alone
-  needs a canonical XML form; the whole `.ldefs` document is a superset, so an
-  unrelated entry in the same file also changes identity. Digesting SLEIGH
-  sources instead of the `.sla` would need the preprocessor's include rules,
-  and Ghidra decodes from the `.sla`. Approximating Ghidra's staleness rule
-  before launch would miss cases; the import check compares the bytes Ghidra
-  loaded. Applying processor-defined labels would bring unverified labels and
-  entries from each language's `.pspec`. Admitting languages with a second
-  loaded space whose code and data share the default space (RISC-V, Z80)
-  needs space roles per language, and Harvard targets need space-qualified
-  addresses; both are additive later. Automatic provider selection and a
-  language-default compiler spec are additive later too.
-- **Owner and consumers.** `src/contracts/providerLanguage.ts` owns the input
-  contract and the Ghidra ID syntax. `src/domain/providerLanguage.ts` owns the
-  opaque selection, its persisted form and the provider rule; the domain never
-  reads the language fields. Raw admission owns pairing, the extent and
-  `raw_load`. `src/ghidra/GhidraLanguageCatalog.ts` owns the catalog, the
-  definition files and the committed `language_definition`. The Ghidra profile
-  owns the coordinate context, and the raw preparation script owns the import
-  checks. Consumers are the CLI and MCP inputs, target summaries, the snapshot
-  target, the Ghidra profile, launcher, preparation script and load-image
-  attestation, and the docs.
-- **Costs of change.** Code: renaming an input is an alias with a deprecation
-  period; widening the space rule or admitting a family beside a language is an
-  additive admission branch. Compatibility: `raw_load.provider_language` and
-  `language_definition` are permanent once released, so changes ship as a new
-  `version`. Versions before this one refuse a snapshot or `segments` image
-  with `architecture: null` instead of misreading it. If D1 is released before
-  this record, `provider_language` ships as `raw_load` `version: 2`.
-  Migration: none for existing loads, whose identity is unchanged.
-  Verification: rerun `npm run verify:ghidra:provider-language`, which needs
-  Ghidra 12.1.4 and JDK 21.
 
 ## NMOS 6502
 
