@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { VerifierFixture } from "./lib/verifier-fixture.mjs";
 import {
   appendFile,
   cp,
   mkdir,
-  mkdtemp,
   readFile,
   readdir,
   realpath,
-  rm,
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
@@ -79,7 +78,11 @@ const M6809 = {
 };
 
 await mkdir(join(root, "build"), { recursive: true });
-const workspace = await mkdtemp(join(root, "build", "rea-language-proof-"));
+const workspaceFixture = await VerifierFixture.open({
+  prefix: "rea-language-proof-",
+  parent: join(root, "build"),
+});
+const workspace = workspaceFixture.path;
 const runtime = join(workspace, "runtime");
 await mkdir(runtime);
 const sh4Path = join(workspace, "sh4.bin");
@@ -505,7 +508,7 @@ const verifierRun = await completeVerifierRun(run);
 assert.equal(verifierRun.process_lineage.status, "verified");
 assert.deepEqual(verifierRun.process_lineage.descendants, []);
 // Keep the workspace for diagnosis unless verification and cleanup both pass.
-await rm(workspace, { recursive: true, force: true });
+await workspaceFixture.release();
 process.stdout.write(
   JSON.stringify({ verifier_run: verifierRun, ...report }) + "\n",
 );
