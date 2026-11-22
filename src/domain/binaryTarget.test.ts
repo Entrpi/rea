@@ -34,6 +34,26 @@ describe("executable header parsing", () => {
     expect(result.ok && result.value).toMatchObject({ format, architecture });
   });
 
+  it("keeps Xtensa ELF declarations as facts and leaves the ABI uninspected", () => {
+    const bytes = elf(1, 1, 94);
+    bytes.writeUInt16LE(2, 16);
+    bytes.writeUInt32LE(0x300, 36);
+    expect(parseExecutableHeader(bytes, "x64")).toEqual({
+      ok: true,
+      value: {
+        format: "elf",
+        architecture: "xtensa",
+        availableArchitectures: ["xtensa"],
+        xtensa: { elfClass: 32, byteOrder: "little", type: 2, flags: 0x300 },
+      },
+    });
+    // EM_XTENSA_OLD (0xabc7) predates the assigned machine and stays unrecognized.
+    expect(parseExecutableHeader(elf(1, 1, 0xabc7), "x64")).toEqual({
+      ok: false,
+      error: "unsupported ELF architecture: e_machine 43975",
+    });
+  });
+
   it("distinguishes native PE applications, DLLs, and managed assemblies", () => {
     const application = parseExecutableHeader(pe(0x8664), "x64");
     const library = parseExecutableHeader(pe(0x8664, 64, 0x2002), "x64");

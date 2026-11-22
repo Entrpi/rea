@@ -624,8 +624,11 @@ describe("Ghidra provider", () => {
 });
 
 describe("Ghidra Xtensa ELF support", () => {
-  it("admits parsed Xtensa targets through profile selection", async () => {
-    const parsed = parseExecutableHeader(elf(1, 1, 94), "x64");
+  it("refuses an Xtensa header without its .xtensa.info declarations instead of guessing the ABI", async () => {
+    // A fixed-address ET_EXEC header, so the lane reaches its ABI check.
+    const header = elf(1, 1, 94);
+    header.writeUInt16LE(2, 16);
+    const parsed = parseExecutableHeader(header, "x64");
     if (!parsed.ok) throw new Error("Expected valid Xtensa ELF target");
     const target: BinaryTarget = {
       path: "/tmp/esp32s3.elf",
@@ -635,20 +638,13 @@ describe("Ghidra Xtensa ELF support", () => {
     };
     const ghidra = provider();
     expect(ghidra.inspectTargetSupport(target)).toMatchObject({
-      status: "supported",
+      status: "unsupported",
+      code: "architecture_unsupported",
+      reason: expect.stringContaining(
+        "The Xtensa ABI declaration in .xtensa.info was not inspected",
+      ),
     });
-    const resolved = await ghidra.resolveAnalysisProfile(target);
-    expect(resolved.ok && resolved.value).toMatchObject({
-      profile: {
-        parameters: {
-          target_format: "elf",
-          architecture: "xtensa",
-          loader: "auto-from-header",
-          language_id: "auto-from-header",
-          compiler_spec_id: "auto-default",
-        },
-      },
-    });
+    expect((await ghidra.resolveAnalysisProfile(target)).ok).toBe(false);
   });
 });
 

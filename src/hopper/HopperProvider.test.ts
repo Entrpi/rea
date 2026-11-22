@@ -206,6 +206,7 @@ describe("Hopper Xtensa support", () => {
       format: "elf",
       architecture: "xtensa",
       availableArchitectures: ["xtensa"],
+      xtensa: { elfClass: 32, byteOrder: "little", type: 2, flags: 0 },
     } as const satisfies BinaryTarget;
     expect(provider.inspectTargetSupport(target)).toMatchObject({
       status: "unsupported",

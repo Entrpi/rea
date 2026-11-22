@@ -68,6 +68,7 @@ export const ELF_METADATA_ARCHITECTURES = [
   "mips",
   "riscv",
   "powerpc",
+  "xtensa",
 ] as const satisfies readonly BinaryArchitecture[];
 
 /** Families that require a specialized target variant instead of generic headers. */
@@ -75,7 +76,6 @@ export const HEADER_ARCHITECTURE_EXCLUSIONS = [
   ...ELF_METADATA_ARCHITECTURES,
   ...RAW_ONLY_ARCHITECTURES,
   "hexagon",
-  "xtensa",
   "arm64_32",
 ] as const satisfies readonly BinaryArchitecture[];
 
@@ -162,6 +162,64 @@ export interface MipsGnuAttributes {
   readonly msa: number | null;
 }
 
+/**
+ * Raw ELF facts; Xtensa `e_flags` carry no ABI or literal addressing, which
+ * `.xtensa.info` declares. Both declarations are undefined until that section
+ * is inspected.
+ */
+export interface XtensaElfMetadata
+  extends ElfFamilyMetadata, Partial<XtensaInfoDeclarations> {}
+
+/**
+ * What the `.xtensa.info` note that GNU as and ld write declares. A note REA
+ * cannot read leaves both unknown.
+ */
+export interface XtensaInfoDeclarations {
+  readonly abi: XtensaAbiDeclaration;
+  readonly literals: XtensaLiteralDeclaration;
+}
+
+/**
+ * The `ABI=` declaration. Values outside binutils' windowed (0) and call0 (1)
+ * are kept as written.
+ */
+export type XtensaAbiDeclaration =
+  | { readonly status: "declared"; readonly abi: "windowed" | "call0" }
+  | XtensaInfoUndeclared;
+
+/**
+ * The `USE_ABSOLUTE_LITERALS=` declaration: binutils writes 0 for PC-relative
+ * L32R literals and 1 for a configuration whose L32R literals are addressed
+ * from `LITBASE` (the Extended L32R option). Other values are kept as written.
+ */
+export type XtensaLiteralDeclaration =
+  | {
+      readonly status: "declared";
+      readonly literals: "pc-relative" | "absolute";
+    }
+  | XtensaInfoUndeclared;
+
+/** A `.xtensa.info` key without a value binutils defines. */
+export type XtensaInfoUndeclared =
+  | { readonly status: "unrecognized"; readonly value: string }
+  /** Examined: no `.xtensa.info` section, or a note without the key. */
+  | { readonly status: "absent" }
+  /** The declaration is unreadable or malformed; its value remains unknown. */
+  | {
+      readonly status: "unavailable";
+      readonly reason: string;
+      /** Present when a fixed REA bound, not the file, stopped the read. */
+      readonly limit?: XtensaInfoBound;
+    };
+
+/** A fixed inspection bound; this release has no runtime override for it. */
+export interface XtensaInfoBound {
+  readonly boundary: "xtensa_info";
+  readonly maximum_bytes: number;
+  readonly declared_bytes: number;
+  readonly runtime_override: false;
+}
+
 /** Byte range of the selected slice inside its universal Mach-O container. */
 export interface UniversalMachOSlice {
   readonly offset: number;
@@ -235,16 +293,18 @@ export type BinaryTarget =
   | (BinaryTargetIdentity & {
       readonly kind: "executable";
       readonly format: "elf";
-      readonly architecture: "hexagon";
-      readonly availableArchitectures: readonly "hexagon"[];
+      readonly architecture: "xtensa";
+      readonly availableArchitectures: readonly "xtensa"[];
+      /** The header does not identify the core configuration. */
+      readonly xtensa: XtensaElfMetadata;
       readonly executableRole?: never;
       readonly managed?: never;
     })
   | (BinaryTargetIdentity & {
       readonly kind: "executable";
       readonly format: "elf";
-      readonly architecture: "xtensa";
-      readonly availableArchitectures: readonly "xtensa"[];
+      readonly architecture: "hexagon";
+      readonly availableArchitectures: readonly "hexagon"[];
       readonly executableRole?: never;
       readonly managed?: never;
     })

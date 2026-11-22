@@ -63,6 +63,7 @@ import {
 } from "../domain/binaryTargetTypes.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { readMipsElfMetadata } from "./MipsElfMetadata.js";
+import { readXtensaElfInfo } from "./XtensaElfMetadata.js";
 import {
   validateElfDeclaredRanges,
   type ElfDeclarationRead,
@@ -1143,6 +1144,16 @@ const readElfMetadata = async (
     signal,
   );
   if (!ranges.ok) return ranges;
+  if (parsed.value.architecture === "xtensa")
+    return ok({
+      ...parsed.value,
+      xtensa: {
+        ...parsed.value.xtensa,
+        ...(await readXtensaElfInfo(handle, fileSize, () =>
+          throwIfTargetResolutionCancelled(signal),
+        )),
+      },
+    });
   if (parsed.value.architecture === "riscv")
     return ok({
       ...parsed.value,

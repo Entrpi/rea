@@ -24,7 +24,7 @@ snapshot parser and a separate optional annotation extension. Check the
 [release boundary](../getting-started/installation.md#released-package-and-main) when using npm.
 
 See [import language and analysis seeds](../getting-started/installation.md#ghidra-import-language-and-analysis-seeds)
-to override the header-detected language or seed analysis. An override that conflicts with a fixed raw, DOS, PSP, MIPS, RISC-V or GameCube DOL import
+to override the header-detected language or seed analysis. An override that conflicts with a fixed raw, DOS, PSP, MIPS, RISC-V, Xtensa or GameCube DOL import
 is a configuration error naming the conflicting settings. It does not make an
 otherwise admitted target unsupported; REA preserves the requested settings.
 An inaccessible language
@@ -33,10 +33,12 @@ undefined. Installation `application.properties` has a fixed 1 MiB read allowanc
 with no runtime override. The failure retains that allowance and directs recovery
 at the selected installation metadata.
 
-Xtensa ELF files (`EM_XTENSA = 94`) use the header-selected Ghidra import
-language and report the canonical `xtensa` architecture in CLI/MCP results.
-Processor extensions and calling-convention compatibility remain specific to
-the selected Ghidra language; family recognition alone does not establish them.
+Xtensa ELF files (`EM_XTENSA = 94`) report the canonical `xtensa`
+architecture in CLI/MCP results. Ghidra opens only the 32-bit little-endian
+windowed-ABI executables that the [Xtensa lane](ghidra-xtensa.md) admits, with
+a pinned language; other Xtensa ELF files are refused with the reason. Processor
+extensions and calling-convention compatibility remain specific to that
+language; family recognition alone does not establish them.
 
 Retained process diagnostics can report termination by `SIGKILL`; the signal alone
 cannot establish an OOM kill. REA gives neutral recovery guidance and preserves the

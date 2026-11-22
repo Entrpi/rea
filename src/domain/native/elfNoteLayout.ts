@@ -20,6 +20,17 @@ export const elfNoteAlignment = (
   declared: number | bigint,
 ): ElfNoteAlignment => (declared === 8 || declared === 8n ? 8 : 4);
 
+/**
+ * The note padding a declared `sh_addralign` selects, as GNU readelf reads one
+ * section's notes: up to 4 pads to 4 and 8 pads to 8. Readelf reports any other
+ * value as a corrupt note and reads none of that section's notes, so it selects
+ * no padding here.
+ */
+export const declaredElfNoteAlignment = (
+  declared: bigint,
+): ElfNoteAlignment | undefined =>
+  declared <= 4n ? 4 : declared === 8n ? 8 : undefined;
+
 /** Fixed ELF note words without interpreting the rest of the table. */
 export const readElfNoteHeader = (bytes: Uint8Array, littleEndian: boolean) => {
   if (bytes.byteLength < ELF_NOTE_HEADER_BYTES)
