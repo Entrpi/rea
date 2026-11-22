@@ -23,6 +23,11 @@ describe("REA's CLI command table", () => {
           architecture_variant: "--architecture-variant",
           base_address: "--base-address",
           vector_table_address: "--vector-table-address",
+          // Each member flag sets its own member; the field as a whole is named
+          // by its first member's flag.
+          provider_language: "--ghidra-language-id",
+          "provider_language.language_id": "--ghidra-language-id",
+          "provider_language.compiler_spec_id": "--ghidra-compiler-spec-id",
           entry_point: "--entry-point",
           provider_id: "--provider",
           snapshot_path: "--snapshot",
