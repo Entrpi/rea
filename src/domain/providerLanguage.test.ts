@@ -12,7 +12,7 @@ import {
   PROVIDER_LANGUAGE_PAIRING,
   rawBinarySelectionError,
 } from "./rawBinary.js";
-import { executableFormatHintSchema } from "./dosCom.js";
+import { TARGET_FORMAT_HINTS } from "./targetFormats.js";
 
 const analysisSnapshotTargetSchema = analysisSnapshotSchema.shape.target;
 
@@ -106,7 +106,7 @@ describe("provider language pairing", () => {
   });
 
   it.each(
-    [undefined, ...executableFormatHintSchema.options].filter(
+    [undefined, ...TARGET_FORMAT_HINTS].filter(
       (format) => format !== "raw-binary",
     ),
   )("refuses a provider language with format %s", (format) => {

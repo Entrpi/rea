@@ -139,8 +139,8 @@ await withServer(ghidra, async ({ call, refuse, fail }) => {
     },
   ]);
   const parameters = image.analysis_profile.parameters;
-  assert.equal(parameters.language_selection, "caller-provider-language-v1");
-  assert.equal(parameters.processor_labels, "not-applied-v1");
+  assert.equal(parameters.language_selection, "caller-provider-language");
+  assert.equal(parameters.processor_labels, "not-applied");
   assert.equal(parameters.architecture, null);
   const definition = parameters.language_definition;
   assert.equal(definition.address_bits, 32);
@@ -563,9 +563,9 @@ async function withServer(installDir, body) {
 
 function evidence(value, bytes) {
   const result = parseEvidence(value);
-  assert.equal(result.subject.digest.sha256, sha256(bytes));
+  assert.equal(result.subject.identity.sha256, sha256(bytes));
   // A provider language names no family.
-  assert.equal(result.subject.architecture, null);
-  assert.equal(result.subject.format, "raw-binary");
+  assert.equal(result.subject.identity.architecture, null);
+  assert.equal(result.subject.identity.format, "raw-binary");
   return result;
 }
