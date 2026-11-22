@@ -267,6 +267,10 @@ export interface GhidraHeadlessLauncherOptions {
   };
   /** Explicit import language committed by the analysis profile. */
   readonly languageOverride?: GhidraLanguageOverride;
+  /** False imports with the language override but without its default labels. */
+  readonly applyProcessorLabels?: false;
+  /** Prototype the DWARF analyzer gives the signatures it imports, as committed. */
+  readonly dwarfCallingConvention?: string;
   /** Auto-analyzers disabled before default auto-analysis, as configured. */
   readonly disabledAnalyzers?: readonly string[];
   /** Per-function native decompiler limit passed to the bridge; absent is unbounded. */
@@ -504,6 +508,12 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
         ...(this.options.languageOverride === undefined
           ? {}
           : { languageOverride: this.options.languageOverride }),
+        ...(this.options.applyProcessorLabels === undefined
+          ? {}
+          : { applyProcessorLabels: this.options.applyProcessorLabels }),
+        ...(this.options.dwarfCallingConvention === undefined
+          ? {}
+          : { dwarfCallingConvention: this.options.dwarfCallingConvention }),
         ...(seedPath === undefined ? {} : { seedPath }),
         ...(this.options.disabledAnalyzers === undefined
           ? {}
@@ -833,6 +843,10 @@ export interface GhidraHeadlessArgumentOptions {
     readonly sectionFilePath: string;
   };
   readonly languageOverride?: GhidraLanguageOverride;
+  /** False imports with the language override but without its default labels. */
+  readonly applyProcessorLabels?: false;
+  /** Prototype the DWARF analyzer gives the signatures it imports. */
+  readonly dwarfCallingConvention?: string;
   /** Bare-hex ElfLoader image base; the loader's default may shift the image. */
   readonly elfImageBase?: string;
   /** Auto-analyzers disabled by the pre-analysis options script. */
@@ -856,6 +870,7 @@ type ExistingProjectOptions = Pick<
   | "elfImageBase"
   | "seedPath"
   | "disabledAnalyzers"
+  | "dwarfCallingConvention"
 > & { readonly analysisSeeds?: GhidraSeedCommitment };
 
 /** Admit existing-project compatibility before any runtime writes. */
@@ -893,7 +908,8 @@ const validateExistingProjectOptions = (
     if (
       options.seedPath !== undefined ||
       options.analysisSeeds !== undefined ||
-      (options.disabledAnalyzers?.length ?? 0) > 0
+      (options.disabledAnalyzers?.length ?? 0) > 0 ||
+      options.dwarfCallingConvention !== undefined
     )
       throw new GhidraAdmissionError("existing_project_analysis");
   }
@@ -968,6 +984,10 @@ export const ghidraHeadlessArguments = (
     throw new GhidraAdmissionError("language_override_dos");
   if (override !== undefined && rawBinary !== undefined)
     throw new GhidraAdmissionError("language_override_raw_binary");
+  if (options.applyProcessorLabels === false && override === undefined)
+    throw new GhidraAdmissionError("processor_labels_scope");
+  if (options.dwarfCallingConvention !== undefined && override === undefined)
+    throw new GhidraAdmissionError("dwarf_calling_convention_scope");
   if (
     rawBinary !== undefined &&
     (options.dosMz === true || options.dosCom !== undefined)
@@ -1054,6 +1074,9 @@ export const ghidraHeadlessArguments = (
                         ...(override === undefined
                           ? []
                           : [
+                              ...(options.applyProcessorLabels === false
+                                ? ["-loader-applyLabels", "false"]
+                                : []),
                               "-processor",
                               override.languageId,
                               ...(override.compilerSpecId === undefined
@@ -1152,6 +1175,18 @@ export const ghidraHeadlessArguments = (
             GHIDRA_BRIDGE_SOURCES.analysisOptions,
           ),
           options.disabledAnalyzers.join(","),
+        ]),
+    // DWARF signatures are created during auto-analysis, so the prototype
+    // they use is selected before it.
+    ...(options.dwarfCallingConvention === undefined
+      ? []
+      : [
+          "-preScript",
+          scriptPath.join(
+            bridgeDirectory,
+            GHIDRA_BRIDGE_SOURCES.dwarfCallingConvention,
+          ),
+          options.dwarfCallingConvention,
         ]),
     ...(existing !== undefined ||
     (options.platform ?? HOST_PLATFORM.platform) === "win32"

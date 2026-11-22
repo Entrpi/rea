@@ -119,6 +119,13 @@ import {
 } from "./GhidraPspProfile.js";
 import { ghidraPspExtensionSchema } from "./GhidraPspExtension.js";
 import {
+  ghidraArmDwarfCallingConvention,
+  ghidraArmDwarfCallingConventionFailure,
+  ghidraArmDwarfCallingConventionLimitations,
+  ghidraArmLimitations,
+  ghidraArmProfileMismatchReason,
+} from "./GhidraArmProfile.js";
+import {
   ghidraRiscvCallingConvention,
   ghidraRiscvCallingConventionFailure,
   ghidraRiscvCallingConventionLimitations,
@@ -604,6 +611,17 @@ export const createGhidraProviderClient = (input: {
   );
   if (xtensaProfileMismatch !== null)
     return err(ghidraProfileConflict("open_binary", xtensaProfileMismatch));
+  const armProfileMismatch = ghidraArmProfileMismatchReason(
+    target,
+    committedProfile.parameters,
+    parameterLanguage,
+  );
+  if (armProfileMismatch !== null)
+    return err(ghidraProfileConflict("open_binary", armProfileMismatch));
+  // Bound to the committed profile, which the check above ties to the target.
+  const armDwarfCallingConvention = ghidraArmDwarfCallingConvention(
+    committedProfile.parameters,
+  );
   const importLanguage = parameterLanguage;
   const disabledAnalyzers = ghidraProfileDisabledAnalyzers(
     committedProfile.parameters,
@@ -645,6 +663,8 @@ export const createGhidraProviderClient = (input: {
   ];
   // Replaced by the reported per-program outcome once the handshake is checked.
   const disabledAnalyzerLimitations: string[] = [];
+  // Replaced by the reported DWARF prototype outcome once the handshake is checked.
+  const armDwarfLimitations: string[] = [];
   const rawLanguage =
     target.format === "raw-binary"
       ? ghidraRawBinaryLanguage(
@@ -685,6 +705,7 @@ export const createGhidraProviderClient = (input: {
     ...ghidraMipsSharedLimitations(target),
     ...ghidraRiscvLimitations(target),
     ...ghidraXtensaLimitations(target),
+    ...ghidraArmLimitations(target, committedProfile.parameters),
   ];
   const providerLimitations =
     installation.platform === "win32"
@@ -787,7 +808,18 @@ export const createGhidraProviderClient = (input: {
           }
         : importLanguage === undefined
           ? {}
-          : { languageOverride: importLanguage }),
+          : {
+              languageOverride: importLanguage,
+              // The M-profile ARM ELF profile commits the same label policy.
+              ...(target.format === "elf" &&
+              committedProfile.parameters.processor_labels ===
+                GHIDRA_PROCESSOR_LABELS_NOT_APPLIED
+                ? { applyProcessorLabels: false as const }
+                : {}),
+              ...(armDwarfCallingConvention === undefined
+                ? {}
+                : { dwarfCallingConvention: armDwarfCallingConvention }),
+            }),
       ...(config.ghidraDisabledAnalyzers === undefined
         ? {}
         : { disabledAnalyzers: config.ghidraDisabledAnalyzers }),
@@ -891,6 +923,10 @@ export const createGhidraProviderClient = (input: {
         ghidraRiscvCallingConventionFailure(
           riscvCallingConvention,
           info.riscv_calling_convention,
+        ) ??
+        ghidraArmDwarfCallingConventionFailure(
+          armDwarfCallingConvention,
+          info.dwarf_calling_convention,
         );
       extensionFailure =
         ghidraExtensionFailure(
@@ -943,6 +979,14 @@ export const createGhidraProviderClient = (input: {
           0,
           disabledAnalyzerLimitations.length,
           ...ghidraDisabledAnalyzerLimitations(info.disabled_analyzers),
+        );
+      if (extensionFailure === undefined)
+        armDwarfLimitations.splice(
+          0,
+          armDwarfLimitations.length,
+          ...ghidraArmDwarfCallingConventionLimitations(
+            info.dwarf_calling_convention,
+          ),
         );
     }
     if (extensionFailure === undefined) return undefined;
@@ -997,6 +1041,7 @@ export const createGhidraProviderClient = (input: {
       ...(psp ? GHIDRA_PSP_LIMITATIONS : []),
       ...softFloatLimitations,
       ...riscvPolicyLimitations,
+      ...armDwarfLimitations,
       ...ghidraExtensionLimitations(extensions),
       ...seedLimitations,
       ...disabledAnalyzerLimitations,

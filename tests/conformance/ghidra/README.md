@@ -25,6 +25,15 @@ no-overwrite CLI delivery. It checks the target and project files for changes.
   Clang/LLD/LLVM readelf/LLVM objdump; `REA_RISCV_CLANG`, `REA_RISCV_LLD`,
   `REA_RISCV_READELF` and `REA_RISCV_OBJDUMP` select existing tool commands.
 
+- `../c/cortex-m.c` and `cortex-m-vectors.S` produce source-owned M-profile ARM
+  ELF executables, with an M-profile vector table, float arguments, M-profile
+  system registers, an ARMv8.1-M low-overhead loop and a handler that only the
+  vector table references.
+  `npm run verify:ghidra:cortex-m-elf` builds them for every M-profile variant,
+  with soft-float, softfp and hard-float ARMv7E-M builds and an ARMv7-A control. It
+  requires BYO Ghidra 12.2/JDK 25+ and LLVM with Arm targets; `REA_CLANG`,
+  `REA_LLD`, `REA_LLVM_STRIP`, `REA_LLVM_READELF` and `REA_LLVM_OBJDUMP` select
+  existing tool commands.
 - `../c/ppc64.c` and `ppc64-probe.S` produce source-owned ELFv2 PPC64
   executables in both byte orders, with TOC-using functions that have separate
   global and local entries and a VSX instruction only Power ISA languages

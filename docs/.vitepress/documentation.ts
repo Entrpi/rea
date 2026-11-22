@@ -589,6 +589,11 @@ export const documentationSections = [
         route: "/ghidra-nativeaot",
       },
       {
+        text: "ARM ELF analysis through Ghidra",
+        source: "providers/ghidra-arm.md",
+        route: "/ghidra-arm",
+      },
+      {
         text: "MIPS ELF analysis through Ghidra",
         source: "providers/ghidra-mips.md",
         route: "/ghidra-mips",

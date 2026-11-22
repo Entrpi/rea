@@ -2,6 +2,7 @@
 // for its triple, the .text bytes must equal the fixture bytes, and
 // llvm-objdump gives the mnemonic at each instruction offset. Data the source
 // declares (an ARM `$d` mapping symbol) is not an instruction.
+// sameThumbMnemonic compares Ghidra's mnemonic with LLVM's.
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -97,4 +98,35 @@ export const llvmThumbMnemonics = async (fixture, llvm) => {
   }
   assert.ok(mnemonics.size > 0, "llvm-objdump reported no instructions");
   return mnemonics;
+};
+
+/**
+ * One spelling for both decoders, which write an encoding width (ldr.w) and an
+ * IT-block condition (Ghidra mov.eq, LLVM moveq) differently.
+ */
+const canonicalMnemonic = (name) =>
+  name
+    ?.toLowerCase()
+    .replace(/\.[nw]$/u, "")
+    .replace(/\.(eq|ne|cs|hs|cc|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le|al)$/u, "$1");
+
+/**
+ * Whether Ghidra and LLVM name the same instruction. A data type that gives
+ * only the element size (Ghidra vldrw.32) matches one that adds signedness
+ * (LLVM vldrw.u32); opposite signedness does not.
+ */
+export const sameThumbMnemonic = (ghidra, llvm) => {
+  const left = canonicalMnemonic(ghidra) ?? "";
+  const right = canonicalMnemonic(llvm) ?? "";
+  if (left === right) return true;
+  const typed = /^(.+)\.([su]?)(8|16|32|64)$/u;
+  const a = typed.exec(left);
+  const b = typed.exec(right);
+  return (
+    a !== null &&
+    b !== null &&
+    a[1] === b[1] &&
+    a[3] === b[3] &&
+    (a[2] === "" || b[2] === "")
+  );
 };
