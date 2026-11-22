@@ -470,7 +470,8 @@ await withServer(copy, async ({ call, refuse }) => {
       provider_id: "ghidra",
       snapshot_path: snapshot,
     },
-    /profile_mismatch/u,
+    // The changed definition changes the committed profile digest.
+    /binding_mismatch[^}]*profile_digest/u,
   );
   await open();
   const after = await profile();
