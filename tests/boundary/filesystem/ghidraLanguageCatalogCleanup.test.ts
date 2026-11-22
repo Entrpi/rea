@@ -333,9 +333,10 @@ it("merges sibling cleanup observations and leases across concurrent definition 
 
   first.closeFails = false;
   second.closeFails = false;
-  expect(
-    await readGhidraLanguageCatalog(await installation("x86"), resources),
-  ).toEqual([{ id: "x86:LE:32:default", compilerSpecIds: [] }]);
+  const x86 = await installation("x86");
+  expect(await readGhidraLanguageCatalog(x86, resources)).toEqual(
+    catalogOf(x86, "x86"),
+  );
   expect(first.closeCalls).toBe(2);
   expect(second.closeCalls).toBe(2);
   expect(resources.hasPending).toBe(false);
