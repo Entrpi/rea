@@ -1,3 +1,4 @@
+import { BinaryReader } from "./binaryContainer.js";
 import type { ArchitectureVariant } from "./architectureVariant.js";
 import { err, ok, type Result } from "./result.js";
 
@@ -41,31 +42,33 @@ const READ_TAGS: ReadonlyMap<number, keyof ArmBuildAttributes> = new Map(
 type Declarations = Record<keyof ArmBuildAttributes, number | null>;
 
 /** Bounded readers over one attribute section, in the containing ELF's byte order. */
-const attributeReader = (bytes: Buffer, littleEndian: boolean) => ({
-  bytes,
-  u32: (offset: number): number =>
-    littleEndian ? bytes.readUInt32LE(offset) : bytes.readUInt32BE(offset),
-  uleb: (
-    offset: number,
-    end: number,
-  ): { readonly value: number; readonly next: number } | undefined => {
-    let value = 0;
-    for (let index = 0; index < 5 && offset + index < end; index += 1) {
-      const byte = bytes[offset + index]!;
-      value += (byte & 0x7f) * 2 ** (7 * index);
-      if ((byte & 0x80) === 0)
-        return value <= 0xffffffff
-          ? { value, next: offset + index + 1 }
-          : undefined;
-    }
-    return undefined;
-  },
-  /** The offset after a NUL-terminated string that ends before `end`. */
-  string: (offset: number, end: number): number | undefined => {
-    const terminator = bytes.indexOf(0, offset);
-    return terminator < 0 || terminator >= end ? undefined : terminator + 1;
-  },
-});
+const attributeReader = (bytes: Buffer, littleEndian: boolean) => {
+  const reader = new BinaryReader(bytes, littleEndian, "elf");
+  return {
+    bytes,
+    u32: (offset: number): number => reader.u32(offset),
+    uleb: (
+      offset: number,
+      end: number,
+    ): { readonly value: number; readonly next: number } | undefined => {
+      let value = 0;
+      for (let index = 0; index < 5 && offset + index < end; index += 1) {
+        const byte = bytes[offset + index]!;
+        value += (byte & 0x7f) * 2 ** (7 * index);
+        if ((byte & 0x80) === 0)
+          return value <= 0xffffffff
+            ? { value, next: offset + index + 1 }
+            : undefined;
+      }
+      return undefined;
+    },
+    /** The offset after a NUL-terminated string that ends before `end`. */
+    string: (offset: number, end: number): number | undefined => {
+      const terminator = bytes.indexOf(0, offset);
+      return terminator < 0 || terminator >= end ? undefined : terminator + 1;
+    },
+  };
+};
 type AttributeReader = ReturnType<typeof attributeReader>;
 
 /**
