@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { sha256Hex } from "../kernel/sha256Hex.js";
 import { readdir } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
@@ -465,9 +464,9 @@ export const resolveGhidraLanguageDefinition = (
       return err(
         `REA cannot confirm that ${languageId} has exactly one .ldefs entry: ${installPath(unexamined)}${
           catalog.oversizedFiles.length > 1
-            ? ` and ${String(catalog.oversizedFiles.length - 1)} more .ldefs files`
-            : ""
-        } exceed the ${String(MAX_LDEFS_BYTES)}-byte bound and were not examined`,
+            ? ` and ${String(catalog.oversizedFiles.length - 1)} more .ldefs files exceed the ${String(MAX_LDEFS_BYTES)}-byte bound and were`
+            : ` exceeds the ${String(MAX_LDEFS_BYTES)}-byte bound and was`
+        } not examined`,
       );
     const matches = catalog.definitions.filter(
       (language) => language.id === languageId,
