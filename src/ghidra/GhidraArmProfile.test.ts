@@ -46,15 +46,6 @@ import {
   ghidraVariantProcessorLabels,
 } from "./GhidraRawBinaryLanguage.js";
 
-// Computed by upstream main at 2885347cd, which has no ARM ELF lane, for an
-// ARM ELF without and with REA_GHIDRA_LANGUAGE_ID=ARM:LE:32:Cortex. Targets
-// outside the lane, and a caller-selected language, keep these digests and so
-// their snapshots.
-const AUTO_DIGEST =
-  "b124b79b6374e97e0490d5958ecd6473f935fb0649683433c88dc0191bbeed1e";
-const CORTEX_OVERRIDE_DIGEST =
-  "f6f887eb41ed5145378ae0022826c7ef446e45ca1127fded040a19f63d94fc4e";
-
 // Abbreviated from Ghidra 12.1.4 Processors/ARM/data/languages/ARM.ldefs.
 const ARM_LDEFS = `<?xml version="1.0" encoding="UTF-8"?>
 <language_definitions>
@@ -165,6 +156,18 @@ const profile = async (
   return resolved.value.profile;
 };
 
+// The header-selected profile of an ARM ELF whose attributes were not read,
+// without and with REA_GHIDRA_LANGUAGE_ID=ARM:LE:32:Cortex: the profile from
+// before the lane. Targets outside the lane, and a caller-selected language,
+// commit the same profile.
+const autoDigest = async () => (await profile(armElf(undefined))).digest;
+const cortexOverrideDigest = async () =>
+  (
+    await profile(armElf(undefined), {
+      REA_GHIDRA_LANGUAGE_ID: "ARM:LE:32:Cortex",
+    })
+  ).digest;
+
 describe("M-profile ARM ELF lanes", () => {
   it("names one versioned lane per variant", () => {
     // Lane ids are persisted in analysis profiles; renaming one is a new lane.
@@ -209,7 +212,7 @@ describe.each(ARM_ELF_M_PROFILE_ARCHITECTURES)(
         loader: "auto-from-header",
         language_id: language.languageId,
         compiler_spec_id: "default",
-        language_selection: "provider-pinned-v1",
+        language_selection: "provider-pinned",
         arm_elf: {
           elf_class: 32,
           byte_order: "little",
@@ -222,7 +225,7 @@ describe.each(ARM_ELF_M_PROFILE_ARCHITECTURES)(
         processor_labels: ghidraVariantProcessorLabels(row.variant),
       });
       // The pinned profile is a new identity, so earlier snapshots are not reused.
-      expect(committed.digest).not.toBe(AUTO_DIGEST);
+      expect(committed.digest).not.toBe(await autoDigest());
       expect(
         sameGhidraLanguageOverride(
           ghidraProfileLanguageOverride(committed.parameters),
@@ -256,7 +259,7 @@ describe.each(ARM_ELF_M_PROFILE_ARCHITECTURES)(
       ] as const) {
         const committed = await profile(target, environment);
         // The selection is the caller's; the import and its lane are the pin's.
-        expect(committed.parameters.language_selection).toBe("configured-v1");
+        expect(committed.parameters.language_selection).toBe("configured");
         expect(omit(committed.parameters, selection)).toEqual(
           omit(pinned.parameters, selection),
         );
@@ -277,7 +280,7 @@ describe.each(ARM_ELF_M_PROFILE_ARCHITECTURES)(
       const outside = await profile(armElf(declared(10, A, 1)), environment);
       expect(committed.digest).toBe(outside.digest);
       if (other === "ARM:LE:32:Cortex")
-        expect(committed.digest).toBe(CORTEX_OVERRIDE_DIGEST);
+        expect(committed.digest).toBe(await cortexOverrideDigest());
       expect(committed.parameters).not.toHaveProperty("arm_support_lane");
       expect(mismatch(target, committed.parameters)).toBe(null);
       expect(ghidraArmLimitations(target, committed.parameters)).toEqual([
@@ -348,7 +351,7 @@ describe("ARM ELF images outside the M-profile lane", () => {
       );
       expect(ghidraPinnedLanguage(target)).toBeUndefined();
       const committed = await profile(target);
-      expect(committed.digest).toBe(AUTO_DIGEST);
+      expect(committed.digest).toBe(await autoDigest());
       expect(mismatch(target, committed.parameters)).toBe(null);
       expect(ghidraArmLimitations(target, committed.parameters)).toEqual(
         reason === undefined
@@ -361,7 +364,7 @@ describe("ARM ELF images outside the M-profile lane", () => {
       const configured = await profile(target, {
         REA_GHIDRA_LANGUAGE_ID: "ARM:LE:32:Cortex",
       });
-      expect(configured.digest).toBe(CORTEX_OVERRIDE_DIGEST);
+      expect(configured.digest).toBe(await cortexOverrideDigest());
       expect(ghidraArmLimitations(target, configured.parameters)).toEqual([]);
     },
   );
@@ -389,7 +392,7 @@ describe("ARM ELF images outside the M-profile lane", () => {
     expect(committed.parameters).toMatchObject({
       language_id: "ARM:LE:32:v8",
       compiler_spec_id: "default",
-      language_selection: "configured-v1",
+      language_selection: "configured",
     });
   });
 });
@@ -454,7 +457,7 @@ describe("M-profile ARM ELF session binding", () => {
     expect(
       mismatch(target, {
         ...outside.parameters,
-        language_selection: "provider-pinned-v1",
+        language_selection: "provider-pinned",
       }),
     ).toMatch(/M-profile ARM ELF lane/u);
     const committed = await profile(target);
@@ -467,7 +470,7 @@ describe("M-profile ARM ELF session binding", () => {
         ...outside.parameters,
         language_id: "ARM:LE:32:Cortex",
         compiler_spec_id: "language-default",
-        language_selection: "configured-v1",
+        language_selection: "configured",
       }),
     ).toMatch(/M-profile ARM ELF lane/u);
     // The label policy is bound with the lane.

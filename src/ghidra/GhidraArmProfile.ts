@@ -49,7 +49,7 @@ export const GHIDRA_ARM_ELF_LANES = {
 export const GHIDRA_ARM_ELF_DWARF_PROTOTYPES = {
   base: {
     callingConvention: "__stdcall_softfp",
-    commitment: "dwarf-default-stdcall-softfp-v1",
+    commitment: "dwarf-default-stdcall-softfp",
   },
 } as const satisfies Partial<
   Record<
@@ -237,7 +237,7 @@ export const ghidraArmProfileMismatchReason = (
   if (ghidraArmElfLane(target) === undefined) return null;
   const expected = ghidraArmProfileParameters(
     target,
-    parameters.language_selection === "configured-v1"
+    parameters.language_selection === "configured"
       ? committedLanguage
       : undefined,
   );
@@ -314,7 +314,7 @@ export const ghidraArmLimitations = (
     target.architecture !== "arm"
   )
     return [];
-  const configured = parameters.language_selection === "configured-v1";
+  const configured = parameters.language_selection === "configured";
   if (lane.kind === "header-selected")
     return lane.reason === undefined || configured
       ? []
