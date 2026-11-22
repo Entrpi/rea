@@ -458,6 +458,17 @@ export const resolveGhidraLanguageDefinition = (
     );
     const installPath = (path: string): string =>
       relative(installDir, path).split(sep).join("/");
+    // An oversized .ldefs is unexamined, so it could define this ID: neither
+    // absence nor a single definition can be confirmed.
+    const [unexamined] = catalog.oversizedFiles;
+    if (unexamined !== undefined)
+      return err(
+        `REA cannot confirm that ${languageId} has exactly one .ldefs entry: ${installPath(unexamined)}${
+          catalog.oversizedFiles.length > 1
+            ? ` and ${String(catalog.oversizedFiles.length - 1)} more .ldefs files`
+            : ""
+        } exceed the ${String(MAX_LDEFS_BYTES)}-byte bound and were not examined`,
+      );
     const matches = catalog.definitions.filter(
       (language) => language.id === languageId,
     );

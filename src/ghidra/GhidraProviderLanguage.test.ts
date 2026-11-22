@@ -13,6 +13,7 @@ import { providerLanguageRawTarget } from "../domain/rawBinary.fixture.js";
 import { silentLogger } from "../logger.js";
 import { ghidraProfileInstallationHost as host } from "./GhidraInstallation.fixture.js";
 import { resolveGhidraLanguageDefinition } from "./GhidraLanguageCatalog.js";
+import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
 import { GhidraProvider } from "./GhidraProvider.js";
 
 // A community-style module: one .ldefs with several entries over shared files.
@@ -196,6 +197,37 @@ const profile = async (subject: ReturnType<typeof target>) => {
   if (resolved.value.profile === null) throw new Error("expected a profile");
   return resolved.value.profile;
 };
+
+describe("Ghidra provider language catalog bounds", () => {
+  it("refuses a language while an oversized .ldefs is unexamined", async () => {
+    const root = await createTestTempDirectory("rea-ghidra-language-bound-");
+    await mkdir(join(root, MODULE), { recursive: true });
+    await writeFile(join(root, MODULE, "f5.ldefs"), COMMUNITY_LDEFS);
+    for (const [name, text] of Object.entries(FILES))
+      await writeFile(join(root, MODULE, name), text);
+    const huge = "Ghidra/Extensions/Huge/data/languages";
+    await mkdir(join(root, huge), { recursive: true });
+    // An unexamined file could define the same ID, so neither a single
+    // definition nor absence is confirmed.
+    await writeFile(
+      join(root, huge, "huge.ldefs"),
+      Buffer.alloc(4 * 1024 * 1024 + 1, 0x20),
+    );
+    for (const languageId of ["F5SH:LE:32:community", "Absent:LE:32:default"]) {
+      const resolved = await resolveGhidraLanguageDefinition(
+        root,
+        { languageId, compilerSpecId: "default" },
+        "12.1.4",
+        new ArtifactResourceScope(),
+      );
+      expect(resolved.ok).toBe(false);
+      if (!resolved.ok) {
+        expect(resolved.error).toContain(languageId);
+        expect(resolved.error).toContain(`${huge}/huge.ldefs`);
+      }
+    }
+  });
+});
 
 describe("Ghidra provider language profile", () => {
   it("commits the caller's language, its definition and no family", async () => {
