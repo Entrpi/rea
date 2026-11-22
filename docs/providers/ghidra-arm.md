@@ -51,7 +51,7 @@ specification is `default`.
   unknown.
 
 REA pins the language with `-processor` and `-cspec`, records
-`language_selection: provider-pinned-v1`, and checks the language that Ghidra
+`language_selection: provider-pinned`, and checks the language that Ghidra
 reports after import. Ghidra imports the ELF without its processor-defined
 labels. `ARMCortex.pspec` names the vector table at `0x0`-`0x40` and marks every
 handler slot an entry, reserved slots included, so in an image linked at `0x0`
@@ -74,7 +74,7 @@ The M-profile pin only replaces Ghidra's header-based default, as the
 [Ghidra provider](ghidra-provider.md) describes for such pins. A
 `REA_GHIDRA_LANGUAGE_ID` that names the pinned language, without
 `REA_GHIDRA_COMPILER_SPEC_ID` or with `default`, keeps the lane: the profile
-records `language_selection: configured-v1` with the lane's parameters, and the
+records `language_selection: configured` with the lane's parameters, and the
 session states the lane as it does without the override. A different language
 or compiler specification wins over the pin. The profile is then the same
 profile that the override produced before this lane, and the session states
@@ -121,8 +121,8 @@ A pinned lane adds these analysis-profile parameters:
   `cpu_arch` and `cpu_arch_profile` as declared (`cpu_arch_profile` is the
   character code, 77 for M);
 - `arm_support_lane`, the lane from the table above;
-- `processor_labels: not-applied-v1`;
-- for `base` images, `arm_float_prototype: dwarf-default-stdcall-softfp-v1`.
+- `processor_labels: not-applied`;
+- for `base` images, `arm_float_prototype: dwarf-default-stdcall-softfp`.
 
 These parameters change the profile identity of M-profile ARM ELF images. Their
 earlier sessions and snapshots no longer match and are not reused; the saved
