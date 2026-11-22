@@ -20,6 +20,7 @@ const GHIDRA_ADMISSION_CODES = [
   "language_override_raw_binary",
   "processor_labels_scope",
   "dwarf_calling_convention_scope",
+  "language_definition_invalid",
   "raw_binary_dos",
   "invalid_environment_entry",
   "invalid_jvm_argument",
