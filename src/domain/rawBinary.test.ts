@@ -300,9 +300,10 @@ describe("raw-binary admission results", () => {
   const ADMISSION_GRID_SHA256 =
     "ccc75843c2abfca5c4eb3dc192dbb2534361a8e760a9e8dc58f1b3c28fadbd65";
   // The pairing grid also covers esp-flash-image (#8228); its other 16 rows
-  // still hash to d6f88becd's b6447afda4012589….
+  // still hash to d6f88becd's b6447afda4012589…. Without esp8266-image's four
+  // rows the grid hashes to D1's d181949998c9ec53….
   const PAIRING_GRID_SHA256 =
-    "d181949998c9ec53c74f42fe596ad7154d611130fd1d7cf6fadfbeba8735d61a";
+    "a26d5c49eefdc641524c0f031351778c00c1d367022ffaf40514560507ad9bbb";
   const architectures = [
     undefined,
     "x86",
@@ -391,7 +392,7 @@ describe("raw-binary admission results", () => {
         ]),
       ),
     );
-    expect(rows).toHaveLength(20);
+    expect(rows).toHaveLength(24);
     expect(sha256(rows)).toBe(PAIRING_GRID_SHA256);
   });
 });
