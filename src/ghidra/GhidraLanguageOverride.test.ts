@@ -22,6 +22,7 @@ import {
 } from "./GhidraLanguageCatalog.js";
 import { GhidraProvider } from "./GhidraProvider.js";
 import { ArtifactResourceScope } from "../resources/ArtifactResourceScope.js";
+import { rawLoadAtEntry } from "../domain/rawBinary.fixture.js";
 
 // Abbreviated from Ghidra 12.1.4 Processors/x86/data/languages/x86.ldefs.
 const X86_LDEFS = `<?xml version="1.0" encoding="UTF-8"?>
@@ -78,8 +79,7 @@ const fixedImportTarget = (
     ? {
         ...executable,
         format,
-        entryPoint: "0x0",
-        entryPointSource: "0x0",
+        rawLoad: rawLoadAtEntry("0x0"),
       }
     : { ...executable, format };
 };

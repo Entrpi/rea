@@ -6,7 +6,11 @@ import type {
   UniversalMachOSliceIdentity,
 } from "./binaryTargetTypes.js";
 import { digestSchema } from "./digests.js";
-import { rawBinaryEntryPointSchema } from "./rawBinary.js";
+import {
+  rawBinaryEntryPointSchema,
+  rawLoadIdentity,
+  rawLoadIdentitySchema,
+} from "./rawBinary.js";
 import { sha256Hex } from "../kernel/sha256Hex.js";
 
 const flashOffsetSchema = z.number().int().min(0).max(0xffff_ffff).nullable();
@@ -17,6 +21,10 @@ export const fileTargetSelectionSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("entry-point"),
     entry_point: rawBinaryEntryPointSchema,
+    // A raw load that is not legacy-equivalent also selects its base, variant,
+    // vector table and the entry's role and basis. Absent otherwise, so a
+    // legacy load keeps the identity it had before these inputs.
+    raw_load: rawLoadIdentitySchema.exactOptional(),
   }),
   z.strictObject({
     kind: z.literal("esp-flash"),
@@ -228,21 +236,38 @@ const universalSliceSelection = (
   };
 };
 
+/** A raw load's entry, with its versioned load identity when it has one. */
+const rawBinarySelection = (
+  load: Parameters<typeof rawLoadIdentity>[0],
+): FileTargetSelection => {
+  const identity = rawLoadIdentity(load);
+  return {
+    kind: "entry-point",
+    entry_point: load.entryPoint,
+    ...(identity === undefined ? {} : { raw_load: identity }),
+  };
+};
+
 /** The selection an open binary target makes inside its bytes, if any. */
 export const binaryTargetSelection = (
   target: BinaryTarget,
 ): FileTargetSelection | null =>
-  target.format === "raw-binary" || target.format === "gamecube-dol"
-    ? { kind: "entry-point", entry_point: target.entryPoint }
-    : target.format === "esp-flash-image"
-      ? {
-          kind: "esp-flash",
-          flash_offset: target.espFlash.flashOffset,
-          partition_table_offset: target.espFlash.partitionTableOffset,
-        }
-      : target.format === "mach-o-universal"
-        ? universalSliceSelection(target.universalSlice, target.universalSlices)
-        : null;
+  target.format === "raw-binary"
+    ? rawBinarySelection(target.rawLoad)
+    : target.format === "gamecube-dol"
+      ? { kind: "entry-point", entry_point: target.entryPoint }
+      : target.format === "esp-flash-image"
+        ? {
+            kind: "esp-flash",
+            flash_offset: target.espFlash.flashOffset,
+            partition_table_offset: target.espFlash.partitionTableOffset,
+          }
+        : target.format === "mach-o-universal"
+          ? universalSliceSelection(
+              target.universalSlice,
+              target.universalSlices,
+            )
+          : null;
 
 /** The one projection of an open binary target into its target identity. */
 export const binaryTargetIdentity = (

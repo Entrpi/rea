@@ -228,6 +228,19 @@ export interface GhidraExistingProject {
   readonly programName: string;
 }
 
+/** Committed raw-binary import: language, file mapping and entry seed. */
+export interface GhidraRawBinaryImport {
+  readonly languageId: string;
+  readonly compilerSpecId: string;
+  /** Address of file offset 0. */
+  readonly baseAddr: string;
+  readonly entryPoint: string;
+  /** Context register value the entry must have, such as TMode for Thumb. */
+  readonly entryContext?: { readonly register: string; readonly value: string };
+  /** False imports without the language's default labels; omitted keeps them. */
+  readonly applyProcessorLabels?: false;
+}
+
 /** Static coordinates for an extracted Ghidra release and packaged script. */
 export interface GhidraHeadlessLauncherOptions {
   readonly environment: Readonly<NodeJS.ProcessEnv>;
@@ -245,11 +258,7 @@ export interface GhidraHeadlessLauncherOptions {
   readonly dosMz?: true;
   /** DOS COM import selected from the committed analysis profile. */
   readonly dosCom?: { readonly loader: "ComLoader" | "BinaryLoader" };
-  readonly rawBinary?: {
-    readonly languageId: string;
-    readonly compilerSpecId: string;
-    readonly baseAddr: string;
-  };
+  readonly rawBinary?: GhidraRawBinaryImport;
   /** GameCube DOL import: committed language and the canonical section table text. */
   readonly gamecubeDol?: {
     readonly languageId: string;
@@ -421,6 +430,13 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
           ...(extensions.length === 0
             ? {}
             : { analysis_extensions: extensions }),
+          // The bridge reports this entry-context register in load-image observations.
+          ...(this.options.rawBinary?.entryContext === undefined
+            ? {}
+            : {
+                entry_context_register:
+                  this.options.rawBinary.entryContext.register,
+              }),
         })}\n`,
         platform,
       );
@@ -810,11 +826,7 @@ export interface GhidraHeadlessArgumentOptions {
   readonly riscvLoadPreparation?: GhidraRiscvLoadPreparation;
   readonly dosMz?: true;
   readonly dosCom?: { readonly loader: "ComLoader" | "BinaryLoader" };
-  readonly rawBinary?: {
-    readonly languageId: string;
-    readonly compilerSpecId: string;
-    readonly baseAddr: string;
-  };
+  readonly rawBinary?: GhidraRawBinaryImport;
   readonly gamecubeDol?: {
     readonly languageId: string;
     readonly compilerSpecId?: string;
@@ -1054,6 +1066,9 @@ export const ghidraHeadlessArguments = (
                       "BinaryLoader",
                       "-loader-baseAddr",
                       rawBinary.baseAddr,
+                      ...(rawBinary.applyProcessorLabels === false
+                        ? ["-loader-applyLabels", "false"]
+                        : []),
                       "-processor",
                       rawBinary.languageId,
                       "-cspec",
@@ -1089,6 +1104,10 @@ export const ghidraHeadlessArguments = (
           scriptPath.join(bridgeDirectory, GHIDRA_BRIDGE_SOURCES.prepareRaw),
           rawBinary.languageId,
           rawBinary.baseAddr,
+          rawBinary.entryPoint,
+          rawBinary.entryContext === undefined
+            ? "language-default"
+            : `${rawBinary.entryContext.register}=${rawBinary.entryContext.value}`,
         ]),
     ...(gamecubeDol === undefined
       ? []
