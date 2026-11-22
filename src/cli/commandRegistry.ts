@@ -152,13 +152,18 @@ export const contractDescriptionOperations = (
       : [
           {
             name: sessionTarget.opening,
-            // A member option names its object field by its first flag.
+            // A member option is keyed `field.member`, so a failure that names
+            // the member gets its own flag; the object field as a whole takes
+            // its first member's flag.
             flags: Object.fromEntries(
               sessionTarget.options
-                .map(({ field, key }) => [
-                  field.split(".")[0] ?? field,
-                  `--${optionFlagName(key)}`,
-                ])
+                .flatMap(({ field, key }) => {
+                  const flag = `--${optionFlagName(key)}`;
+                  const object = field.split(".")[0] ?? field;
+                  return object === field
+                    ? [[field, flag] as const]
+                    : [[field, flag] as const, [object, flag] as const];
+                })
                 .reverse(),
             ),
           },
