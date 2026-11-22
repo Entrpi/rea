@@ -32,7 +32,7 @@ to a lane's pinned language depends on why the lane pins it:
   [legacy MIPS](ghidra-mips.md#admission-boundary) and
   [M-profile ARM ELF](ghidra-arm.md#language-override) images are imported in
   the language you set, and the profile records
-  `language_selection: configured-v1` instead of the pin. An override that
+  `language_selection: configured` instead of the pin. An override that
   names the pinned language keeps the lane.
 - A pin that is a lane's admission condition refuses a different override, as
   for [RISC-V](ghidra-riscv.md#why-the-language-is-pinned), the other MIPS
