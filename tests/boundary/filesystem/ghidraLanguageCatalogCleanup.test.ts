@@ -13,6 +13,7 @@ import { classifyProviderFailure } from "../../../src/providers/classifyProvider
 import { readGhidraLanguageCatalog } from "../../../src/ghidra/GhidraLanguageCatalog.js";
 import { catalogLanguage } from "../../fixtures/ghidraLanguageCatalog.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import { phaseArrival, phaseGate } from "../../support/lifecycleHarness.js";
 
 interface FileControl {
   closeFails: boolean;
@@ -28,15 +29,18 @@ interface FileControl {
 
 // Per-file failure controls, keyed by definition file name, and a barrier
 // that releases synchronized closes only after all of them are pending.
-const { controls, barrier } = vi.hoisted(() => {
+const { controls, directoryControls, barrier } = vi.hoisted(() => {
   const state = { expected: 0, arrived: 0, release: () => {} };
   let gate = new Promise<void>((resolve) => {
     state.release = resolve;
   });
   return {
     controls: new Map<string, FileControl>(),
+    directoryControls: new Map<
+      string,
+      (entries: readonly string[]) => Promise<void>
+    >(),
     barrier: {
-      state,
       reset: (expected: number) => {
         state.expected = expected;
         state.arrived = 0;
@@ -56,6 +60,11 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
     ...actual,
+    readdir: async (path: Parameters<typeof actual.readdir>[0]) => {
+      const entries = await actual.readdir(path);
+      await directoryControls.get(String(path))?.(entries);
+      return entries;
+    },
     open: async (...args: Parameters<typeof actual.open>) => {
       const path = String(args[0]);
       const control = controls.get(basename(path));
@@ -156,47 +165,131 @@ afterEach(async () => {
   await Promise.allSettled(scopes.map((value) => value.close()));
   scopes.length = 0;
   controls.clear();
+  directoryControls.clear();
 });
 
-it("retries the retained close in the caller scope before the next read", async () => {
+it.for(["installation roots", "module directories"] as const)(
+  "reports cancellation while completing an empty scan of %s",
+  async (stage) => {
+    const root = await createTestTempDirectory("rea-ghidra-ldefs-empty-");
+    const directory = join(
+      root,
+      stage === "installation roots"
+        ? "Ghidra/Extensions"
+        : "Ghidra/Processors/x86/data/languages",
+    );
+    await mkdir(directory, { recursive: true });
+    const gate = phaseGate<readonly string[]>();
+    directoryControls.set(directory, (entries) => gate.hold(entries));
+    const resources = scope();
+    const controller = new AbortController();
+    const reason = { stage, cancelled: true };
+    const reading = readGhidraLanguageCatalog(
+      root,
+      resources,
+      controller.signal,
+    );
+    try {
+      expect(await gate.reached(reading, stage)).toEqual([]);
+      controller.abort(reason);
+      gate.release();
+      const failure = await reading.catch((cause: unknown) => cause);
+      if (!(failure instanceof ArtifactReaderFailure))
+        throw new Error("Expected typed artifact cancellation", {
+          cause: failure,
+        });
+      expect(failure.reason).toBe("cancelled");
+      expect(failure.cause).toBe(reason);
+    } finally {
+      gate.release();
+      await reading.catch(() => undefined);
+    }
+    expect(await readGhidraLanguageCatalog(root, resources)).toEqual({
+      definitions: [],
+      oversizedFiles: [],
+    });
+  },
+);
+
+it("refuses an already cancelled catalog before reading the installation", async () => {
+  const root = await createTestTempDirectory("rea-ghidra-ldefs-cancelled-");
+  const processors = join(root, "Ghidra/Processors");
+  await mkdir(processors, { recursive: true });
+  const visited: string[] = [];
+  directoryControls.set(processors, async () => {
+    visited.push(processors);
+  });
+  const reason = { source: "caller" };
+  await expect(
+    readGhidraLanguageCatalog(root, scope(), AbortSignal.abort(reason)),
+  ).rejects.toMatchObject({ reason: "cancelled", cause: reason });
+  expect(visited).toEqual([]);
+});
+
+it("reports the lowest selected directory failure after another directory fails first", async () => {
+  const root = await createTestTempDirectory("rea-ghidra-ldefs-selection-");
+  const earlier = join(root, "Ghidra/Processors/a/data/languages");
+  const later = join(root, "Ghidra/Processors/b/data/languages");
+  const held = phaseGate();
+  const laterFailed = phaseArrival();
+  const makeFailure = (path: string) =>
+    Object.assign(new Error("directory read denied"), { code: "EACCES", path });
+  await Promise.all(
+    [earlier, later].map((directory) => mkdir(directory, { recursive: true })),
+  );
+  const primary = makeFailure(earlier);
+  directoryControls.set(earlier, () => held.hold());
+  directoryControls.set(later, async () => {
+    laterFailed.arrive();
+    throw makeFailure(later);
+  });
+  const reading = readGhidraLanguageCatalog(root, scope());
+  try {
+    await held.reached(reading, "earlier directory is still pending");
+    await laterFailed.reached(reading, "later directory refused first");
+    held.reject(primary);
+    await expect(reading).rejects.toBe(primary);
+  } finally {
+    held.release();
+    await reading.catch(() => undefined);
+  }
+});
+
+it("blocks nonempty and empty reads until the caller scope releases the same descriptor", async () => {
   const resources = scope();
   const retained = control("flaky.ldefs", { closeFails: true });
+  const owner = { resources: [expect.stringContaining("flaky.ldefs")] };
   const failure = await readGhidraLanguageCatalog(
     await installation("flaky"),
     resources,
   ).catch((cause: unknown) => cause);
   expect(failure).toBeInstanceOf(ArtifactReaderFailure);
-  expect(failure).toMatchObject({
-    cleanup: { resources: [expect.stringContaining("flaky.ldefs")] },
-  });
+  expect(failure).toMatchObject({ cleanup: owner });
   expect(resources.hasPending).toBe(true);
-  retained.closeFails = false;
-  const x86 = await installation("x86");
-  expect(await readGhidraLanguageCatalog(x86, resources)).toEqual(
-    catalogOf(x86, "x86"),
-  );
-  expect(retained.closeCalls).toBe(2);
-  expect(resources.hasPending).toBe(false);
-});
 
-it("refuses new reads without opening definitions while the retry still fails", async () => {
-  const resources = scope();
-  const retained = control("stuck.ldefs", { closeFails: true });
-  await expect(
-    readGhidraLanguageCatalog(await installation("stuck"), resources),
-  ).rejects.toBeInstanceOf(ArtifactReaderFailure);
-  const next = control("next.ldefs");
-  const refused = await readGhidraLanguageCatalog(
-    await installation("next"),
-    resources,
-  ).catch((cause: unknown) => cause);
+  const next = control("x86.ldefs");
+  const nextRoot = await installation("x86");
+  const refused = await readGhidraLanguageCatalog(nextRoot, resources).catch(
+    (cause: unknown) => cause,
+  );
   expect(refused).toBeInstanceOf(ArtifactResourceRetryFailure);
-  expect(refused).toMatchObject({
-    cleanup: { resources: [expect.stringContaining("stuck.ldefs")] },
-  });
+  expect(refused).toMatchObject({ cleanup: owner });
   expect(retained.closeCalls).toBe(2);
   expect(next.opens).toBe(0);
+
+  const empty = await createTestTempDirectory("rea-ghidra-ldefs-empty-");
+  await expect(
+    readGhidraLanguageCatalog(empty, resources),
+  ).rejects.toMatchObject({ cleanup: owner });
+  expect(retained.closeCalls).toBe(3);
   expect(resources.hasPending).toBe(true);
+
+  retained.closeFails = false;
+  const catalog = await readGhidraLanguageCatalog(nextRoot, resources);
+  expect(catalog.definitions).toEqual(catalogOf(nextRoot, "x86"));
+  expect(retained.closeCalls).toBe(4);
+  expect(next.opens).toBe(1);
+  expect(resources.hasPending).toBe(false);
 });
 
 it("keeps one scope's retained close out of another scope", async () => {
@@ -206,9 +299,8 @@ it("keeps one scope's retained close out of another scope", async () => {
     readGhidraLanguageCatalog(await installation("isolated"), failed),
   ).rejects.toBeInstanceOf(ArtifactReaderFailure);
   const x86 = await installation("x86");
-  expect(await readGhidraLanguageCatalog(x86, scope())).toEqual(
-    catalogOf(x86, "x86"),
-  );
+  const catalog = await readGhidraLanguageCatalog(x86, scope());
+  expect(catalog.definitions).toEqual(catalogOf(x86, "x86"));
   expect(failed.hasPending).toBe(true);
 });
 
@@ -222,7 +314,7 @@ it("attempts every retained close and reports the remaining failures together", 
     closeFails: true,
     synchronizedClose: true,
   });
-  barrier.state.expected = 2;
+  barrier.reset(2);
   // Concurrent resolutions can each retain an owner in the same scope.
   const roots = [await installation("first"), await installation("second")];
   const results = await Promise.allSettled(
@@ -252,20 +344,6 @@ it("keeps the read failure primary when the close also fails", async () => {
   expect(failure).toMatchObject({
     message: "definition read failed",
     cleanup: { resources: [expect.stringContaining("damaged.ldefs")] },
-  });
-});
-
-it("reports retained cleanup for a catalog without definitions", async () => {
-  const resources = scope();
-  control("pending.ldefs", { closeFails: true });
-  await expect(
-    readGhidraLanguageCatalog(await installation("pending"), resources),
-  ).rejects.toBeInstanceOf(ArtifactReaderFailure);
-  const empty = await createTestTempDirectory("rea-ghidra-ldefs-empty-");
-  await expect(
-    readGhidraLanguageCatalog(empty, resources),
-  ).rejects.toMatchObject({
-    cleanup: { resources: [expect.stringContaining("pending.ldefs")] },
   });
 });
 
@@ -334,13 +412,13 @@ it("merges sibling cleanup observations and leases across concurrent definition 
   first.closeFails = false;
   second.closeFails = false;
   const x86 = await installation("x86");
-  expect(await readGhidraLanguageCatalog(x86, resources)).toEqual(
-    catalogOf(x86, "x86"),
-  );
+  const recovered = await readGhidraLanguageCatalog(x86, resources);
+  expect(recovered.definitions).toEqual(catalogOf(x86, "x86"));
   expect(first.closeCalls).toBe(2);
   expect(second.closeCalls).toBe(2);
   expect(resources.hasPending).toBe(false);
-  expect(await readGhidraLanguageCatalog(root, resources)).toHaveLength(10);
+  const catalog = await readGhidraLanguageCatalog(root, resources);
+  expect(catalog.definitions).toHaveLength(10);
 });
 
 it("reports the denied definition as primary while owning a sibling close retry", async () => {
