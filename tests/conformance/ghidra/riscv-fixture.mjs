@@ -9,6 +9,12 @@ import { FIXTURE_TOOLS, fixtureCommand } from "./fixture-toolchain.mjs";
 
 const execute = promisify(execFile);
 
+const FLOAT_ABI_SOURCES = [
+  "../c/riscv-float-abi.c",
+  "./riscv-probe.S",
+  "./riscv-isa-probe.S",
+];
+
 /** One build per float ABI the lane verifies. */
 const BUILDS = {
   double: {
@@ -19,14 +25,25 @@ const BUILDS = {
   },
   // ESP-IDF's ESP32-C2 and C3 base string, built ilp32 as ESP-IDF does.
   soft: {
-    sources: [
-      "../c/riscv-float-abi.c",
-      "./riscv-probe.S",
-      "./riscv-isa-probe.S",
-    ],
+    sources: FLOAT_ABI_SOURCES,
     march: () => "rv32imc_zicsr_zifencei",
     mabi: () => "ilp32",
     flags: 1,
+  },
+  // ESP-IDF 5.5's ESP32-H4 base string, built ilp32f as ESP-IDF does.
+  single: {
+    sources: FLOAT_ABI_SOURCES,
+    march: () => "rv32imafc_zicsr_zifencei",
+    mabi: () => "ilp32f",
+    flags: 3,
+  },
+  // The same build with the shapes __rea_ilp32f cannot express.
+  unmodelled: {
+    sources: [...FLOAT_ABI_SOURCES, "../c/riscv-float-abi-empty.cpp"],
+    march: () => "rv32imafc_zicsr_zifencei",
+    mabi: () => "ilp32f",
+    defines: ["REA_RISCV_ABI_UNMODELLED"],
+    flags: 3,
   },
 };
 
@@ -37,7 +54,7 @@ const readerOptions = {
 };
 
 /** Independent reading of LLVM readelf's `-h -l -S -s -A` report. */
-const readRiscvElf = async (reader, path, floatAbi, run = execute) => {
+const readRiscvElf = async (reader, path, run = execute) => {
   const { stdout, stderr } = await run(
     reader,
     ["-h", "-l", "-S", "-s", "-A", "-W", path],
@@ -82,7 +99,6 @@ const readRiscvElf = async (reader, path, floatAbi, run = execute) => {
       base: declared[2],
       extensions: tokens.map((token) => /^(.*?)(?:\d+p\d+)?$/u.exec(token)[1]),
     },
-    floatAbi,
   };
 };
 
@@ -91,19 +107,22 @@ const sha256 = async (path) =>
     .update(await readFile(path))
     .digest("hex");
 
-/** Build and independently inspect a source-owned ELF; never execute it. */
+/**
+ * Build and independently inspect a source-owned ELF; never execute it. The
+ * variant is a float ABI, or `unmodelled` for the refused single-float build.
+ */
 export async function buildRiscvFixture(directory, bits, buildOptions = {}) {
   const {
-    floatAbi = "double",
+    variant = "double",
     pie = false,
     execute: run = execute,
   } = typeof buildOptions === "string"
-    ? { floatAbi: buildOptions }
+    ? { variant: buildOptions }
     : buildOptions;
   assert.ok(bits === 32 || bits === 64);
-  const build = BUILDS[floatAbi];
-  assert.ok(build !== undefined, `No ${floatAbi}-float RISC-V fixture`);
-  assert.ok(floatAbi === "double" || bits === 32);
+  const build = BUILDS[variant];
+  assert.ok(build !== undefined, `No ${variant} RISC-V fixture`);
+  assert.ok(variant === "double" || bits === 32);
   const compiler = fixtureCommand(FIXTURE_TOOLS.riscvClang);
   const linker = fixtureCommand(FIXTURE_TOOLS.riscvLinker);
   const reader = fixtureCommand(FIXTURE_TOOLS.riscvReadelf);
@@ -112,7 +131,7 @@ export async function buildRiscvFixture(directory, bits, buildOptions = {}) {
   );
   const path = join(
     directory,
-    `rv${bits}${floatAbi === "double" ? "" : `-${floatAbi}`}${pie ? "-pie" : ""}.elf`,
+    `rv${bits}${variant === "double" ? "" : `-${variant}`}${pie ? "-pie" : ""}.elf`,
   );
   const interpreter =
     bits === 32
@@ -131,6 +150,7 @@ export async function buildRiscvFixture(directory, bits, buildOptions = {}) {
     "-g",
     "-Wl,-e,rea_riscv_entry",
     "-Wl,--build-id=none",
+    ...(build.defines ?? []).map((name) => `-D${name}`),
     ...sources,
     "-o",
     path,
@@ -140,7 +160,7 @@ export async function buildRiscvFixture(directory, bits, buildOptions = {}) {
   const linkerVersion = await run(linker, ["--version"], options);
   const readerVersion = await run(reader, ["--version"], options);
   await run(compiler, args, { ...options, timeout: 60000 });
-  const elf = await readRiscvElf(reader, path, floatAbi, run);
+  const elf = await readRiscvElf(reader, path, run);
   assert.equal(elf.class, `ELF${bits}`);
   assert.match(elf.data, /little endian/u);
   assert.match(elf.type, pie ? /^DYN\b/u : /^EXEC\b/u);
@@ -161,7 +181,7 @@ export async function buildRiscvFixture(directory, bits, buildOptions = {}) {
   assert.equal(
     elf.flags,
     build.flags,
-    `Compiler did not declare RVC and the ${floatAbi}-float ABI`,
+    `Compiler did not declare RVC and the ${variant} build's float ABI`,
   );
   assert.equal(elf.isa.xlen, bits);
   // Every source-owned global; the verifier asserts the ones it needs.
@@ -173,6 +193,7 @@ export async function buildRiscvFixture(directory, bits, buildOptions = {}) {
     symbols[name] = `0x${BigInt(`0x${value}`).toString(16)}`;
   }
   return {
+    variant,
     path,
     sha256: await sha256(path),
     riscv: {
@@ -220,12 +241,7 @@ export async function stripRiscvFixture(directory, typed, run = execute) {
     timeout: 60000,
     maxBuffer: 1024 * 1024,
   });
-  const elf = await readRiscvElf(
-    typed.toolchain.reader.command,
-    path,
-    "soft",
-    run,
-  );
+  const elf = await readRiscvElf(typed.toolchain.reader.command, path, run);
   assert.equal(elf.flags, typed.riscv.flags);
   assert.deepEqual(elf.isa, typed.riscv.isa);
   assert.ok(
