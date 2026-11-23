@@ -23,7 +23,11 @@ import {
   requireMcpOperationResult,
   requireMcpOutput,
 } from "./lib/mcp-verifier-results.mjs";
-import { createVerifierRun, completeVerifierRun } from "./lib/verifier-run.mjs";
+import {
+  assertVerifierCleanupComplete,
+  completeVerifierRun,
+  createVerifierRun,
+} from "./lib/verifier-run.mjs";
 
 if (process.argv.length !== 2)
   throw new Error(
@@ -510,8 +514,7 @@ assert.deepEqual(
 report.runtime_cleanup = "complete";
 report.ok = true;
 const verifierRun = await completeVerifierRun(run);
-assert.equal(verifierRun.process_lineage.status, "verified");
-assert.deepEqual(verifierRun.process_lineage.descendants, []);
+assertVerifierCleanupComplete(verifierRun.process_lineage);
 // Keep the workspace for diagnosis unless verification and cleanup both pass.
 await workspaceFixture.release();
 process.stdout.write(

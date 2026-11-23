@@ -324,10 +324,21 @@ export interface CliOpeningFieldProjection extends CliFieldProjection {
    * target itself.
    */
   readonly callerPath?: true;
+  /**
+   * An optional object field spelled as one option per member. `fixed`
+   * members take their value from the command, such as the provider that
+   * option names carry. Any given member opens the object; the contract then
+   * admits it, so a missing member is refused under its own option.
+   */
+  readonly members?: {
+    readonly options: Readonly<Record<string, CliFieldProjection>>;
+    readonly fixed?: Readonly<Record<string, string>>;
+  };
 }
 
 /** An option that supplies one field of the opening contract. */
 export interface ContractCliOpeningOption {
+  /** The contract field, or `field.member` for a member option. */
   readonly field: string;
   readonly key: string;
   readonly description: string | undefined;
