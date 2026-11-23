@@ -378,10 +378,6 @@ export function assertXtensaCall0FixtureInstructions(instructions, addresses) {
   );
 }
 
-/** A local declaration, which Ghidra prints before the body's statements. */
-const isDeclaration = (statement) =>
-  !statement.startsWith("return") && !/[=(]/u.test(statement);
-
 /** The operands a top-level `operator` chain combines, without casts or parentheses. */
 const chain = (text, operator) => {
   const value = operand(text);
@@ -436,13 +432,27 @@ const singleCall = (code, caller, callee) => {
   };
 };
 
-/** The expression the function's single return statement returns. */
-const returned = (statements, code, name) => {
-  const returns = statements
-    .map((statement) => RETURN.exec(statement))
-    .filter((match) => match !== null);
-  assert.equal(returns.length, 1, `${name} must return once: ${code}`);
-  return returns[0][1];
+/**
+ * The expression the caller returns: the call's own statement when it is the
+ * return, or else the next statement after declarations, so nothing can
+ * change the call's result before the caller returns it.
+ */
+const returnedAfterCall = (call, code, name) => {
+  const own = RETURN.exec(call.statements[call.index]);
+  const after = bodyStatements(call.statements.slice(call.index + 1));
+  const value =
+    own !== null
+      ? after.length === 0
+        ? own
+        : null
+      : after.length === 1
+        ? RETURN.exec(after[0])
+        : null;
+  assert.ok(
+    value !== null,
+    `${name} must return right after its call: ${code}`,
+  );
+  return value[1];
 };
 
 /**
@@ -458,7 +468,7 @@ const keptValue = (code, caller, call, kept) => {
   const before = call.statements
     .slice(0, call.index)
     .filter((statement) => !isDeclaration(statement));
-  const sum = chain(returned(call.statements, code, caller), "+");
+  const sum = chain(returnedAfterCall(call, code, caller), "+");
   if (before.length === 0 && sameOperands(sum, [call.result, parameter, kept]))
     return "folded";
   const assignment = before.length === 1 ? ASSIGNMENT.exec(before[0]) : null;
@@ -573,7 +583,7 @@ export function assertXtensaCall0CFixturePseudocode(entry, scale, values) {
     [],
     `${name} must keep the callee-saved value across call0: ${entry}`,
   );
-  const sum = chain(returned(call.statements, entry, name), "+");
+  const sum = chain(returnedAfterCall(call, entry, name), "+");
   assert.ok(
     sum.length === 2 &&
       sum.includes(call.result) &&
