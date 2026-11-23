@@ -375,7 +375,7 @@ const call0Decoded = {
 const ROM_CALLER = (body: string) =>
   `int __call0 rea_xtensa_call0_rom_caller(int param_1)\n\n{\n  int iVar1;\n  \n  ${body}\n}\n`;
 
-describe("Xtensa call0 lane fixture and dataflow", () => {
+describe("Xtensa call0 lane fixture", () => {
   it("writes a call0 fixture REA admits, which the lane can declare windowed", async () => {
     const directory = await createTestTempDirectory("rea-xtensa-call0-");
     const fixture = await writeXtensaCall0Fixture(directory);
@@ -413,7 +413,9 @@ describe("Xtensa call0 lane fixture and dataflow", () => {
       ),
     ).toThrow();
   });
+});
 
+describe("Xtensa call0 lane dataflow", () => {
   it("tells the folded a12 value from the windowed default's spill", () => {
     expect(xtensaCall0KeptValue(CALL0_ENTRY, XTENSA_CALL0_FIXTURE_VALUES)).toBe(
       "folded",
@@ -447,6 +449,17 @@ describe("Xtensa call0 lane fixture and dataflow", () => {
       name: "the literal not passed",
       entry: CALL0_ENTRY.replace("0x12345678", "in_a2"),
       error: /must pass 0x12345678/u,
+    },
+    ...["(iVar1) = 0;", "iVar1++;", "param_1 = 0;"].map((statement) => ({
+      name: `a statement between the call and its return (${statement})`,
+      entry: CALL0_ENTRY.replace("return", `${statement}\n  return`),
+      error: /rea_xtensa_call0_entry must return right after its call/u,
+    })),
+    {
+      // Not a declaration, so the value is not carried in a12 untouched.
+      name: "an increment before the call",
+      entry: CALL0_ENTRY.replace("iVar1 = ", "param_1++;\n  iVar1 = "),
+      error: /plus its argument plus 5:/u,
     },
   ])("refuses $name", ({ entry, error }) => {
     expect(() =>
@@ -529,5 +542,12 @@ describe("Xtensa call0 lane fixture and dataflow", () => {
         XTENSA_CALL0_C_FIXTURE_VALUES,
       ),
     ).toThrow(/must return value \+ factor \+ 0x1234567/u);
+    expect(() =>
+      assertXtensaCall0CFixturePseudocode(
+        CALL0_C_ENTRY.replace("return", "(uVar1) = 0;\n  return"),
+        CALL0_C_SCALE,
+        XTENSA_CALL0_C_FIXTURE_VALUES,
+      ),
+    ).toThrow(/rea_xtensa_call0_c_entry must return right after its call/u);
   });
 });
