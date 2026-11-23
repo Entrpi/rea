@@ -90,13 +90,18 @@ no-overwrite CLI delivery. It checks the target and project files for changes.
 - `no-return.c` and `ReaNoReturnProbe.java` inject incorrect import flags into a
   real ELF or Mach-O analysis database, verify caller recovery, propagated flag
   repair and signature preservation, and retain genuine/unknown no-return calls
-  and independently identified entries. Run `npm run build:cached`, then
-  `node scripts/verify-real-ghidra-noreturn.mjs` with the Ghidra/JDK environment
-  below on Linux or macOS x64/arm64. On Linux, use a procps-compatible process
-  table that exposes REA's current process for owned cleanup. It also checks
-  named limitations through the real read-only TCP bridge and provider Evidence
-  projection; default Unix-socket transport, Windows, and the reported Amethyst
-  artifact need separate verification. Fixture target code is never executed.
+  and independently identified entries. Its computed calls to a local no-return
+  function check the computed-call repair: a call whose target inline assembly
+  fixes ends. A second recorded target, an existing flow override, a writable
+  function-pointer slot and a conditional move each keep the fallthrough, body
+  and pseudocode; the last two have one injected candidate. Run
+  `npm run build:cached`, then `node scripts/verify-real-ghidra-noreturn.mjs`
+  with the Ghidra/JDK environment below on Linux or macOS x64/arm64. On Linux,
+  use a procps-compatible process table that exposes REA's current process for
+  owned cleanup. It also checks named limitations through the real read-only TCP
+  bridge and provider Evidence projection; default Unix-socket transport,
+  Windows, and the reported Amethyst artifact need separate verification.
+  Fixture target code is never executed.
 - `ReaDecompilerFailureProbe.java` replaces the bridge decompiler after a real
   import of `cross-format.c`, so one function's decompilation fails. It checks
   that `analyze_function` still returns that function's assembly, callers,
