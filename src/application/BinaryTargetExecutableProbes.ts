@@ -51,6 +51,7 @@ import { err, ok, type Result } from "../domain/result.js";
 import { readRiscvElfDeclarations } from "../domain/riscvIsaDeclaration.js";
 import { readFileHandleRange } from "../filesystem/readFileHandleRange.js";
 import type { StableRegularFileDescriptor } from "../filesystem/RegularFile.js";
+import { readArmElfAttributes } from "./ArmElfAttributes.js";
 import { readMipsElfMetadata } from "./MipsElfMetadata.js";
 import { readXtensaElfInfo } from "./XtensaElfMetadata.js";
 
@@ -258,6 +259,24 @@ const readElfMetadata = async (
         )),
       },
     });
+
+  // Only a little-endian ELF32 image can select an M-profile ARM lane.
+  if (
+    parsed.value.architecture === "arm" &&
+    parsed.value.arm.elfClass === 32 &&
+    parsed.value.arm.byteOrder === "little"
+  ) {
+    const attributes = await readArmElfAttributes(
+      handle,
+      parsed.value.arm,
+      () => throwIfTargetResolutionCancelled(signal),
+    );
+    if (!attributes.ok) return attributes;
+    return ok({
+      ...parsed.value,
+      arm: { ...parsed.value.arm, attributes: attributes.value },
+    });
+  }
   if (parsed.value.architecture === "riscv")
     return ok({
       ...parsed.value,
