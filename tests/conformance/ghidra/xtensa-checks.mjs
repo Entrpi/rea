@@ -141,9 +141,14 @@ export function assertXtensaFixtureInstructions(instructions, addresses) {
 
 const RETURN = /^return\b(.*)$/su;
 const ASSIGNMENT = /^(\w+)\s*=(?!=)(.*)$/su;
-/** A cast Ghidra prints before an operand, such as `(int)` or `(uint *)`. */
+/**
+ * A cast Ghidra prints before an operand that keeps its 32-bit value: a
+ * 32-bit integer type of Xtensa's ILP32 ABI, such as `(int)` or
+ * `(undefined4)`. Any other cast, such as a narrowing `(char)` or a pointer
+ * type, stays part of the operand's text, so no check can match through it.
+ */
 const CAST =
-  /^\(\s*[A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)*(?:\s*\*)*\s*\)\s*(?=[\w(])/u;
+  /^\(\s*(?:(?:un)?signed\s+)?(?:int|uint|long|ulong|undefined4|dword|u?int32_t)\s*\)\s*(?=[\w(])/u;
 const INTEGER = /^(0x[\da-f]+|\d+)[lu]*$/iu;
 
 const closingParenthesis = (text, open) => {
@@ -206,22 +211,40 @@ const computes = (text, expected) => {
   );
 };
 
-/** Parameter names and statements of a straight-line decompiled function. */
+/** A statement that labels a jump target or transfers control. */
+const CONTROL_FLOW =
+  /^(?:[A-Za-z_]\w*\s*:(?!:)|(?:goto|if|else|while|for|do|switch|case|default|break|continue)\b)/u;
+
+/**
+ * Parameter names and statements of a straight-line decompiled function: no
+ * label, jump, branch or loop, and its only return is its last statement, so
+ * every statement runs, in order, on the one path to that return.
+ */
 const decompiledFunction = (code, name) => {
   const match = new RegExp(
     `\\b${name}\\s*\\(([^)]*)\\)\\s*\\{([^{}]*)\\}`,
     "u",
   ).exec(code.replaceAll(/\/\*[^]*?\*\//gu, " "));
   assert.ok(match, `${name} is not one straight-line function: ${code}`);
+  const statements = match[2]
+    .split(";")
+    .map((statement) => statement.trim())
+    .filter((statement) => statement !== "");
+  assert.ok(
+    statements.every((statement) => !CONTROL_FLOW.test(statement)),
+    `${name} is not one straight-line function: ${code}`,
+  );
+  assert.ok(
+    statements.filter((statement) => RETURN.test(statement)).length === 1 &&
+      RETURN.test(statements.at(-1) ?? ""),
+    `${name} must end in its only return statement: ${code}`,
+  );
   return {
     parameters: match[1]
       .split(",")
       .map((parameter) => /(\w+)\s*$/u.exec(parameter)?.[1])
       .filter((parameter) => parameter !== undefined && parameter !== "void"),
-    statements: match[2]
-      .split(";")
-      .map((statement) => statement.trim())
-      .filter((statement) => statement !== ""),
+    statements,
   };
 };
 
